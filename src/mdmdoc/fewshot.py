@@ -42,7 +42,8 @@ def label_to_example(lab: dict) -> dict:
     out_fields: dict = {}
     for k in keys:
         if k == "tin_type":
-            out_fields[k] = (gold.get("tin") or {}).get("type", "")
+            tt = (gold.get("tin") or {}).get("type", "")
+            out_fields[k] = tt if tt in ("SSN", "EIN") else ""
             continue
         if k == "tin_raw":
             tin = gold.get("tin") or {}
@@ -67,12 +68,25 @@ def label_to_example(lab: dict) -> dict:
     return {"input": inp, "output": {"doc_type": lab.get("doc_type_gold", ""), "fields": out_fields}}
 
 
+def _completeness(lab: dict) -> int:
+    """Exemplars with empty core fields teach the model to LEAVE fields empty —
+    prefer complete golds."""
+    core = (("account_holder", "bank_name") if lab.get("doc_class") == "bank"
+            else ("line1_name", "line3_classification", "tin"))
+    gold = lab.get("fields_gold", {})
+    n = 0
+    for k in core:
+        v = gold.get(k, "")
+        n += int(bool(v.get("present")) if isinstance(v, dict) else bool(str(v or "").strip()))
+    return n
+
+
 def _teaching_value(lab: dict) -> int:
     mp = lab.get("model_predicted", {}) or {}
     score = len(mp.get("fields_diff") or {})
     if mp.get("doc_type") and mp.get("doc_type") != lab.get("doc_type_gold"):
         score += 3
-    return score
+    return score + 2 * _completeness(lab)
 
 
 def build_fewshot(k: int = 2) -> int:
