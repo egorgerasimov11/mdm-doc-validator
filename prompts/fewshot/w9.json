@@ -1,0 +1,36 @@
+[
+  {
+    "input": "OCR-VERIFIED CANDIDATES:\n{\"tin_boxed\": \"210261422\"}\n\nDOCUMENT TEXT:\n. Check \nonly one of the following seven boxes. \nIndividual/sole proprietor\nC corporation\nS corporation\nPartnership\nTrust/estate\nLLC. Enter the tax classification (C = C corporation, S = S corporation, P = Partnership) \n.\n.\n.\n.\nNote: Check the “LLC” box above and, in the entry space, enter the appropriate code (C, S, or P) for the tax \nclassification of the LLC, unless it is a disregarded entity. A disregarded entity should instead check the appropriate \nbox for the tax classification of its owner.\nOther (see instructions) \n3b If on line 3a you checked “Partnership” or “Trust/estate,” or checked “LLC” and entered “P” as its tax classification, \nand you are providing this form to a partnership, trust, or estate in which you have an ownership interest, check \nthis box if you have any foreign",
+    "output": {
+      "doc_type": "w9",
+      "fields": {
+        "line1_name": "American Epilepsy Society",
+        "line2_business_name": "",
+        "line3_classification": "",
+        "tin_type": "unknown",
+        "tin_raw": "210261422",
+        "address_street": "141 West Jackson Blvd, Suite 1065",
+        "address_city_state_zip": "Chicago, IL 60604",
+        "signed": false,
+        "sign_date": "01/08/2026"
+      }
+    }
+  },
+  {
+    "input": "OCR-VERIFIED CANDIDATES:\n{\"ein\": \"15-5320496\"}\n\nDOCUMENT TEXT:\n effectively connected with the conduct of trade or business within the United States\n\nOMB No. 1545-1621\n\nInstead use Form:\n\nW-8BEN (Individual) or Form 8233\n\n. W-8EC!\n. W-8IMY\n\n* A foreign government, international organization, foreign central bank of issue, foreign tax-exempt organization, foreign private foundation, or\ngovernment of a U.S. possession claiming that income is effectively connected U.S. income or that is claiming the applicability of section(s) 115(2),\n\n501(c), 892, 895, or 1443(b) (unless claiming treaty benefits) (see instructions for other exceptions) .\n¢ Any person acting as an intermediary (including a qualified intermediary acting as a qualified derivatives dealer). . . 1. 2. we\n\n1\n\nIdentification of Beneficial Owner\n\nName of organization that is the beneficial owne",
+    "output": {
+      "doc_type": "w8",
+      "fields": {
+        "line1_name": "",
+        "line2_business_name": "",
+        "line3_classification": "",
+        "tin_type": "unknown",
+        "tin_raw": "15-5320496",
+        "address_street": "Via Roma, 50",
+        "address_city_state_zip": "Zola Predosa, Bologna",
+        "signed": false,
+        "sign_date": ""
+      }
+    }
+  }
+]

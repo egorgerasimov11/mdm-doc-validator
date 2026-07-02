@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+runs/
+dataset/mlx-lora/
+eval/report.md
+eval/history.jsonl
+models/Modelfile.mdmdoc-extract
+.env

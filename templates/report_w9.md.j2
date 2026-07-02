@@ -1,0 +1,40 @@
+W-9 CHECK
+
+Document: {{ pub.file_name }}
+Detected form: {{ pub.doc_type }}
+Verdict: {{ verdict }}
+W-9 classification: {{ fields.line3_classification or 'unclear' }}
+TIN mapping: {% if fields.tin and fields.tin.present %}{{ fields.tin.type }} ({{ fields.tin.masked }}) -> {{ 'Tax Number 1' if fields.tin.type == 'SSN' else ('Tax Number 2' if fields.tin.type == 'EIN' else 'unclear') }}{% else %}unclear — TIN not readable{% endif %}
+
+Name mapping: Line 1 "{{ fields.line1_name or '—' }}" -> SAP Name 1{% if fields.line2_business_name %}; Line 2 "{{ fields.line2_business_name }}" -> SAP Name 2{% endif %}
+
+Signed: {{ 'yes' if fields.signed else 'no' }}{% if fields.sign_date %} ({{ fields.sign_date }}){% endif %}
+
+Next step: {{ next_step }}
+
+{% if groups.critical %}
+Critical issues:
+{% for f in groups.critical %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+{% if groups.warnings %}
+Warnings:
+{% for f in groups.warnings %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+{% if groups.notes %}
+Notes:
+{% for f in groups.notes %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+MDM entry notes:
+- Address on form: {{ fields.address_street or '—' }}{% if fields.address_city_state_zip %}, {{ fields.address_city_state_zip }}{% endif %} (enter only components actually present on the W-9)
+{% if fields.tin and fields.tin.present %}
+- Preserve the exact hyphen format from the W-9 when entering the tax number ({{ 'XXX-XX-XXXX' if fields.tin.type == 'SSN' else 'XX-XXXXXXX' }}).
+{% endif %}
+{% if pub.crosscheck %}
+OCR cross-check: {{ pub.crosscheck | join('; ') }}
+{% endif %}

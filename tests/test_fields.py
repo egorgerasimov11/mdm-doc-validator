@@ -1,0 +1,88 @@
+import re
+from pathlib import Path
+
+from mdmdoc.fields import (Extraction, crosscheck_ids, norm_classification, to_iso2,
+                           type_hint)
+
+
+def test_crosscheck_fills_and_flags():
+    fields = {"iban": "", "account_number": "999", "swift_bic": "DEUTDEFF"}
+    det = {"iban": "DE44500105175407324931", "account_number": "1830042757",
+           "swift_bic": "DEUTDEFF"}
+    notes = crosscheck_ids(fields, det)
+    assert fields["iban"] == "DE44500105175407324931"          # filled from OCR
+    assert any(n.startswith("iban=filled-from-OCR") for n in notes)
+    assert any(n.startswith("account_number=MISMATCH") for n in notes)
+    assert "swift_bic=confirmed" in notes
+    # notes must be masked
+    assert "1830042757" not in " ".join(notes)
+    assert "DE44500105175407324931" not in " ".join(notes)
+
+
+def test_find_boxed_tin():
+    from mdmdoc.fields import find_boxed_tin
+    text = "Form W-9 boilerplate\nAmerican Epilepsy Society\n3\n6\n1\n2\n3\n4\n5\n6\n7\n06/09/2026\n"
+    assert find_boxed_tin(text) == "361234567"
+    assert find_boxed_tin("only\n3\n6\ndigits\n") == ""
+
+
+def test_scrub_masks_boxed_tin_lines():
+    from mdmdoc.privacy import SecretVault, scrub_text
+    vault = SecretVault()
+    vault.register("tin", "361234567")
+    out = scrub_text("boxes:\n3\n6\n1\n2\n3\n4\n5\n6\n7\nend", vault)
+    assert "3\n6\n1\n2\n3\n4\n5\n6\n7" not in out
+
+
+def test_to_iso2():
+    assert to_iso2("Germany") == "DE"
+    assert to_iso2("de") == "DE"
+    assert to_iso2("United States") == "US"
+    assert to_iso2("") == ""
+
+
+def test_norm_classification():
+    assert norm_classification("Individual/sole proprietor or single-member LLC") == "individual_sole_prop"
+    assert norm_classification("C Corporation") == "corporation"
+    assert norm_classification("Limited liability company") == "llc"
+
+
+def test_type_hint_invoice_and_w8():
+    assert type_hint("invoice_123.pdf", "", ".pdf", "bank") == "invoice"
+    assert type_hint("scan.pdf", "certificación bancaria of account", ".pdf", "bank") == "bank_letter"
+    assert type_hint("doc.docx", "", ".docx", "bank") == "editable_source"
+    assert type_hint("2026 05 w8ben.pdf", "", ".pdf", "w9") == "w8"
+
+
+def test_to_public_masks_everything():
+    e = Extraction(doc_class="w9", doc_type="w9")
+    e.fields = {"line1_name": "John Smith", "line2_business_name": "", "line3_classification":
+                "Individual/sole proprietor", "tin_type": "SSN", "tin_raw": "320-54-0693",
+                "address_street": "1 Main St", "address_city_state_zip": "", "signed": True,
+                "sign_date": ""}
+    e.register_secrets()
+    pub = e.to_public()
+    blob = str(pub)
+    assert "320-54-0693" not in blob
+    assert pub["fields"]["tin"]["masked"] == "XXX-XX-0693"
+    assert pub["fields"]["tin"]["digits"] == 9
+    assert pub["sensitive_present"] == {"tin": True}
+
+
+def test_no_writes_outside_choke_points():
+    """Source-level guard: only runstore/privacy/evalrun/dataset/fewshot/lora_export/
+    modelfile may write files (they all call assert_no_leak or write non-document data)."""
+    src = Path(__file__).resolve().parents[1] / "src" / "mdmdoc"
+    allowed = {"runstore.py", "modelfile.py", "evalrun.py", "dataset.py",
+               "fewshot.py", "lora_export.py"}
+    offenders = []
+    for p in src.rglob("*.py"):
+        if p.name in allowed:
+            continue
+        body = p.read_text()
+        if re.search(r"write_text\(|open\([^)]*['\"]w", body):
+            # cli.py --report writes the already-gated report; stage_a renders images via fitz
+            if p.name == "cli.py" and body.count("write_text") == 1:
+                continue
+            offenders.append(p.name)
+    assert not offenders, f"files writing outside choke points: {offenders}"

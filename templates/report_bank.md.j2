@@ -1,0 +1,41 @@
+[BANK DOC VERDICT]
+
+Document: {{ pub.file_name }}
+Document type: {{ pub.doc_type }}
+Verdict: {{ verdict }}
+Why: {{ why }}
+Evidence: {{ evidence | join('; ') if evidence else 'no banking identity elements readable' }}
+Next step: {{ next_step }}
+
+{% if groups.critical %}
+Critical issues:
+{% for f in groups.critical %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+{% if groups.warnings %}
+Warnings:
+{% for f in groups.warnings %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+{% if groups.notes %}
+Notes:
+{% for f in groups.notes %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+Extracted fields (masked):
+{% for k, v in fields.items() %}
+{% if v is mapping %}
+- {{ k }}: {{ v.masked if v.present else '—' }}{% if v.country is defined and v.country %} (country {{ v.country }}, len {{ v.length }}){% endif %}
+
+{% elif v is sameas true or v is sameas false %}
+- {{ k }}: {{ 'yes' if v else 'no' }}
+{% elif v %}
+- {{ k }}: {{ v }}
+{% endif %}
+{% endfor %}
+{% if pub.crosscheck %}
+OCR cross-check: {{ pub.crosscheck | join('; ') }}
+{% endif %}

@@ -1,0 +1,25 @@
+[project]
+name = "mdm-doc-validator"
+version = "0.1.0"
+description = "Local MDM Document Validator — banking documents and W-9 forms, local models only"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32",
+    "pymupdf>=1.26",
+    "pillow>=11.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+]
+
+[project.scripts]
+mdmdoc = "mdmdoc.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mdmdoc"]

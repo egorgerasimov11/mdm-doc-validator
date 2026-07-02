@@ -1,0 +1,104 @@
+# Banking document rules — explicit and editable. The model never decides verdicts;
+# these rules do. Sources: mdm-banking-doc-verdict + mdm-banking-checker skills.
+version: 1
+
+doc_types: [bank_letter, supplier_letterhead, bank_screenshot, voided_check,
+            ap_document, invoice, email, editable_source, other]
+
+tables:
+  iban_length: {AD: 24, AE: 23, AT: 20, BE: 16, BG: 22, BH: 22, BR: 29, CH: 21,
+                CY: 28, CZ: 24, DE: 22, DK: 18, EE: 20, EG: 29, ES: 24, FI: 18,
+                FR: 27, GB: 22, GR: 27, HR: 21, HU: 28, IE: 22, IL: 23, IQ: 23,
+                IS: 26, IT: 27, JO: 30, KW: 30, LB: 28, LI: 21, LT: 20, LU: 20,
+                LV: 21, MC: 27, MT: 31, MX: 18, NL: 18, "NO": 15, PK: 24, PL: 28,
+                PT: 25, QA: 29, RO: 24, SA: 24, SE: 24, SG: 19, SI: 19, SK: 24,
+                TN: 24, TR: 26}
+
+rules:
+  - id: BNK-001
+    name: invoice_never_bank_proof
+    applies_to: [invoice]
+    when: {always: true}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Invoice used as banking support — an invoice (incl. pro forma) is never acceptable, even when it shows remittance/bank details. Request a bank letter, bank statement or supplier letterhead."
+    message_ru: "Инвойс как банковское подтверждение не принимается (даже с реквизитами). Запросить bank letter / statement / supplier letterhead."
+
+  - id: BNK-002
+    name: email_as_proof
+    applies_to: [email]
+    when: {always: true}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Plain email is not normal bank support — exception-only with explicit Finance/Accounting approval evidence."
+    message_ru: "Обычное письмо — не банковское подтверждение; только как исключение с явным одобрением Finance/Accounting."
+
+  - id: BNK-003
+    name: editable_source
+    applies_to: [editable_source]
+    when: {always: true}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Editable file (.docx/.xlsx/.txt/.rtf) is not acceptable as bank proof. Request a PDF/scan on letterhead."
+    message_ru: "Редактируемый файл (.docx/.xlsx/.txt/.rtf) не принимается как банковское подтверждение. Запросить PDF/скан."
+
+  - id: BNK-010
+    name: swift_shape
+    when: {check: swift_valid, field: swift_bic, args: {lengths: [8, 11]}}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "SWIFT/BIC {value} fails shape/country check: {detail}."
+
+  - id: BNK-011
+    name: iban_country_length
+    when: {check: iban_valid, field: iban, args: {table: iban_length}}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "IBAN {value_masked}: {detail}."
+
+  - id: BNK-020
+    name: doc_older_than_2y
+    when: {check: date_older_than, field: doc_date, args: {years: 2}}
+    severity: NOTE
+    verdict_effect: null
+    message: "Document is older than 2 years ({detail}) — confirm the details are still current."
+
+  - id: BNK-021
+    name: missing_signature_bank_letter
+    applies_to: [bank_letter]
+    when: {flag_false: signed}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "Bank letter appears unsigned/unstamped."
+
+  - id: BNK-022
+    name: partial_screenshot
+    applies_to: [bank_screenshot]
+    when: {flag_true: partial_capture}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Screenshot appears cropped/partial — key fields may be cut off."
+
+  - id: BNK-023
+    name: missing_account_holder
+    applies_to: [bank_letter, supplier_letterhead, bank_screenshot, voided_check, ap_document, other]
+    when: {field_missing: account_holder}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "No account holder / beneficiary name readable on the document."
+
+  - id: BNK-024
+    name: no_banking_identity
+    applies_to: [bank_letter, supplier_letterhead, bank_screenshot, voided_check, ap_document, other]
+    when: {check: no_bank_ids}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Document shows no bank account identifiers (no IBAN, account number or routing) — cannot serve as banking evidence as-is."
+
+  - id: BNK-025
+    name: missing_bank_name
+    applies_to: [bank_letter, bank_screenshot, voided_check]
+    when: {field_missing: bank_name}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "Bank name not readable on the document."

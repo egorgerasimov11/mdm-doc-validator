@@ -1,0 +1,89 @@
+# W-9 / W-8 document rules — explicit and editable. Sources: mdm-w9-checker skill
+# (+ its rules.md / dynamic_rules.md).
+version: 1
+
+doc_types: [w9, w8, other_tax, unknown]
+
+tables: {}
+
+rules:
+  - id: W9-030
+    name: w8_detected
+    applies_to: [w8]
+    when: {always: true}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "This is a W-8 (foreign status), not a W-9 — apply W-8 treatment; do not map to Tax Number 1/2 as a W-9."
+    message_ru: "Это W-8 (иностранный статус), не W-9 — другой процесс обработки."
+
+  - id: W9-031
+    name: unknown_tax_doc
+    applies_to: [unknown, other_tax]
+    when: {always: true}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Not recognized as a W-9 — confirm the document type before using it as US tax evidence."
+
+  - id: W9-001
+    name: line1_missing
+    applies_to: [w9]
+    when: {field_missing: line1_name}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "W-9 Line 1 (taxpayer legal name) is missing/unreadable — Line 1 must feed SAP Name 1."
+
+  - id: W9-002
+    name: tin_unreadable
+    applies_to: [w9]
+    when: {field_missing: tin_raw}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN not readable on the form — cannot verify SSN/EIN mapping."
+
+  - id: W9-003
+    name: classification_missing
+    applies_to: [w9]
+    when: {field_missing: line3_classification}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Federal tax classification (Line 3) unclear — Recipient Type cannot be verified."
+
+  - id: W9-010
+    name: ein_9_digits
+    applies_to: [w9]
+    when: {check: ein_shape, field: tin_raw, args: {digits: 9}}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN {value} has the wrong digit count: {detail} (EIN/SSN must be 9 digits)."
+
+  - id: W9-011
+    name: tin_type_vs_classification
+    applies_to: [w9]
+    when: {check: tin_type_vs_classification}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN type conflicts with the tax classification: {detail}. Individual/Sole proprietor normally uses SSN (Tax Number 1); businesses use EIN (Tax Number 2)."
+
+  - id: W9-012
+    name: individual_llc_ein_mix
+    applies_to: [w9]
+    when: {check: individual_with_business_name_and_ein}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Internal inconsistency: {detail}. Request clarification or an updated W-9 (rule DR-20260624-131532)."
+
+  - id: W9-013
+    name: line_swap_suspect
+    applies_to: [w9]
+    when: {check: line_swap_suspect}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Line 1 / Line 2 look swapped or collapsed: {detail}. Never swap or merge W-9 name lines (Line 1 -> Name 1, Line 2 -> Name 2)."
+
+  - id: W9-020
+    name: unsigned
+    applies_to: [w9]
+    when: {flag_false: signed}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "W-9 appears unsigned — note for review (blocking only if packet rules say so)."
