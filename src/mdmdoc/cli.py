@@ -127,6 +127,15 @@ def _cmd_ui(args) -> int:
     port = args.port
     url = f"http://127.0.0.1:{port}"
 
+    # a server is already running (e.g. the LaunchAgent) -> just open the console
+    try:
+        if requests.get(f"{url}/health", timeout=1).ok:
+            print(f"mdmdoc console already running: {url}/ui")
+            webbrowser.open(f"{url}/ui")
+            return 0
+    except Exception:
+        pass
+
     def open_when_up() -> None:
         for _ in range(30):
             try:

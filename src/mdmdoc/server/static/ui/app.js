@@ -191,14 +191,32 @@ window.mdmdoc = (() => {
         notes: document.getElementById("f-notes").value,
       };
       const err = document.getElementById("review-error");
+      const btn = form.querySelector("button[type=submit]");
       try {
+        btn.disabled = true; btn.textContent = "Saving…";
         const res = await api(`/api/v1/runs/${form.dataset.run}/label`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        location = `/ui/runs/${res.doc_sha256}?flash=labeled`;
-      } catch (ex) { err.hidden = false; err.textContent = "ERROR: " + ex.message; }
+        const q = res.retrain_job_id ? `retrain=${res.retrain_job_id}` : "flash=labeled";
+        location = `/ui/runs/${res.doc_sha256}?${q}`;
+      } catch (ex) {
+        err.hidden = false; err.textContent = "ERROR: " + ex.message;
+        btn.disabled = false; btn.textContent = "Save & retrain";
+      }
     };
+  }
+
+  /* ---------- run page: live retrain progress ----------------------------- */
+  function initRetrainWatch() {
+    const jobId = new URLSearchParams(location.search).get("retrain");
+    if (!jobId) return;
+    const log = document.getElementById("job-log");
+    const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+    say("correction saved — retraining and re-checking this document…");
+    pollJob(jobId, say,
+      () => location = location.pathname + "?flash=retrained",
+      (e) => say("ERROR: " + e));
   }
 
   /* ---------- training page ---------------------------------------------- */
@@ -300,5 +318,5 @@ window.mdmdoc = (() => {
   setInterval(refreshChip, 60000);
 
   return { api, pollJob, initDropZone, initArtifacts, initReview, initTraining,
-           initSapCompare };
+           initSapCompare, initRetrainWatch };
 })();

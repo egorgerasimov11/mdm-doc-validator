@@ -153,9 +153,33 @@ _W9_PAGE_KWS = ("w-9", "taxpayer", "tin", "social security", "employer identific
                 "classification", "certification", "signature of", "disregarded")
 
 
+_BANK_LETTER_PHRASES = ("please accept this letter", "account confirmation",
+                        "confirmation that", "we confirm that", "maintained at",
+                        "routing instructions", "letter as confirmation",
+                        "bank confirmation", "treasury analyst", "to whom it may concern",
+                        "this letter is to confirm")
+_INVOICE_HEADER_RE = re.compile(r"(?im)^\s*(invoice|rechnung|fattura|factura)\s*$")
+_INVOICE_MARKS = ("invoice number", "invoice no", "invoice date", "amount due",
+                  "subtotal", "payment terms", "purchase order number", "pro forma")
+
+
+def page_markers(text: str) -> dict:
+    """Per-page evidence: does this page look like a bank confirmation letter /
+    an invoice? A packet is classified by its STRONGEST banking evidence — an
+    invoice page elsewhere must not poison a packet that contains a bank letter."""
+    t = (text or "").lower()
+    letter_hits = sum(1 for p in _BANK_LETTER_PHRASES if p in t)
+    bank_letter = letter_hits >= 2 or "account confirmation" in t \
+        or "please accept this letter" in t or "this letter is to confirm" in t
+    invoice = bool(_INVOICE_HEADER_RE.search(text or "")) \
+        or sum(1 for m in _INVOICE_MARKS if m in t) >= 2
+    return {"bank_letter": bank_letter, "invoice": invoice}
+
+
 def page_score(text: str, doc_class: str) -> int:
     """How likely a page holds the data we need. Keyword hits + deterministic
-    regex hits (weighted) + W-9 boxed-TIN bonus."""
+    regex hits (weighted) + W-9 boxed-TIN bonus + bank-letter page bonus (the
+    confirmation letter must outrank an invoice template's remittance footer)."""
     t = (text or "").lower()
     if not t.strip():
         return 0
@@ -165,6 +189,12 @@ def page_score(text: str, doc_class: str) -> int:
     score += 3 * len(ocr.regex_fields(text))
     if doc_class == "w9" and find_boxed_tin(text):
         score += 5
+    if doc_class == "bank":
+        m = page_markers(text)
+        if m["bank_letter"]:
+            score += 8
+        if m["invoice"] and not m["bank_letter"]:
+            score -= 2
     return score
 
 
@@ -188,9 +218,12 @@ def type_hint(filename: str, text: str, ext: str, doc_class: str) -> str:
         if has("w-8", "w8ben", "w-8ben", "w8-ben", "certificate of foreign status"):
             return "w8"
         return ""
-    # banking
-    if "invoice" in f or has("pro forma invoice", "proforma invoice", "invoice no", "invoice number",
-                             "rechnung", "fattura", "factura comercial"):
+    # banking — the TEXT-based invoice hint must not fire when the packet also
+    # contains a bank confirmation letter page (packet != invoice)
+    if "invoice" in f:
+        return "invoice"
+    if has("pro forma invoice", "proforma invoice", "invoice no", "invoice number",
+           "rechnung", "fattura", "factura comercial") and not page_markers(t)["bank_letter"]:
         return "invoice"
     if has("voided check", "void check"):
         return "voided_check"

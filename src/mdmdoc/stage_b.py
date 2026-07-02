@@ -37,13 +37,27 @@ def build_prompt(raw: RawDoc) -> str:
     keys = BANK_KEYS if doc_class == "bank" else W9_KEYS
     types = BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES
     parts = []
-    for ex in _load_fewshot(doc_class):
-        parts.append("EXAMPLE INPUT:\n" + ex.get("input", "")
-                     + "\nEXAMPLE OUTPUT:\n" + json.dumps(ex.get("output", {}), ensure_ascii=False))
+    # our custom model (mdmdoc-extract) has the exemplars baked in via MESSAGE
+    # pairs — injecting them again would double them up
+    if not mc.resolve("TEXT").startswith("mdmdoc-extract"):
+        for ex in _load_fewshot(doc_class):
+            parts.append("EXAMPLE INPUT:\n" + ex.get("input", "")
+                         + "\nEXAMPLE OUTPUT:\n" + json.dumps(ex.get("output", {}), ensure_ascii=False))
+    packet_note = ""
+    if raw.bank_letter_pages:
+        packet_note = ("\nPACKET SIGNALS: page(s) "
+                       + ", ".join(str(p + 1) for p in raw.bank_letter_pages)
+                       + " look like a bank-issued confirmation letter"
+                       + (("; page(s) " + ", ".join(str(p + 1) for p in raw.invoice_pages)
+                           + " look like an invoice") if raw.invoice_pages else "")
+                       + ". A packet that CONTAINS a bank confirmation letter is classified "
+                         "by that letter (doc_type bank_letter) — invoice pages elsewhere "
+                         "do not make the packet an invoice.")
     cand = {k: v for k, v in raw.regex_candidates.items()}
     parts.append(
         "DOCUMENT FILENAME: " + raw.path.rsplit("/", 1)[-1]
         + ("\nHEURISTIC TYPE HINT: " + raw.type_hint if raw.type_hint else "")
+        + packet_note
         + "\nOCR-VERIFIED CANDIDATES (from deterministic regex — trust these over your own reading):\n"
         + json.dumps(cand, ensure_ascii=False)
         + "\n\nDOCUMENT TEXT:\n" + raw.raw_text[:config.STAGE_B_TEXT_LIMIT]
@@ -91,8 +105,17 @@ def extract(raw: RawDoc) -> Extraction:
         if not raw.locked and not raw.editable:
             ext_res.warnings.append("no text available for extraction")
 
+    # packet-aware classification: a bank confirmation letter inside the packet
+    # beats invoice pages elsewhere (the letter IS the banking support)
+    if doc_class == "bank" and raw.bank_letter_pages and ext_res.doc_type == "invoice":
+        pages = ", ".join(str(p + 1) for p in raw.bank_letter_pages)
+        ext_res.warnings.append(
+            f"packet contains invoice page(s), but classified by the bank confirmation "
+            f"letter on page {pages} — an invoice elsewhere does not poison the packet")
+        ext_res.doc_type = "bank_letter"
     # deterministic type hints beat a hesitant model on hard-reject types
-    if raw.type_hint == "invoice" and ext_res.doc_type not in ("invoice",):
+    # (the text-based invoice hint is already suppressed when a bank letter page exists)
+    elif raw.type_hint == "invoice" and ext_res.doc_type not in ("invoice",):
         ext_res.warnings.append(f"type hint 'invoice' overrides model '{ext_res.doc_type}'")
         ext_res.doc_type = "invoice"
     if doc_class == "w9" and raw.type_hint == "w8" and ext_res.doc_type == "w9":

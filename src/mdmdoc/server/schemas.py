@@ -18,6 +18,7 @@ class ReviewSubmission(BaseModel):
     verdict_gold: str = ""
     notes: str = ""
     reviewer: str = "egor"
+    retrain: bool = True     # save-and-retrain is the default feedback flow
 
 
 class FewshotIn(BaseModel):

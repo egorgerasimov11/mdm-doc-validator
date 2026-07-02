@@ -111,7 +111,10 @@ def _role_env(name: str, default: str) -> str:
 
 ROLES = {
     "VISION": _role_env("VISION", "qwen2.5vl:7b"),
-    "TEXT": _role_env("TEXT", "qwen3:4b"),
+    # OUR custom model (Modelfile: system prompt + operator's few-shot exemplars
+    # baked in, rebuilt on every retrain); falls back to stock qwen3:4b until it
+    # has been created on the model host (mdmdoc train --modelfile --apply)
+    "TEXT": _role_env("TEXT", "mdmdoc-extract"),
     "EMBED": _role_env("EMBED", "nomic-embed-text"),
 }
 

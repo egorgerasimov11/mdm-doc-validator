@@ -64,6 +64,10 @@ def review_run(spec: str, open_doc: bool = False) -> int:
     })
     print(f"\nSaved label for {form['file_name']} — dataset now has "
           f"{result['labels_count']} examples.")
-    print("Run `mdmdoc train --fewshot` to fold corrections into the prompts, "
-          "then `mdmdoc eval` to measure the effect.")
+    from .fewshot import build_fewshot
+    build_fewshot(k=2)   # feedback trains immediately — no separate step to forget
+    print("Few-shot exemplars rebuilt. Your verdict/doc_type now override the "
+          "machine for this document (operator precedent). "
+          "Optionally: `mdmdoc train --modelfile --apply` to bake into mdmdoc-extract, "
+          "`mdmdoc eval` to measure.")
     return 0

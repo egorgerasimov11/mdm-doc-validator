@@ -1,20 +1,20 @@
 [
   {
-    "input": "OCR-VERIFIED CANDIDATES:\n{\"account_number\": \"0732303363063302\"}\n\nDOCUMENT TEXT:\nCERTIFICACION\nSANTIAGO DE CALI, VALLE DEL CAUCA, 16/04/2026\nPor medio de la presente hacemos constar que nuestro cliente  HEALTH COMPANY INT\nSAS con NIT  9004487622 posee en el Banco Davivienda:\nCUENTA CORRIENTE\nNúmero\n0732303363063302\nCordialmente,\nBANCO DAVIVIENDA\n",
+    "input": "OCR-VERIFIED CANDIDATES:\n{\"account_number\": \"021524501554810\"}\n\nDOCUMENT TEXT:\n expedición de esta certificación, tiene con el banco los siguientes productos:\n\n| Producto | No. Producto | Fecha Apertura | Estado |\n|----------|---------------|-----------------|--------|\n| CUENTA CORRIENTE | …0477 | 2009/04/24 | ACTIVA |\n\n*Importante: Esta constancia solo hace referencia a los productos mencionados anteriormente.\n*Si desea verificar la veracidad de esta información, puede comunicarse con la Sucursal Telefónica Bancolombia los siguientes números: Medellín - Local: (60-4) 510 90 00 - Bogotá - Local: (60-1) 343 00 00 - Barranquilla - Local: (60-5) 361 88 88 - Cali - Local: (60-2) 554 05 05 - Resto del país: …2345. Sucursales Telefónicas en el exterior: España (34) …5717 - Estados Unidos (1) …9714.\n\nCatalina Cortés Uribe.\nGerente Servicios Contact Center & BPO.\nBancolombia",
     "output": {
       "doc_type": "bank_letter",
       "fields": {
-        "account_holder": "HEALTH COMPANY INT SAS",
-        "bank_name": "BANCO DAVIVIENDA",
-        "bank_country": "COL",
-        "bank_address": "SANTIAGO DE CALI, VALLE DEL CAUCA",
+        "account_holder": "Catalina Cortés Uribe",
+        "bank_name": "BANCOLOMBIA S.A.",
+        "bank_country": "CO",
+        "bank_address": "",
         "iban": "",
         "swift_bic": "",
-        "account_number": "0732303363063302",
+        "account_number": "021524501554810",
         "routing_aba": "",
         "currency": "",
-        "doc_date": "16/04/2026",
-        "signed": false,
+        "doc_date": "2026-03-06",
+        "signed": true,
         "partial_capture": false
       }
     }

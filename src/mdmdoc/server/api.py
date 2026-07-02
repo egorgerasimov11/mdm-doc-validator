@@ -246,12 +246,44 @@ def review_form(run_id: str) -> dict:
 
 @router_teach.post("/runs/{run_id}/label")
 def submit_label(run_id: str, sub: ReviewSubmission) -> dict:
+    """Save the correction AND retrain immediately (unless retrain=false):
+    few-shot rebuild -> custom model rebuild on the model host -> re-run the
+    document so the corrected verdict is visible right away (precedent applies)."""
     try:
-        return review_core.submit_review(run_id, sub.model_dump())
+        result = review_core.submit_review(run_id, sub.model_dump())
     except review_core.RunNotFound:
         raise api_error(404, "not_found", f"run {run_id} not found")
     except ValueError as e:   # leak gate — never echo details beyond scrubbed text
         raise api_error(400, "bad_request", str(e))
+    if not sub.retrain:
+        return result
+
+    rid = runstore.resolve_run(run_id)
+    meta = runstore.load(rid, "meta.json") or {}
+
+    def work(log):
+        from ..fewshot import build_fewshot
+        from ..modelfile import build_modelfile
+        log("1/3 rebuilding few-shot exemplars from your corrections…")
+        build_fewshot(k=2)
+        log("2/3 rebuilding the custom model (mdmdoc-extract) on the model host…")
+        try:
+            mc.reset_host()
+            rc = build_modelfile(apply=True)
+            log(f"    model rebuild rc={rc}")
+        except Exception as e:  # noqa: BLE001 — training must not block the precedent
+            log(f"    model rebuild skipped ({e.__class__.__name__}) — few-shot still applied")
+        p = Path(meta.get("path", ""))
+        if p.exists():
+            log("3/3 re-running the document with the corrections applied…")
+            out = _run_pipeline(p, meta.get("doc_class", "bank"), "en", True)
+            log(f"new verdict: {out['verdict']} (was corrected by your precedent)")
+            return {**result, "rerun": {"run_id": out["run_id"], "verdict": out["verdict"]}}
+        log("3/3 original file missing — skipping re-run (precedent will apply next time)")
+        return result
+
+    job = jobs.REGISTRY.submit("retrain", work, capture_stdout=True)
+    return {**result, "retrain_job_id": job.id}
 
 
 @router_teach.get("/labels")

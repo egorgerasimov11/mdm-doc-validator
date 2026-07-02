@@ -26,7 +26,10 @@ class CheckResult:
 
 
 def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders: bool = False,
-              lang: str = "en", sap_image: Path | None = None) -> CheckResult:
+              lang: str = "en", sap_image: Path | None = None,
+              apply_precedent: bool = True) -> CheckResult:
+    """apply_precedent=False is for eval: metrics must measure the MACHINE,
+    not the operator's stored answers."""
     t0 = time.time()
     config.ensure_dirs()
     path = path.expanduser().resolve()
@@ -67,8 +70,31 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     verdict = decide(findings)
     secrets = ext.vault.secrets()   # AFTER sap compare — its values are secrets too
 
+    # operator precedent: a confirmed label for THIS document (by content hash)
+    # overrides the machine verdict/doc_type — feedback must stick immediately
+    model_verdict, model_doc_type = verdict, ext.doc_type
+    precedent = _find_precedent(run_id) if apply_precedent else None
+    if precedent:
+        from .rules.engine import Finding
+        gold_v = precedent.get("verdict_gold") or verdict
+        gold_t = precedent.get("doc_type_gold") or ext.doc_type
+        if gold_v != verdict or gold_t != ext.doc_type:
+            note = f" Operator note: {precedent['notes']}" if precedent.get("notes") else ""
+            findings.insert(0, Finding(
+                "OPERATOR-1", "NOTE", None,
+                f"Operator precedent ({precedent.get('ts', '')}): doc_type={gold_t}, "
+                f"verdict={gold_v} — overrides the machine result "
+                f"({model_doc_type}/{model_verdict}).{note}"))
+            verdict, ext.doc_type = gold_v, gold_t
+
     pub = ext.to_public()
     pub["file_name"] = path.name
+    if precedent:
+        pub["operator_precedent"] = {"verdict": verdict, "doc_type": ext.doc_type,
+                                     "model_verdict": model_verdict,
+                                     "model_doc_type": model_doc_type,
+                                     "ts": precedent.get("ts", ""),
+                                     "notes": precedent.get("notes", "")}
     if sap_rows:
         pub["sap_compare"] = sap_rows
 
@@ -95,3 +121,12 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
 
 class UnreadableDocument(RuntimeError):
     pass
+
+
+def _find_precedent(run_id: str) -> dict | None:
+    """The confirmed label for this exact document (content hash), if any."""
+    from .dataset import load_labels
+    for lab in load_labels():
+        if lab.get("doc_sha256") == run_id and lab.get("confirmed"):
+            return lab
+    return None

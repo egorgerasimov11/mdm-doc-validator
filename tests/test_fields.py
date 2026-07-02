@@ -54,6 +54,43 @@ def test_type_hint_invoice_and_w8():
     assert type_hint("2026 05 w8ben.pdf", "", ".pdf", "w9") == "w8"
 
 
+LETTER = ("Please accept this letter as confirmation that the account referenced below "
+          "is maintained at Bank of America, N.A. ACH/EFT Routing Instructions ... "
+          "Wire Routing Instructions ...")
+INVOICE = ("Invoice\nInvoice Date ... Amount Due ... Payment Terms ... Subtotal ... "
+           "Please note your invoice number and remit to the address below.")
+
+
+def test_page_markers_detect_letter_and_invoice():
+    from mdmdoc.fields import page_markers, page_score
+    assert page_markers(LETTER) == {"bank_letter": True, "invoice": False}
+    m = page_markers(INVOICE)
+    assert m["invoice"] and not m["bank_letter"]
+    # the confirmation letter must outrank the invoice template page
+    assert page_score(LETTER, "bank") > page_score(INVOICE, "bank")
+
+
+def test_invoice_text_hint_suppressed_by_bank_letter_page():
+    # packet text containing BOTH an invoice footer and a bank confirmation letter
+    packet_text = INVOICE + "\n" + LETTER
+    assert type_hint("Customer Welcome Packet.pdf", packet_text, ".pdf", "bank") != "invoice"
+    # pure invoice text still hints invoice
+    assert type_hint("scan.pdf", INVOICE, ".pdf", "bank") == "invoice"
+
+
+def test_find_precedent(tmp_path, monkeypatch):
+    import json
+    from mdmdoc import config
+    from mdmdoc.pipeline import _find_precedent
+    monkeypatch.setattr(config, "LABELS_PATH", tmp_path / "labels.jsonl")
+    (tmp_path / "labels.jsonl").write_text(json.dumps(
+        {"doc_sha256": "aa" * 8, "confirmed": True, "verdict_gold": "ACCEPT",
+         "doc_type_gold": "bank_letter", "notes": "BOA letter p.3"}) + "\n")
+    p = _find_precedent("aa" * 8)
+    assert p and p["verdict_gold"] == "ACCEPT"
+    assert _find_precedent("bb" * 8) is None
+
+
 def test_to_public_masks_everything():
     e = Extraction(doc_class="w9", doc_type="w9")
     e.fields = {"line1_name": "John Smith", "line2_business_name": "", "line3_classification":

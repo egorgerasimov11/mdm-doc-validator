@@ -3,10 +3,16 @@
 {% block content %}
 <p class="meta" style="margin-top:16px"><a href="/ui">← Dashboard</a></p>
 {% if flash == 'labeled' %}<p class="flash">Saved — dataset now has {{ labels_count }} examples. <a href="/ui/training">Training →</a></p>{% endif %}
+{% if flash == 'retrained' %}<p class="flash">Retrained — the corrected verdict below is now permanent for this document. <a href="/ui/training">Training →</a></p>{% endif %}
 
 <div class="verdict-h">
   <span class="dot dot--{{ report.verdict }}"></span>
   <h1 style="margin:16px 0 4px">{{ report.verdict }}</h1>
+  {% if pub.operator_precedent %}
+  <span class="tag" title="machine said {{ pub.operator_precedent.model_doc_type }}/{{ pub.operator_precedent.model_verdict }}{% if pub.operator_precedent.notes %} — {{ pub.operator_precedent.notes }}{% endif %}">
+    operator override (machine: {{ pub.operator_precedent.model_verdict }})
+  </span>
+  {% endif %}
 </div>
 <p style="margin:0 0 4px">{{ report.next_step }}</p>
 <p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }} ·
@@ -99,4 +105,4 @@
   {% endfor %}
 </section>
 {% endblock %}
-{% block script %}<script>mdmdoc.initArtifacts(); mdmdoc.initSapCompare();</script>{% endblock %}
+{% block script %}<script>mdmdoc.initArtifacts(); mdmdoc.initSapCompare(); mdmdoc.initRetrainWatch();</script>{% endblock %}

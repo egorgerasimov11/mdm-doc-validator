@@ -56,6 +56,8 @@ class RawDoc:
     pages: int = 0
     pages_used: list = field(default_factory=list)   # 0-based indices, score order
     rotations: dict = field(default_factory=dict)    # page index -> degrees applied
+    bank_letter_pages: list = field(default_factory=list)  # 0-based, packet evidence
+    invoice_pages: list = field(default_factory=list)
     raw_text: str = ""                  # FULL text — in-memory only, scrubbed on persist
     tesseract_text: str = ""
     vision_text: str = ""
@@ -260,6 +262,19 @@ def _read_image_file(path: Path, render_dir: Path, raw: RawDoc, use_vision: bool
             raw.warnings.append(vt)
 
 
+def _collect_markers(raw: RawDoc, indexed_texts: list, doc_class: str) -> None:
+    """Per-page packet evidence: which pages look like a bank confirmation
+    letter and which like an invoice. Drives packet-aware classification."""
+    if doc_class != "bank":
+        return
+    for i, t in indexed_texts:
+        m = fields.page_markers(t)
+        if m["bank_letter"]:
+            raw.bank_letter_pages.append(i)
+        if m["invoice"]:
+            raw.invoice_pages.append(i)
+
+
 def _merged(raw: RawDoc) -> str:
     return "\n".join(x for x in (raw.raw_text, raw.tesseract_text, raw.vision_text) if x)
 
@@ -294,13 +309,16 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             # text layer: score every page, keep the most relevant ones,
             # best page first so it never falls off the Stage-B budget
             raw.has_text_layer = True
+            _collect_markers(raw, list(enumerate(texts)), doc_class)
             scored = [(fields.page_score(t, doc_class), i, t, 0) for i, t in enumerate(texts)]
             picks = _select_pages(scored, max_pages)
             raw.pages_used = [i for _, i, _, _ in picks]
             raw.raw_text = "\n".join(t for _, _, t, _ in picks)
         else:
             # scanned: cheap survey of ALL pages (with rotation retry), deep-read the best
-            picks = _select_pages(_survey_scanned_pdf(path, render_dir, doc_class), max_pages)
+            survey = _survey_scanned_pdf(path, render_dir, doc_class)
+            _collect_markers(raw, [(i, t) for _, i, t, _ in survey], doc_class)
+            picks = _select_pages(survey, max_pages)
             raw.pages_used = [i for _, i, _, _ in picks]
             _deep_read_pages(path, picks, render_dir, raw, use_vision)
     elif ext in config.IMAGE_EXTS:
@@ -357,6 +375,7 @@ def to_public(raw: RawDoc, vault) -> dict:
         "path": raw.path, "sha256": raw.sha256, "ext": raw.ext, "doc_class": raw.doc_class,
         "has_text_layer": raw.has_text_layer, "locked": raw.locked, "editable": raw.editable,
         "pages": raw.pages, "pages_used": raw.pages_used, "rotations": raw.rotations,
+        "bank_letter_pages": raw.bank_letter_pages, "invoice_pages": raw.invoice_pages,
         "type_hint": raw.type_hint, "warnings": raw.warnings,
         "raw_text_excerpt": scrub_text(raw.raw_text[:config.EXCERPT_LIMIT], vault),
         "tesseract_chars": len(raw.tesseract_text), "vision_chars": len(raw.vision_text),
