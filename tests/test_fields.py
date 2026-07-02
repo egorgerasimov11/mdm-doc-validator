@@ -69,6 +69,15 @@ def test_to_public_masks_everything():
     assert pub["sensitive_present"] == {"tin": True}
 
 
+def test_clean_path_handles_spaces_quotes_and_urls():
+    from mdmdoc.cli import _clean_path
+    assert _clean_path(["a", "file", "name.pdf"]) == "a file name.pdf"
+    assert _clean_path(['"quoted path.pdf"']) == "quoted path.pdf"
+    assert _clean_path(["escaped\\ space.pdf"]) == "escaped space.pdf"
+    assert _clean_path(["file:///Users/x/a%20b.pdf"]) == "/Users/x/a b.pdf"
+    assert _clean_path(["  trailing.pdf  "]) == "trailing.pdf"
+
+
 def test_no_writes_outside_choke_points():
     """Source-level guard: only runstore/privacy/evalrun/dataset/fewshot/lora_export/
     modelfile may write files (they all call assert_no_leak or write non-document data)."""

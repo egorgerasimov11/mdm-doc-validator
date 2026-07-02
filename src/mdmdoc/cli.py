@@ -11,8 +11,21 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from . import config, model_client as mc
+
+
+def _clean_path(parts) -> str:
+    """Turn CLI token(s) into a usable path. Handles unquoted paths with spaces
+    (parts join back), Finder drag-and-drop (backslash-escaped spaces, trailing
+    space), file:// URLs, and surrounding quotes."""
+    raw = " ".join(parts) if isinstance(parts, (list, tuple)) else str(parts)
+    raw = raw.strip().strip('"').strip("'").strip()
+    if raw.startswith("file://"):
+        raw = unquote(urlparse(raw).path)
+    raw = raw.replace("\\ ", " ").replace("\\~", "~")
+    return raw
 
 
 def _cmd_check(args, doc_class: str) -> int:
@@ -23,8 +36,15 @@ def _cmd_check(args, doc_class: str) -> int:
     except mc.OllamaUnavailable as e:
         print(str(e), file=sys.stderr)
         return config.EXIT_OLLAMA_DOWN
+    path = _clean_path(args.path)
+    if not Path(path).expanduser().exists():
+        print(f"file not found: {path}\n"
+              "hint: wrap the path in quotes, or just drag the file from Finder into "
+              "the terminal after typing `mdmdoc check-bank ` (with a trailing space).",
+              file=sys.stderr)
+        return config.EXIT_UNREADABLE
     try:
-        res = run_check(Path(args.path), doc_class, use_vision=not args.no_vision,
+        res = run_check(Path(path), doc_class, use_vision=not args.no_vision,
                         keep_renders=args.keep_renders, lang=args.lang)
     except FileNotFoundError as e:
         print(f"file not found: {e}", file=sys.stderr)
@@ -130,7 +150,8 @@ def main(argv: list[str] | None = None) -> int:
 
     for name, doc_class in (("check-bank", "bank"), ("check-w9", "w9")):
         p = sub.add_parser(name, help=f"validate a {'banking document' if doc_class == 'bank' else 'W-9/W-8 form'}")
-        p.add_argument("path")
+        p.add_argument("path", nargs="+", help="path to the PDF/image (quotes optional — "
+                       "spaces and Finder drag-and-drop are handled)")
         p.add_argument("--json", action="store_true", help="print machine JSON instead of the report")
         p.add_argument("--report", help="also write the report to this path")
         p.add_argument("--lang", choices=("en", "ru"), default="en")
