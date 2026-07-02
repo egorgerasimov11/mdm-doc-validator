@@ -114,6 +114,22 @@ def data_block(pub: dict) -> str:
     return "\n".join(lines)
 
 
+def sap_block(rows: list[dict]) -> str:
+    """Masked doc-vs-SAP comparison table for the text report."""
+    if not rows:
+        return ""
+    wf = max(len(r["field"]) for r in rows)
+    wd = max(max(len(r["doc"]) for r in rows), 8)
+    ws = max(max(len(r["sap"]) for r in rows), 8)
+    lines = ["─" * 16 + " SAP COMPARISON " + "─" * 16,
+             f"{'field':<{wf}}   {'document':<{wd}}   {'SAP':<{ws}}   result"]
+    for r in rows:
+        res = r["status"] + (f" ({r['note']})" if r.get("note") else "")
+        lines.append(f"{r['field']:<{wf}}   {r['doc']:<{wd}}   {r['sap']:<{ws}}   {res}")
+    lines.append("─" * 48)
+    return "\n".join(lines)
+
+
 def render_report(pub: dict, findings: list[Finding], verdict: str, lang: str = "en") -> str:
     tpl = _env.get_template("report_bank.md.j2" if pub["doc_class"] == "bank" else "report_w9.md.j2")
     groups = _group(findings)
@@ -123,6 +139,7 @@ def render_report(pub: dict, findings: list[Finding], verdict: str, lang: str = 
            if pub["doc_class"] == "bank" else "Form is complete and internally consistent.")
     return tpl.render(pub=pub, fields=pub.get("fields", {}), groups=groups, why=why,
                       verdict=verdict, evidence=_evidence(pub), data_block=data_block(pub),
+                      sap_block=sap_block(pub.get("sap_compare", [])),
                       next_step=next_step(pub["doc_class"], verdict), lang=lang)
 
 
@@ -138,6 +155,7 @@ def build_json(pub: dict, findings: list[Finding], verdict: str, meta: dict) -> 
         "findings": [f.to_dict() for f in findings],
         "fields": pub.get("fields", {}),
         "crosscheck": pub.get("crosscheck", []),
+        "sap_compare": pub.get("sap_compare", []),
         "warnings": pub.get("warnings", []),
         "sensitive_present": pub.get("sensitive_present", {}),
         "model": pub.get("model"),

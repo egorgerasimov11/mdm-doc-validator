@@ -17,6 +17,9 @@ DATASET_DIR = PROJECT_ROOT / "dataset"
 LABELS_PATH = DATASET_DIR / "labels.jsonl"
 LORA_DIR = DATASET_DIR / "mlx-lora"
 EVAL_DIR = PROJECT_ROOT / "eval"
+INBOX_DIR = PROJECT_ROOT / "inbox"      # uploaded documents (raw, gitignored)
+
+SERVER_DEFAULT_PORT = 8766   # 8765 is Anki's local port on this Mac
 
 # Stage B input budget: OCR text is truncated to this many chars before the model sees it.
 STAGE_B_TEXT_LIMIT = 8000
@@ -41,5 +44,5 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
 
 
 def ensure_dirs() -> None:
-    for d in (RUNS_DIR, DATASET_DIR, LORA_DIR, EVAL_DIR, FEWSHOT_DIR, MODELS_DIR):
+    for d in (RUNS_DIR, DATASET_DIR, LORA_DIR, EVAL_DIR, FEWSHOT_DIR, MODELS_DIR, INBOX_DIR):
         d.mkdir(parents=True, exist_ok=True)

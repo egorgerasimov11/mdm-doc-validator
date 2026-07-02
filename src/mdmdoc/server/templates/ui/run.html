@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — {{ meta.file_name }}{% endblock %}
+{% block content %}
+<p class="meta" style="margin-top:16px"><a href="/ui">← Dashboard</a></p>
+{% if flash == 'labeled' %}<p class="flash">Saved — dataset now has {{ labels_count }} examples. <a href="/ui/training">Training →</a></p>{% endif %}
+
+<div class="verdict-h">
+  <span class="dot dot--{{ report.verdict }}"></span>
+  <h1 style="margin:16px 0 4px">{{ report.verdict }}</h1>
+</div>
+<p style="margin:0 0 4px">{{ report.next_step }}</p>
+<p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }} ·
+  {{ meta.duration_s }}s · {{ meta.ts }}{% if labeled %} · <span class="tag">labeled ✓</span>{% endif %}</p>
+
+<div class="actions">
+  <a class="btn" href="/ui/runs/{{ run_id }}/review"><strong>Correct</strong> — teach the model</a>
+  {% if doc_class == 'bank' %}
+  <button type="button" id="btn-sap">Compare with SAP…</button>
+  <input type="file" id="sap-input" accept=".png,.jpg,.jpeg,.pdf" hidden>
+  <span class="hint">re-runs this document together with an SAP Bank Details screenshot</span>
+  {% endif %}
+</div>
+<pre id="job-log" hidden></pre>
+
+{% if preview_pages %}
+<section>
+  <h2>Document preview</h2>
+  <div class="preview-strip">
+    {% for p in preview_pages %}
+    <a href="/api/v1/runs/{{ run_id }}/preview/{{ p }}" target="_blank">
+      <img src="/api/v1/runs/{{ run_id }}/preview/{{ p }}" alt="page {{ p + 1 }}" loading="lazy">
+      <span class="meta">page {{ p + 1 }}</span>
+    </a>
+    {% endfor %}
+    {% if has_sap_shot %}
+    <a href="/api/v1/runs/{{ run_id }}/preview/0?src=sap" target="_blank">
+      <img src="/api/v1/runs/{{ run_id }}/preview/0?src=sap" alt="SAP screen" loading="lazy">
+      <span class="meta">SAP screen</span>
+    </a>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if sap_rows %}
+<section>
+  <h2>SAP comparison <span class="meta">(document vs SAP Bank Details screen)</span></h2>
+  <table>
+    <tr><th>field</th><th>document</th><th>SAP</th><th>result</th></tr>
+    {% for r in sap_rows %}
+    <tr>
+      <td>{{ r.field }}</td>
+      <td><code>{{ r.doc }}</code></td>
+      <td><code>{{ r.sap }}</code></td>
+      <td class="{{ 'bad' if r.status == 'MISMATCH' }}">
+        {{ r.status }}{% if r.note %} <span class="meta">({{ r.note }})</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+{% if block %}
+<section>
+  <pre class="report">{{ block }}</pre>
+</section>
+{% endif %}
+
+{% if findings %}
+<section>
+  <h2>Findings</h2>
+  <ul class="timeline">
+    {% for f in findings %}
+    <li>
+      <span class="chip chip--{{ f.severity }}">{{ f.severity }}</span>
+      <code>{{ f.rule_id }}</code>
+      <span class="grow" style="white-space:normal">{{ f.message }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if pub.crosscheck %}
+<section>
+  <h2>OCR cross-check</h2>
+  <p class="meta">{{ pub.crosscheck | join('; ') }}</p>
+</section>
+{% endif %}
+
+<section>
+  <h2>Raw artifacts</h2>
+  {% for name in artifacts %}
+  <details data-artifact="{{ name }}" data-run="{{ run_id }}">
+    <summary>{{ name }}</summary>
+    <pre class="artifact-body">loading…</pre>
+  </details>
+  {% endfor %}
+</section>
+{% endblock %}
+{% block script %}<script>mdmdoc.initArtifacts(); mdmdoc.initSapCompare();</script>{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — review {{ form.file_name }}{% endblock %}
+{% block content %}
+<p class="meta" style="margin-top:16px"><a href="/ui/runs/{{ form.run_id }}">← Back to run</a></p>
+<h1>Correct — {{ form.file_name }}</h1>
+<p class="meta">Every correction becomes a training example. Sensitive values are masked
+before anything is saved; full values never leave this machine's memory.</p>
+
+{% if preview_pages %}
+<div class="preview-strip">
+  {% for p in preview_pages %}
+  <a href="/api/v1/runs/{{ form.run_id }}/preview/{{ p }}" target="_blank">
+    <img src="/api/v1/runs/{{ form.run_id }}/preview/{{ p }}" alt="page {{ p + 1 }}" loading="lazy">
+    <span class="meta">page {{ p + 1 }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<form id="review-form" data-run="{{ form.run_id }}">
+  {% for k in form.field_keys %}
+  <div class="field-row">
+    <label class="name" for="f-{{ k }}">{{ k }}</label>
+    {% if k in form.booleans %}
+    <span class="seg" data-bool="{{ k }}" data-original="{{ form.display[k] or 'no' }}">
+      <button type="button" class="{{ 'active' if form.display[k] == 'yes' }}" data-v="yes">yes</button>
+      <button type="button" class="{{ 'active' if form.display[k] != 'yes' }}" data-v="no">no</button>
+    </span>
+    {% elif k in form.sensitive %}
+    <div>
+      <div class="radio-row" data-sensitive="{{ k }}">
+        <span class="masked">{{ form.display[k] or '—' }}</span>
+        <label><input type="radio" name="s-{{ k }}" value="keep" checked> keep as shown</label>
+        <label><input type="radio" name="s-{{ k }}" value="set"> replace</label>
+        <label><input type="radio" name="s-{{ k }}" value="clear"> clear</label>
+      </div>
+      <input type="text" id="f-{{ k }}" hidden autocomplete="off"
+             placeholder="type the FULL value — it is masked before saving">
+      {% if k == 'tin_raw' %}
+      <div class="radio-row" style="margin-top:6px" id="tin-type-row" hidden>
+        <span class="hint">tin_type:</span>
+        <select id="f-tin_type" style="width:auto">
+          <option value="" {{ 'selected' if not form.tin_type_current }}>—</option>
+          <option value="SSN" {{ 'selected' if form.tin_type_current == 'SSN' }}>SSN</option>
+          <option value="EIN" {{ 'selected' if form.tin_type_current == 'EIN' }}>EIN</option>
+        </select>
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
+    <input type="text" id="f-{{ k }}" value="{{ form.display[k] }}"
+           data-original="{{ form.display[k] }}" autocomplete="off">
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <div class="field-row">
+    <label class="name" for="f-doc_type">doc_type</label>
+    <select id="f-doc_type">
+      {% for t in form.doc_types %}
+      <option value="{{ t }}" {{ 'selected' if t == form.doc_type }}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-row">
+    <label class="name" for="f-verdict">verdict</label>
+    <select id="f-verdict">
+      {% for v in form.verdicts %}
+      <option value="{{ v }}" {{ 'selected' if v == form.verdict }}>{{ v }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-row">
+    <label class="name" for="f-notes">notes</label>
+    <input type="text" id="f-notes" autocomplete="off">
+  </div>
+
+  <div class="actions" style="margin-top:16px">
+    <button type="submit" class="primary">Save as training example</button>
+    <span class="hint">stored masked · replaces any earlier label for this document</span>
+  </div>
+  <p class="meta" id="review-error" hidden></p>
+</form>
+{% endblock %}
+{% block script %}<script>mdmdoc.initReview();</script>{% endblock %}

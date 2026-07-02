@@ -26,7 +26,7 @@ class CheckResult:
 
 
 def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders: bool = False,
-              lang: str = "en") -> CheckResult:
+              lang: str = "en", sap_image: Path | None = None) -> CheckResult:
     t0 = time.time()
     config.ensure_dirs()
     path = path.expanduser().resolve()
@@ -51,19 +51,32 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
 
     # Stage B (trainable extraction)
     ext = stage_b.extract(raw)
-    secrets = ext.vault.secrets()
 
-    # rules -> verdict
+    # rules -> verdict (+ optional SAP comparison as extra findings)
     findings = run_rules(ext, lang=lang)
+    sap_rows: list = []
+    if sap_image is not None and doc_class == "bank":
+        from . import sap_compare
+        sap_image = sap_image.expanduser().resolve()
+        sap_fields = sap_compare.read_sap_screen(sap_image, ext.vault)
+        if sap_fields:
+            sap_findings, sap_rows = sap_compare.compare(ext, sap_fields)
+            findings += sap_findings
+        else:
+            ext.warnings.append("SAP screenshot could not be read — comparison skipped")
     verdict = decide(findings)
+    secrets = ext.vault.secrets()   # AFTER sap compare — its values are secrets too
 
     pub = ext.to_public()
     pub["file_name"] = path.name
+    if sap_rows:
+        pub["sap_compare"] = sap_rows
 
     report_md = rpt.render_report(pub, findings, verdict, lang=lang)
     meta = {"path": str(path), "file_name": path.name, "doc_class": doc_class,
             "run_id": run_id, "ts": runstore.now_iso(), "model": ext.model_id,
-            "use_vision": use_vision, "duration_s": round(time.time() - t0, 1)}
+            "use_vision": use_vision, "duration_s": round(time.time() - t0, 1),
+            "sap_path": str(sap_image) if sap_image is not None else None}
     report_json = rpt.build_json(pub, findings, verdict, meta)
 
     runstore.write(run_id, "meta.json", meta, secrets)
@@ -72,6 +85,8 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     runstore.write(run_id, "findings.json", [f.to_dict() for f in findings], secrets)
     runstore.write(run_id, "report.md", report_md, secrets)
     runstore.write(run_id, "report.json", report_json, secrets)
+    if sap_rows:
+        runstore.write(run_id, "sap_compare.json", sap_rows, secrets)
     runstore.mark_last(run_id)
     if not keep_renders:
         runstore.cleanup_renders(run_id)

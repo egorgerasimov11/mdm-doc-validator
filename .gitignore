@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 runs/
+inbox/
 dataset/mlx-lora/
 eval/report.md
 eval/history.jsonl

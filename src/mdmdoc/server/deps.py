@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""deps.py — auth, host hardening and upload helpers for the server."""
+from __future__ import annotations
+
+import hmac
+import os
+import re
+from pathlib import Path
+
+from fastapi import HTTPException, Request
+
+from .. import config
+
+
+def api_error(status: int, code: str, message: str) -> HTTPException:
+    from ..privacy import scrub_text
+    return HTTPException(status_code=status,
+                         detail={"code": code, "message": scrub_text(message)})
+
+
+async def require_token(request: Request) -> None:
+    """Bearer auth when MDMDOC_API_TOKEN is set (mandatory in BTP); no-op otherwise.
+    Also rejects non-local Host headers in full mode (DNS-rebinding hardening)."""
+    if os.environ.get("MDMDOC_MODE", "full") != "api-only":
+        host = (request.headers.get("host") or "").split(":")[0]
+        if host not in ("127.0.0.1", "localhost", "testserver", ""):
+            raise api_error(403, "forbidden_host", f"unexpected Host header {host!r}")
+    token = os.environ.get("MDMDOC_API_TOKEN", "")
+    if not token:
+        return
+    auth = request.headers.get("authorization", "")
+    given = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
+    if not hmac.compare_digest(given, token):
+        raise api_error(401, "unauthorized", "missing or invalid bearer token")
+
+
+_NAME_SAFE = re.compile(r"[^A-Za-z0-9._ \-]+")
+
+
+def save_upload(filename: str, data: bytes) -> Path:
+    """Store an uploaded document as inbox/<sha16>__<sanitized-name> so that
+    labels and eval can re-run it later. Content-addressed: re-uploads reuse."""
+    import hashlib
+    if not data:
+        raise api_error(400, "bad_request", "empty upload")
+    sha16 = hashlib.sha256(data).hexdigest()[:16]
+    base = _NAME_SAFE.sub("_", Path(filename or "document").name).strip() or "document"
+    config.INBOX_DIR.mkdir(parents=True, exist_ok=True)
+    path = config.INBOX_DIR / f"{sha16}__{base}"
+    if not path.exists():
+        path.write_bytes(data)
+    return path

@@ -58,7 +58,14 @@ def _leak_sweep() -> int:
     return hits
 
 
-def run_eval(only: str | None = None, limit: int | None = None, tag: str = "") -> int:
+def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
+             progress=None) -> int:
+    """progress: optional Callable[[str], None] for live line-by-line status
+    (used by the server's job log); CLI output is unchanged."""
+    def _p(line: str) -> None:
+        if progress:
+            progress(line)
+
     config.ensure_dirs()
     labels = [l for l in load_labels() if not only or l.get("doc_class") == only]
     if limit:
@@ -103,6 +110,9 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "") -
             row_fields[k] = ok
         rows.append({"file": path.name, "doc_type": f"{pred_type}/{gold_type}",
                      "verdict": f"{res.verdict}/{lab.get('verdict_gold')}", "fields": row_fields})
+        _p(f"[{len(rows)}/{len(labels)}] {path.name}: {res.verdict}/{lab.get('verdict_gold')}"
+           + (f", misses: {', '.join(k for k, ok in row_fields.items() if not ok)}"
+              if any(not ok for ok in row_fields.values()) else ""))
 
     n = sum(1 for r in rows if "error" not in r)
     leaks = _leak_sweep()
@@ -161,7 +171,10 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "") -
     report = "\n".join(lines) + "\n"
     (config.EVAL_DIR / "report.md").write_text(report, encoding="utf-8")
     print(report)
+    _p(f"done: doc_type={metrics['doc_type_accuracy']} verdict={metrics['verdict_accuracy']} "
+       f"leakage={leaks}")
     if leaks:
         print(f"FAIL: sensitive-leakage count = {leaks} (must be 0)")
+        _p(f"FAIL: sensitive-leakage count = {leaks} (must be 0)")
         return 1
     return 0

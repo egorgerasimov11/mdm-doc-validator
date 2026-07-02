@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — debug{% endblock %}
+{% block content %}
+<h1>Debug</h1>
+
+<section>
+  <h2>Doctor</h2>
+  <pre>{{ doctor_json }}</pre>
+</section>
+
+<section>
+  <h2>Jobs</h2>
+  {% if jobs %}
+  <table>
+    <tr><th>id</th><th>kind</th><th>status</th><th>started</th><th>finished</th><th>error</th></tr>
+    {% for j in jobs %}
+    <tr>
+      <td><code>{{ j.id }}</code></td><td>{{ j.kind }}</td>
+      <td><span class="dot {{ 'dot--ok' if j.status == 'done' else ('dot--down' if j.status == 'error') }}"></span>{{ j.status }}</td>
+      <td class="meta">{{ j.started or '—' }}</td><td class="meta">{{ j.finished or '—' }}</td>
+      <td class="{{ 'bad' if j.error }}">{{ j.error or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="meta">No jobs this session.</p>{% endif %}
+</section>
+
+<section>
+  <h2>Storage</h2>
+  <table>
+    {% for name, size in sizes.items() %}
+    <tr><td><code>{{ name }}</code></td><td class="meta">{{ size }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section>
+  <h2>Server log <button onclick="location.reload()" style="margin-left:8px">refresh</button></h2>
+  <pre id="job-log">{% for l in log_lines %}{{ l }}
+{% endfor %}</pre>
+</section>
+{% endblock %}

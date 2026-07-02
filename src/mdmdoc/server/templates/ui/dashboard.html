@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p class="meta" id="doctor-strip">
+  {% set mh = doctor.model_host %}
+  <span class="dot {{ 'dot--ok' if mh.reachable else 'dot--down' }}"></span>
+  {% if mh.reachable %}{{ mh.source }} · TEXT {{ doctor.roles.TEXT.resolved if doctor.roles.TEXT }} · VISION {{ doctor.roles.VISION.resolved if doctor.roles.VISION }}{% else %}model host unreachable{% endif %}
+  · tesseract {{ 'ok' if doctor.tesseract.path else 'missing' }}
+  · {{ labels_count }} labels
+</p>
+
+<section>
+  <div class="actions">
+    <span class="seg" id="class-seg">
+      <button type="button" class="active" data-v="bank">Bank document</button>
+      <button type="button" data-v="w9">W-9 / W-8</button>
+    </span>
+    <select id="lang" style="width:auto">
+      <option value="en">en</option><option value="ru">ru</option>
+    </select>
+  </div>
+  <div class="drop" id="drop">Drop a PDF or image here — or click to choose a file</div>
+  <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" hidden>
+  <div class="actions" id="sap-row">
+    <button type="button" id="sap-attach">+ SAP screenshot (optional)</button>
+    <span class="meta" id="sap-name"></span>
+    <input type="file" id="sap-file" accept=".png,.jpg,.jpeg,.pdf" hidden>
+  </div>
+  <pre id="job-log" hidden></pre>
+</section>
+
+<section>
+  <h2>Recent runs</h2>
+  {% if runs %}
+  <ul class="timeline">
+    {% for r in runs %}
+    <li>
+      <span class="dot dot--{{ r.verdict }}"></span>
+      <span class="meta">{{ r.doc_type }}</span>
+      <a class="grow" href="/ui/runs/{{ r.run_id }}">{{ r.file }}</a>
+      {% if r.labeled %}<span class="tag">labeled ✓</span>{% endif %}
+      <span class="meta">{{ r.run_id[:8] }} · {{ r.ts }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="meta">No runs yet — drop a document above.</p>{% endif %}
+</section>
+{% endblock %}
+{% block script %}<script>mdmdoc.initDropZone();</script>{% endblock %}

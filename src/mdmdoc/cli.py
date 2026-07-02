@@ -43,9 +43,15 @@ def _cmd_check(args, doc_class: str) -> int:
               "the terminal after typing `mdmdoc check-bank ` (with a trailing space).",
               file=sys.stderr)
         return config.EXIT_UNREADABLE
+    sap_image = None
+    if getattr(args, "sap", None):
+        sap_image = Path(_clean_path(args.sap)).expanduser()
+        if not sap_image.exists():
+            print(f"SAP screenshot not found: {sap_image}", file=sys.stderr)
+            return config.EXIT_UNREADABLE
     try:
         res = run_check(Path(path), doc_class, use_vision=not args.no_vision,
-                        keep_renders=args.keep_renders, lang=args.lang)
+                        keep_renders=args.keep_renders, lang=args.lang, sap_image=sap_image)
     except FileNotFoundError as e:
         print(f"file not found: {e}", file=sys.stderr)
         return config.EXIT_UNREADABLE
@@ -98,6 +104,44 @@ def _cmd_train(args) -> int:
 def _cmd_export_lora(args) -> int:
     from .lora_export import export_lora
     return export_lora(min_labels=args.min_labels, force=args.force, split=args.split)
+
+
+def _cmd_serve(args) -> int:
+    import os
+    if args.api_only:
+        os.environ["MDMDOC_MODE"] = "api-only"
+    import uvicorn
+    uvicorn.run("mdmdoc.server.app:create_app", factory=True,
+                host=args.host, port=args.port, log_level="info")
+    return 0
+
+
+def _cmd_ui(args) -> int:
+    import threading
+    import time
+    import webbrowser
+
+    import requests
+    import uvicorn
+
+    port = args.port
+    url = f"http://127.0.0.1:{port}"
+
+    def open_when_up() -> None:
+        for _ in range(30):
+            try:
+                if requests.get(f"{url}/health", timeout=1).ok:
+                    webbrowser.open(f"{url}/ui")
+                    return
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+    threading.Thread(target=open_when_up, daemon=True).start()
+    print(f"mdmdoc console: {url}/ui  (Ctrl-C to stop)")
+    uvicorn.run("mdmdoc.server.app:create_app", factory=True,
+                host="127.0.0.1", port=port, log_level="info")
+    return 0
 
 
 def _cmd_runs(args) -> int:
@@ -158,6 +202,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--no-vision", action="store_true", help="skip the vision model (tesseract only)")
         p.add_argument("--keep-renders", action="store_true",
                        help="keep page renders (SENSITIVE: pixels contain full account data)")
+        if doc_class == "bank":
+            p.add_argument("--sap", help="screenshot of the SAP Bank Details screen — "
+                                         "compares document vs SAP char-by-char")
         p.set_defaults(func=lambda a, dc=doc_class: _cmd_check(a, dc))
 
     p = sub.add_parser("review", help="interactively correct a run -> labeled example")
@@ -183,6 +230,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--force", action="store_true")
     p.add_argument("--split", type=float, default=0.85)
     p.set_defaults(func=_cmd_export_lora)
+
+    p = sub.add_parser("ui", help="start the operator console and open it in the browser")
+    p.add_argument("--port", type=int, default=config.SERVER_DEFAULT_PORT)
+    p.set_defaults(func=_cmd_ui)
+
+    p = sub.add_parser("serve", help="run the HTTP server headless (Docker/BTP)")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=config.SERVER_DEFAULT_PORT)
+    p.add_argument("--api-only", action="store_true",
+                   help="core API only: no UI, no teach/training routes")
+    p.set_defaults(func=_cmd_serve)
 
     p = sub.add_parser("runs", help="list past runs")
     p.set_defaults(func=_cmd_runs)

@@ -1,0 +1,128 @@
+/* mdmdoc operator console — Codex look: white, text-forward, minimal chrome */
+:root {
+  --ink: #1a1a1a;
+  --secondary: #6e6e6e;
+  --faint: #a3a3a3;
+  --divider: #e6e6e6;
+  --code-bg: #f6f6f6;
+  --bg: #ffffff;
+  --accept: #1f883d;
+  --reject: #d1242f;
+  --warning: #b58a00;
+  --review: #0969da;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 400 15px/1.5 var(--font); color: var(--ink); background: var(--bg); }
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+header { border-bottom: 1px solid var(--divider); }
+.header-row { display: flex; align-items: center; gap: 20px; padding: 14px 24px; }
+.wordmark { font-size: 15px; font-weight: 600; }
+nav { display: flex; gap: 16px; flex: 1; }
+nav a { font-size: 13px; color: var(--secondary); text-decoration: none; }
+nav a.current { color: var(--ink); font-weight: 600; }
+.host-chip { white-space: nowrap; }
+
+h1 { font-size: 20px; font-weight: 600; margin: 24px 0 4px; }
+h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+section { padding: 20px 0; border-top: 1px solid var(--divider); }
+section:first-of-type { border-top: none; }
+.meta { font-size: 13px; color: var(--secondary); }
+a { color: var(--ink); }
+
+pre, .report {
+  font: 13px/1.45 var(--mono);
+  background: var(--code-bg); border-radius: 6px; padding: 12px 14px;
+  overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin: 8px 0;
+}
+code { font: 13px var(--mono); background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+       margin-right: 6px; vertical-align: 1px; background: var(--faint); }
+.dot--ACCEPT { background: var(--accept); }
+.dot--REJECT { background: var(--reject); }
+.dot--WARNING { background: var(--warning); }
+.dot--NEED_MANUAL_REVIEW { background: var(--review); }
+.dot--ok { background: var(--accept); }
+.dot--down { background: var(--reject); }
+
+button, .btn {
+  font: 400 13px var(--font); color: var(--ink); background: var(--bg);
+  border: 1px solid var(--divider); border-radius: 6px; padding: 6px 14px;
+  cursor: pointer; text-decoration: none; display: inline-block;
+}
+button:hover, .btn:hover { border-color: var(--secondary); }
+button.primary { font-weight: 600; border-color: var(--ink); }
+button:disabled { color: var(--faint); border-color: var(--divider); cursor: default; }
+
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 6px 6px 0; }
+.seg button.active { font-weight: 600; border-color: var(--ink); position: relative; z-index: 1; }
+
+.drop {
+  border: 1px dashed var(--divider); border-radius: 8px; padding: 36px 20px;
+  text-align: center; color: var(--secondary); font-size: 15px; cursor: pointer;
+  margin: 12px 0;
+}
+.drop.hover { border-color: var(--ink); color: var(--ink); }
+
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline li { padding: 10px 0; border-top: 1px solid var(--divider); display: flex;
+               align-items: baseline; gap: 10px; }
+.timeline li:first-child { border-top: none; }
+.timeline .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                  white-space: nowrap; }
+.tag { font-size: 11px; color: var(--secondary); border: 1px solid var(--divider);
+       border-radius: 4px; padding: 0 5px; }
+
+.chip { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+        padding: 1px 6px; border-radius: 4px; }
+.chip--CRITICAL { color: var(--reject); background: #fdeef0; }
+.chip--WARNING { color: var(--warning); background: #fbf4e0; }
+.chip--NOTE { color: var(--secondary); background: var(--code-bg); }
+
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--secondary); padding: 6px 10px 6px 0;
+     border-bottom: 1px solid var(--divider); }
+td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--divider); }
+td.bad { color: var(--reject); font-weight: 600; }
+
+.field-row { display: grid; grid-template-columns: 220px 1fr; gap: 8px 14px;
+             padding: 8px 0; border-top: 1px solid var(--divider); align-items: center; }
+.field-row label.name { font: 13px var(--mono); color: var(--secondary); }
+input[type=text], select, textarea {
+  font: 15px var(--font); color: var(--ink); border: 1px solid var(--divider);
+  border-radius: 6px; padding: 5px 9px; width: 100%;
+}
+input[type=text]:focus, select:focus, textarea:focus { outline: none; border-color: var(--ink); }
+input.changed { border-color: var(--review); }
+.radio-row { display: flex; gap: 14px; font-size: 13px; align-items: center; flex-wrap: wrap; }
+.masked { font: 13px var(--mono); background: var(--code-bg); padding: 2px 7px;
+          border-radius: 4px; }
+.hint { font-size: 12px; color: var(--faint); }
+
+.metric-strip { display: flex; gap: 28px; flex-wrap: wrap; margin: 12px 0; }
+.metric { min-width: 130px; }
+.metric .val { font-size: 15px; font-weight: 600; }
+.metric .delta-up { color: var(--accept); font-size: 12px; }
+.metric .delta-down { color: var(--reject); font-size: 12px; }
+.metric svg { display: block; margin-top: 3px; }
+.metric polyline { fill: none; stroke: var(--secondary); stroke-width: 1.5; }
+
+.preview-strip { display: flex; gap: 14px; overflow-x: auto; padding: 6px 0; }
+.preview-strip a { text-align: center; text-decoration: none; flex: 0 0 auto; }
+.preview-strip img { display: block; height: 240px; border: 1px solid var(--divider);
+                     border-radius: 6px; background: var(--code-bg); }
+.preview-strip img:hover { border-color: var(--secondary); }
+
+details { margin: 6px 0; }
+summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
+.flash { font-size: 13px; color: var(--accept); font-weight: 600; padding: 8px 0; }
+#job-log { max-height: 300px; overflow-y: auto; }
+.actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.verdict-h { display: flex; align-items: center; gap: 10px; }
+.verdict-h .dot { width: 12px; height: 12px; }

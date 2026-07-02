@@ -26,6 +26,9 @@ Notes:
 {% endfor %}
 {% endif %}
 {{ data_block }}
+{% if sap_block %}
+{{ sap_block }}
+{% endif %}
 {% if pub.crosscheck %}
 OCR cross-check: {{ pub.crosscheck | join('; ') }}
 {% endif %}

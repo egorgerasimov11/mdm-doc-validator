@@ -98,6 +98,13 @@ def host_source() -> str:
     return _HOST_SOURCE
 
 
+def reset_host() -> None:
+    """Forget the cached endpoint and model list so the next call re-probes.
+    A long-lived server needs this when the SSH tunnel dies under it."""
+    global _HOST, _HOST_SOURCE, _AVAILABLE
+    _HOST, _HOST_SOURCE, _AVAILABLE = None, "", None
+
+
 def _role_env(name: str, default: str) -> str:
     return os.environ.get(f"MDMDOC_{name}", os.environ.get(f"MDM_VAL_{name}", default))
 
@@ -219,7 +226,8 @@ def generate_json(role_or_model: str, prompt: str, system: str | None = None,
 
 
 def vision(role_or_model: str, prompt: str, images: list[str], system: str | None = None,
-           options: dict | None = None, keep_alive=0, timeout: int = 420, retries: int = 2) -> str:
+           options: dict | None = None, keep_alive=0, timeout: int = 420, retries: int = 2,
+           fmt: str | None = None) -> str:
     model = resolve(role_or_model) if role_or_model in ROLES else role_or_model
     b64 = []
     for p in images:
@@ -234,6 +242,8 @@ def vision(role_or_model: str, prompt: str, images: list[str], system: str | Non
             "options": {"temperature": 0.1, "num_predict": 2048, **(options or {})}}
     if system:
         body["system"] = system
+    if fmt:
+        body["format"] = fmt
     last = ""
     for attempt in range(retries + 1):
         try:
@@ -247,6 +257,20 @@ def vision(role_or_model: str, prompt: str, images: list[str], system: str | Non
             last = str(e)
         time.sleep(2 * (attempt + 1))
     return f"[vision error: {last}]"
+
+
+def generate_json_vision(prompt: str, images: list[str], retries: int = 2):
+    """Vision call constrained to JSON output. Returns (obj_or_None, first_try_ok)."""
+    first = True
+    for attempt in range(retries + 1):
+        txt = vision("VISION", prompt, images, fmt="json",
+                     options={"temperature": 0, "seed": 7})
+        obj = _extract_json(txt)
+        if obj is not None:
+            return obj, first
+        first = False
+        prompt += "\n\nReturn ONLY valid JSON, nothing else."
+    return None, False
 
 
 def embed(texts: list[str], timeout: int = 120) -> list[list[float]]:

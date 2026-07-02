@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — training{% endblock %}
+{% block content %}
+<h1>Training</h1>
+<p class="meta">{{ labels_count }} labeled examples
+  ({% for c, n in by_class.items() %}{{ c }}: {{ n }}{{ ", " if not loop.last }}{% endfor %})
+  · LoRA export unlocks at {{ lora_gate }}</p>
+
+<section>
+  <h2>Actions</h2>
+  <div class="actions">
+    <button id="btn-fewshot" class="primary">Build few-shot (k=2)</button>
+    <button id="btn-modelfile">Build Modelfile</button>
+    <label class="meta"><input type="checkbox" id="mf-apply"> apply (ollama create)</label>
+  </div>
+  <div class="actions">
+    <button id="btn-eval" class="primary">Run eval</button>
+    <input type="text" id="eval-tag" placeholder="tag (optional)" style="width:180px">
+    <select id="eval-only" style="width:auto">
+      <option value="">all</option><option value="bank">bank</option><option value="w9">w9</option>
+    </select>
+  </div>
+  <pre id="train-log" hidden></pre>
+</section>
+
+<section>
+  <h2>Eval history</h2>
+  {% if history %}
+  <div class="metric-strip" id="metric-strip"></div>
+  <script type="application/json" id="eval-series">{{ series_json | safe }}</script>
+  <table>
+    <tr><th>ts</th><th>tag</th><th>n</th><th>doc_type</th><th>verdict</th><th>json</th><th>leakage</th></tr>
+    {% for h in history | reverse %}
+    <tr>
+      <td class="meta">{{ h.ts }}</td>
+      <td>{{ h.tag or '—' }}</td>
+      <td>{{ h.metrics.n }}</td>
+      <td>{{ h.metrics.doc_type_accuracy }}</td>
+      <td>{{ h.metrics.verdict_accuracy }}</td>
+      <td>{{ h.metrics.json_valid_first_try }}</td>
+      <td class="{{ 'bad' if h.metrics.leakage_count }}">{{ h.metrics.leakage_count }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="meta">No eval runs yet.</p>{% endif %}
+</section>
+
+<section>
+  <h2>Latest eval report</h2>
+  <details><summary>show report.md</summary><pre id="eval-report">loading…</pre></details>
+</section>
+{% endblock %}
+{% block script %}<script>mdmdoc.initTraining();</script>{% endblock %}
