@@ -54,12 +54,26 @@ document ──► Stage A (frozen): text layer / tesseract 300dpi / qwen2.5vl t
   auto-started — the tool only tunnels to one that is already running; models are called
   sequentially with `keep_alive=0` (fits the mini's OLLAMA_MAX_LOADED_MODELS=1).
 
-## Setup
+## Setup (one time)
 
 ```bash
-uv sync
-brew install tesseract tesseract-lang   # if missing
-mdmdoc doctor                            # checks ollama, models, tesseract, dirs
+cd ~/Projects/mdm-doc-validator
+uv tool install --editable .             # puts `mdmdoc` on your PATH, runs from anywhere
+brew install tesseract tesseract-lang    # if missing
+mdmdoc doctor                            # checks mini tunnel, models, tesseract, dirs
+```
+
+After this, just use `mdmdoc ...` from any folder — no `cd`, no `uv run`.
+Re-run `uv tool install --editable . --force` only if you move the project folder;
+code edits take effect immediately (editable install).
+
+**Paths with spaces** are handled — quotes are optional, and you can type
+`mdmdoc check-bank ` (trailing space) then **drag the file from Finder** into the
+terminal:
+
+```bash
+mdmdoc check-bank ~/Desktop/documents/banking/eu/some bank letter.pdf
+mdmdoc check-w9 "~/Desktop/documents/w9/Acme W-9.pdf"
 ```
 
 Model roles (env-overridable): `MDMDOC_VISION` (qwen2.5vl:7b), `MDMDOC_TEXT` (qwen3:4b),
