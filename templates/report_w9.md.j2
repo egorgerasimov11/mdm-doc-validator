@@ -3,14 +3,11 @@ W-9 CHECK
 Document: {{ pub.file_name }}
 Detected form: {{ pub.doc_type }}
 Verdict: {{ verdict }}
-W-9 classification: {{ fields.line3_classification or 'unclear' }}
 TIN mapping: {% if fields.tin and fields.tin.present %}{{ fields.tin.type }} ({{ fields.tin.masked }}) -> {{ 'Tax Number 1' if fields.tin.type == 'SSN' else ('Tax Number 2' if fields.tin.type == 'EIN' else 'unclear') }}{% else %}unclear — TIN not readable{% endif %}
 
-Name mapping: Line 1 "{{ fields.line1_name or '—' }}" -> SAP Name 1{% if fields.line2_business_name %}; Line 2 "{{ fields.line2_business_name }}" -> SAP Name 2{% endif %}
-
-Signed: {{ 'yes' if fields.signed else 'no' }}{% if fields.sign_date %} ({{ fields.sign_date }}){% endif %}
-
 Next step: {{ next_step }}
+
+{{ data_block }}
 
 {% if groups.critical %}
 Critical issues:

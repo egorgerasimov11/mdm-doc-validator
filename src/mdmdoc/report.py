@@ -55,6 +55,65 @@ def _evidence(pub: dict) -> list[str]:
     return ev
 
 
+def _fmt(v, empty="—") -> str:
+    if isinstance(v, dict):
+        return v.get("masked") or empty if v.get("present") else empty
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    return str(v).strip() or empty
+
+
+def _data_rows(pub: dict) -> list[tuple[str, str, str]]:
+    """(label, value, sap-hint) rows for the EXTRACTED DATA block."""
+    f = pub.get("fields", {})
+    if pub["doc_class"] == "bank":
+        iban = f.get("iban")
+        iban_extra = (f" (country {iban['country']}, len {iban['length']})"
+                      if isinstance(iban, dict) and iban.get("present") and iban.get("country") else "")
+        return [
+            ("Account holder", _fmt(f.get("account_holder")), ""),
+            ("Bank name", _fmt(f.get("bank_name")), ""),
+            ("Bank country", _fmt(f.get("bank_country")), ""),
+            ("Bank address", _fmt(f.get("bank_address")), ""),
+            ("IBAN", _fmt(iban) + iban_extra, ""),
+            ("SWIFT/BIC", _fmt(f.get("swift_bic")), ""),
+            ("Account number", _fmt(f.get("account_number")), ""),
+            ("Routing/ABA", _fmt(f.get("routing_aba")), ""),
+            ("Currency", _fmt(f.get("currency")), ""),
+            ("Document date", _fmt(f.get("doc_date")), ""),
+            ("Signed/stamped", _fmt(f.get("signed", False)), ""),
+        ]
+    tin = f.get("tin", {}) if isinstance(f.get("tin"), dict) else {}
+    tin_target = ("Tax Number 1" if tin.get("type") == "SSN"
+                  else "Tax Number 2" if tin.get("type") == "EIN" else "")
+    signed = _fmt(f.get("signed", False))
+    if f.get("sign_date"):
+        signed += f" ({f['sign_date']})"
+    return [
+        ("Line 1 — taxpayer name", _fmt(f.get("line1_name")), "SAP Name 1"),
+        ("Line 2 — business name", _fmt(f.get("line2_business_name")), "SAP Name 2"),
+        ("Classification (Line 3)", _fmt(f.get("line3_classification")), ""),
+        ("TIN type", tin.get("type") or "—", tin_target),
+        ("TIN (masked)", _fmt(tin), ""),
+        ("Address — street", _fmt(f.get("address_street")), ""),
+        ("Address — city/state/ZIP", _fmt(f.get("address_city_state_zip")), ""),
+        ("Signed", signed, ""),
+    ]
+
+
+def data_block(pub: dict) -> str:
+    rows = _data_rows(pub)
+    w = max(len(r[0]) for r in rows)
+    lines = ["─" * 18 + " EXTRACTED DATA " + "─" * 18]
+    for label, value, hint in rows:
+        line = f"{label:<{w}} : {value}"
+        if hint and value != "—":
+            line += f"   → {hint}"
+        lines.append(line)
+    lines.append("─" * 52)
+    return "\n".join(lines)
+
+
 def render_report(pub: dict, findings: list[Finding], verdict: str, lang: str = "en") -> str:
     tpl = _env.get_template("report_bank.md.j2" if pub["doc_class"] == "bank" else "report_w9.md.j2")
     groups = _group(findings)
@@ -63,7 +122,7 @@ def render_report(pub: dict, findings: list[Finding], verdict: str, lang: str = 
            else "Document shows sufficient banking identity for support."
            if pub["doc_class"] == "bank" else "Form is complete and internally consistent.")
     return tpl.render(pub=pub, fields=pub.get("fields", {}), groups=groups, why=why,
-                      verdict=verdict, evidence=_evidence(pub),
+                      verdict=verdict, evidence=_evidence(pub), data_block=data_block(pub),
                       next_step=next_step(pub["doc_class"], verdict), lang=lang)
 
 

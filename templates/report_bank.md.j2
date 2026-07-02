@@ -25,17 +25,7 @@ Notes:
 - [{{ f.rule_id }}] {{ f.message }}
 {% endfor %}
 {% endif %}
-Extracted fields (masked):
-{% for k, v in fields.items() %}
-{% if v is mapping %}
-- {{ k }}: {{ v.masked if v.present else '—' }}{% if v.country is defined and v.country %} (country {{ v.country }}, len {{ v.length }}){% endif %}
-
-{% elif v is sameas true or v is sameas false %}
-- {{ k }}: {{ 'yes' if v else 'no' }}
-{% elif v %}
-- {{ k }}: {{ v }}
-{% endif %}
-{% endfor %}
+{{ data_block }}
 {% if pub.crosscheck %}
 OCR cross-check: {{ pub.crosscheck | join('; ') }}
 {% endif %}

@@ -68,9 +68,11 @@ def extract(raw: RawDoc) -> Extraction:
         ext_res.doc_type = "email"
 
     if raw.raw_text.strip():
-        # 16k ctx: system + few-shot exemplars + 8k doc text must never truncate
+        # 16k ctx: system + few-shot exemplars + 8k doc text must never truncate.
+        # temperature 0 + fixed seed: extraction must be reproducible, otherwise
+        # eval before/after deltas drown in run-to-run jitter.
         obj, first_try = mc.generate_json("TEXT", build_prompt(raw), system=_load_system(doc_class),
-                                          options={"num_ctx": 16384})
+                                          options={"num_ctx": 16384, "temperature": 0, "seed": 7})
         mc.unload("TEXT")
         ext_res.json_valid_first_try = first_try
         if isinstance(obj, dict):

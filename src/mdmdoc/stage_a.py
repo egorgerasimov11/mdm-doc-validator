@@ -152,7 +152,8 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
         if use_vision:
             raw.images = _render_for_vision(path, render_dir, max_pages)
             if raw.images:
-                vt = mc.vision("VISION", VISION_TRANSCRIBE_PROMPT, raw.images)
+                vt = mc.vision("VISION", VISION_TRANSCRIBE_PROMPT, raw.images,
+                               options={"temperature": 0, "seed": 7})
                 if not vt.startswith("[vision"):
                     raw.vision_text = vt
                 else:
