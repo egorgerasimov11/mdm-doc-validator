@@ -1,0 +1,48 @@
+# Kyma / Kubernetes deployment for the mdmdoc validation service.
+# kubectl apply -f btp/kyma/ -n <namespace>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mdmdoc-validator
+  labels: { app: mdmdoc-validator }
+spec:
+  replicas: 1                     # runs/ + inbox/ are pod-local; scale needs shared PVC
+  selector:
+    matchLabels: { app: mdmdoc-validator }
+  template:
+    metadata:
+      labels: { app: mdmdoc-validator }
+    spec:
+      containers:
+        - name: mdmdoc
+          image: <your-registry>/mdmdoc:latest
+          ports: [{ containerPort: 8080 }]
+          env:
+            - name: MDMDOC_MODE
+              value: api-only
+            - name: MDMDOC_API_TOKEN
+              valueFrom: { secretKeyRef: { name: mdmdoc-secrets, key: api-token } }
+            - name: MDMDOC_OLLAMA_HOST
+              value: http://localhost:11434        # topology (c): sidecar below
+          resources:
+            requests: { memory: "1Gi", cpu: "500m" }
+            limits: { memory: "2Gi", cpu: "2" }
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+          volumeMounts:
+            - { name: state, mountPath: /app/runs, subPath: runs }
+            - { name: state, mountPath: /app/inbox, subPath: inbox }
+        # --- topology (c): Ollama sidecar. Needs a GPU node pool or generous CPU;
+        # qwen2.5vl:7b + qwen3:4b want ~12-16Gi. Remove for topologies (a)/(b). ---
+        # - name: ollama
+        #   image: ollama/ollama:latest
+        #   ports: [{ containerPort: 11434 }]
+        #   resources:
+        #     limits: { memory: "16Gi", nvidia.com/gpu: 1 }
+        #   volumeMounts: [{ name: models, mountPath: /root/.ollama }]
+      volumes:
+        - name: state
+          persistentVolumeClaim: { claimName: mdmdoc-state }
+        # - name: models
+        #   persistentVolumeClaim: { claimName: mdmdoc-models }

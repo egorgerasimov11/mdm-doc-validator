@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mdmdoc-validator
+  labels: { app: mdmdoc-validator }
+spec:
+  selector: { app: mdmdoc-validator }
+  ports:
+    - { name: http, port: 80, targetPort: 8080 }

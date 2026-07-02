@@ -1,0 +1,21 @@
+# Kyma APIRule — exposes the service on the cluster domain.
+# The bearer token (MDMDOC_API_TOKEN) stays as defense-in-depth; for production
+# switch the handler to jwt with your XSUAA/IAS issuer (see docs/BTP_INTEGRATION.md).
+apiVersion: gateway.kyma-project.io/v1beta1
+kind: APIRule
+metadata:
+  name: mdmdoc-validator
+spec:
+  gateway: kyma-system/kyma-gateway
+  host: mdmdoc-validator
+  service:
+    name: mdmdoc-validator
+    port: 80
+  rules:
+    - path: /.*
+      methods: ["GET", "POST"]
+      accessStrategies:
+        - handler: noAuth        # replace with jwt in production:
+        # - handler: jwt
+        #   config:
+        #     jwks_urls: ["https://<your-subaccount>.authentication.<region>.hana.ondemand.com/token_keys"]

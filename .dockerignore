@@ -1,0 +1,15 @@
+.git
+.venv
+.claude
+.pytest_cache
+__pycache__
+*.pyc
+runs/
+inbox/
+dataset/labels.jsonl
+dataset/mlx-lora/
+eval/report.md
+eval/history.jsonl
+models/
+.env
+.DS_Store

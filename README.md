@@ -5,13 +5,34 @@ tax forms** for SAP MDM work. Everything runs on-device (Ollama + tesseract); do
 never leave the machine, and full tax IDs / account numbers never leave process memory.
 
 ```
-mdmdoc check-bank <pdf|image>     # bank letter / statement / screenshot / invoice? -> verdict + fields
-mdmdoc check-w9   <pdf|image>     # W-9 vs W-8, Line 1/2, classification, masked TIN -> verdict + fields
+mdmdoc ui                         # operator web console (drag-drop, review, training, debug)
+mdmdoc check-bank <pdf|image> [--sap <screenshot>]   # verdict + fields (+ SAP comparison)
+mdmdoc check-w9   <pdf|image>     # W-9 vs W-8, Line 1/2, classification, masked TIN
 mdmdoc review last --open         # correct a result -> labeled example (the teach loop)
 mdmdoc train --fewshot            # fold corrections into the prompts
 mdmdoc eval --tag after-fewshot   # measure before/after
+mdmdoc serve --api-only           # headless REST API (the BTP surface)
 mdmdoc runs | mdmdoc doctor
 ```
+
+**Operator console** (`mdmdoc ui`, Codex-look, no build step): Dashboard
+(drag-drop checks with live progress, optional SAP screenshot), run pages with
+document preview + EXTRACTED DATA + findings + SAP comparison table, a review
+form that turns corrections into training examples, Training (few-shot /
+Modelfile / eval with metric sparklines) and Debug pages.
+
+**SAP BTP packaging**: the same API ships as an api-only Docker image with an
+OpenAPI contract and CF/Kyma artifacts — see [`btp/`](btp/) and
+[docs/BTP_INTEGRATION.md](docs/BTP_INTEGRATION.md).
+
+| doc | what |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | system design, components, data lifecycle |
+| [docs/API.md](docs/API.md) | REST reference + mdmdoc.v1 schema |
+| [docs/BTP_INTEGRATION.md](docs/BTP_INTEGRATION.md) | Docker/CF/Kyma, model topologies, auth |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | masking model, leak gate, erasure |
+| [docs/OPERATOR_GUIDE_RU.md](docs/OPERATOR_GUIDE_RU.md) | руководство оператора (RU) |
+| [TRAINING.md](TRAINING.md) | label → few-shot → LoRA ladder |
 
 Exit codes: `0` ACCEPT · `1` REJECT · `2` WARNING/NEED_MANUAL_REVIEW · `3` Ollama not
 running · `4` unreadable input.

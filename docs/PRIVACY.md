@@ -1,0 +1,85 @@
+# Privacy & Data Handling
+
+The documents this tool reads carry exactly the data that must not leak: bank
+account numbers, IBANs, routing numbers, SSN/EIN tax identifiers. The design
+treats privacy as an *invariant enforced by code*, not a policy hope.
+
+## Invariants
+
+1. **Full sensitive values live only in process memory.** They are never
+   written to disk, logged, or returned in any persisted artifact.
+2. **Every persisted byte passes a leak gate.** `runstore.write()` (all run
+   artifacts) and `dataset.append_label()` (training data) call
+   `privacy.assert_no_leak()`, which scans for known full values *and* generic
+   patterns (SSN/EIN shapes, full IBANs, long digit runs) and **raises** on a
+   hit — a leaking write crashes instead of leaking. This is not theoretical:
+   during development the gate blocked an unmasked routing number in the SAP
+   comparison table; the fix was masking at the source, never relaxing the gate.
+3. **Eval enforces zero leakage.** `mdmdoc eval` sweeps `runs/`, `dataset/`,
+   `prompts/`, `eval/` and hard-fails (non-zero exit) if `leakage_count > 0`.
+
+## The masking model (`src/mdmdoc/privacy.py`)
+
+| kind | full (memory only) | persisted/displayed |
+|---|---|---|
+| SSN | 320-54-0693 | `XXX-XX-0693` (hyphen style preserved — an SAP entry rule) |
+| EIN | 12-3456789 | `XX-XXX6789` |
+| IBAN | DE44…4931 (22 ch) | `DE**…4931` + derived facts `{country, length, shape_ok}` |
+| account / routing | 1830042757 | `…2757` + `{length}` |
+
+Free text (OCR excerpts, error messages, report evidence) goes through
+`scrub_text()`, which also catches spaced/hyphenated/one-digit-per-line
+variants (the W-9 digit-box case) of every value seen in the run.
+
+## Fakes vs masks (training data)
+
+Few-shot exemplars and LoRA exports must show the model *realistic* values —
+masked exemplars would teach it to output masks. So training data uses
+**shape-preserving fakes** (`fake_preserve_shape`): deterministic replacements
+with the same prefix/length/hyphenation but different digits. Fakes are listed
+in each label's `sensitive_map` (masked ↔ fake pairs, no real values) and are
+explicitly allow-listed at the leak gate — a real value can never ride through
+that allowance because the known-secret pass runs first.
+
+## What is stored where
+
+| location | content | sensitivity | lifecycle |
+|---|---|---|---|
+| `inbox/` | original uploads (content-addressed) | **raw documents** | gitignored; delete `inbox/<sha16>__*` to erase |
+| `runs/<sha16>/` | meta, OCR excerpt (scrubbed), extraction, findings, reports, sap_compare | masked only | gitignored; delete the folder to erase |
+| page renders | pixels of pages | raw | deleted after every run; UI preview renders on demand with `Cache-Control: no-store`, never persisted |
+| `dataset/labels.jsonl` | training examples | masked + fakes | committable by design |
+| `prompts/fewshot/` | exemplars | fakes only | committable |
+| server logs | method, path, run ids, file names | no values | in-memory ring (500 lines) |
+
+The Docker image ships **none** of the operator's data (`.dockerignore`
+excludes runs, inbox, labels, eval history).
+
+## Sensitive values in transit
+
+The review/label API accepts full values when the operator corrects a field
+(`action: "set"`). That request body exists in memory only, on
+127.0.0.1 in operator mode; the api-only BTP image does not register the
+endpoint at all. No middleware logs request bodies; the operator UI never
+echoes a typed full value back.
+
+## Erasure & audit
+
+- **Erase one document:** delete `inbox/<sha16>__*`, `runs/<sha16>/`, and (if
+  labeled) its line in `dataset/labels.jsonl` (`doc_sha256` field). Nothing
+  else references it.
+- **Audit what was decided and why:** `runs/<sha16>/findings.json` holds the
+  fired rule ids and messages; `report.json` fixes verdict, model id and
+  timestamp — all masked, safe to attach to a case.
+- **Model training data audit:** `dataset/labels.jsonl` is human-readable;
+  every sensitive entry carries `present`/`masked`/derived facts only.
+
+## Known residual risks
+
+- OCR scrubbing of *unknown* values relies on generic patterns; exotic digit
+  formatting could evade them. Defense in depth: excerpts are truncated, runs/
+  is local and gitignored, and the eval sweep re-checks everything.
+- `--keep-renders` (debug flag) keeps page pixels on disk — documented as
+  sensitive, off by default.
+- The SAP screenshot contains full bank data by nature; it is treated exactly
+  like a document upload (inbox, masked artifacts, in-memory values).

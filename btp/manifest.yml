@@ -1,0 +1,24 @@
+# Cloud Foundry manifest for the mdmdoc validation service (docker path).
+# Push:  cf push --var mdmdoc-token=<token> --var model-host=<url>
+#
+# Alternative WITHOUT a docker registry: the python buildpack works but needs
+# tesseract via the apt-buildpack (multi-buildpack) + a Procfile
+# (`web: mdmdoc serve --host 0.0.0.0 --port $PORT --api-only`). The docker
+# path below is the recommended, reproducible one.
+---
+applications:
+  - name: mdmdoc-validator
+    docker:
+      image: <your-registry>/mdmdoc:latest   # push the image built from btp/Dockerfile
+    memory: 2G
+    disk_quota: 2G
+    instances: 1            # keep 1: runs/ state is instance-local (see docs)
+    health-check-type: http
+    health-check-http-endpoint: /health
+    env:
+      MDMDOC_MODE: api-only
+      MDMDOC_API_TOKEN: ((mdmdoc-token))
+      # Ollama-compatible model endpoint — see docs/BTP_INTEGRATION.md topologies:
+      #  (a) on-prem via Cloud Connector, (b) SAP AI Core (adapter required),
+      #  (c) co-located Ollama sidecar (Kyma only)
+      MDMDOC_OLLAMA_HOST: ((model-host))
