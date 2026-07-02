@@ -16,6 +16,22 @@ mdmdoc runs | mdmdoc doctor
 Exit codes: `0` ACCEPT · `1` REJECT · `2` WARNING/NEED_MANUAL_REVIEW · `3` Ollama not
 running · `4` unreadable input.
 
+## Built to find the data, not just read page 1
+
+- **Multi-page**: every page (up to 12) gets a cheap survey read; pages are scored by
+  banking/W-9 keyword + regex density and only the best pages get the expensive
+  300-DPI OCR + vision treatment. A statement with details on page 7 works.
+- **Sideways photos**: tesseract OSD detects orientation (confidence-gated) with a
+  brute-force 90/180/270 fallback; the detected rotation is applied to both OCR and
+  vision renders.
+- **Escalation**: if a bank document shows no account identifiers after the first
+  pass, a second *targeted* vision pass hunts specifically for payment details.
+- **Languages**: text layer for anything digital; tesseract with CJK retry; vision
+  model for ES/DE/ZH/KO/RU scans; account-number keywords cover
+  EN/ES/DE/FR/PT/RU/KO/JA/ZH (cuenta, Konto, compte, счёт, 계좌, 口座, 账户…).
+- **Non-obvious layouts**: that's what the teach loop is for — one `review` turns a
+  missed document into a few-shot exemplar.
+
 ## How it works
 
 ```

@@ -156,8 +156,10 @@ def regex_fields(text: str) -> dict:
     m = re.search(r"(?i)(?:routing|aba|aba\s*#|rtn)[^0-9]{0,12}(\d{9})\b", t)
     if m:
         out["routing_aba"] = m.group(1)
-    # account number: digits near 'account'/'acct'/CJK keyword (계좌/口座/账号/帐号)
-    for am in re.finditer(r"(?i)(?:acc(?:oun)?t|계좌|口座|账[号號]|帐[号號])[^0-9]{0,14}([0-9][0-9 \-]{5,20}[0-9])", t):
+    # account number: digits near an 'account' keyword in EN/ES/DE/FR/PT/RU/CJK
+    for am in re.finditer(r"(?i)(?:acc(?:oun)?t|cuenta|cta\.?|konto(?:nummer)?|kto\.?|"
+                          r"compte|conta|сч[её]т|계좌|口座|账[户戶号號]|帐[户戶号號])"
+                          r"[^0-9]{0,14}([0-9][0-9 \-]{5,20}[0-9])", t):
         acct = re.sub(r"[\s\-]", "", am.group(1))
         if 6 <= len(acct) <= 18 and acct != out.get("routing_aba"):
             out["account_number"] = acct

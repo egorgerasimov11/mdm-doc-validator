@@ -112,7 +112,8 @@ class SecretVault:
 
 # --- free-text scrubbing ----------------------------------------------------
 _ACCT_NEAR_RE = re.compile(
-    r"(?i)((?:acc(?:oun)?t|iban|계좌|口座|账[户戶号號]|帐[户戶号號])[^0-9]{0,14})([0-9][0-9 \-]{5,20}[0-9])")
+    r"(?i)((?:acc(?:oun)?t|iban|cuenta|cta\.?|konto(?:nummer)?|kto\.?|compte|conta|"
+    r"сч[её]т|계좌|口座|账[户戶号號]|帐[户戶号號])[^0-9]{0,14})([0-9][0-9 \-]{5,20}[0-9])")
 _LONG_DIGITS_RE = re.compile(r"\b\d[\d \-]{9,20}\d\b")
 
 

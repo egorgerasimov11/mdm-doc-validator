@@ -142,6 +142,32 @@ def looks_like_business(name: str) -> bool:
     return bool(_BUSINESS_SUFFIX_RE.search(name or ""))
 
 
+# --- page relevance scoring (multi-page docs: find WHERE the data lives) ------
+_BANK_PAGE_KWS = ("iban", "swift", "bic", "account", "acct", "routing", "aba",
+                  "sort code", "bank", "cuenta", "banco", "beneficiario",
+                  "konto", "bankverbindung", "kontonummer", "blz", "empfänger",
+                  "compte", "banque", "conta", "agência", "beneficiário",
+                  "счет", "счёт", "банк", "реквизит", "получатель",
+                  "계좌", "은행", "口座", "銀行", "账号", "帐号", "账户", "银行", "开户", "開戶")
+_W9_PAGE_KWS = ("w-9", "taxpayer", "tin", "social security", "employer identification",
+                "classification", "certification", "signature of", "disregarded")
+
+
+def page_score(text: str, doc_class: str) -> int:
+    """How likely a page holds the data we need. Keyword hits + deterministic
+    regex hits (weighted) + W-9 boxed-TIN bonus."""
+    t = (text or "").lower()
+    if not t.strip():
+        return 0
+    kws = _BANK_PAGE_KWS if doc_class == "bank" else _W9_PAGE_KWS
+    score = sum(1 for k in kws if k in t)
+    from . import ocr
+    score += 3 * len(ocr.regex_fields(text))
+    if doc_class == "w9" and find_boxed_tin(text):
+        score += 5
+    return score
+
+
 # --- heuristic doc-type hint (deterministic; model refines within taxonomy) ----
 def type_hint(filename: str, text: str, ext: str, doc_class: str) -> str:
     from . import config
