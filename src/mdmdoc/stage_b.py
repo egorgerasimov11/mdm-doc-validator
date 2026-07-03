@@ -113,6 +113,8 @@ def escalation_reasons(ext: Extraction, raw: RawDoc, quality: bool) -> list[str]
             r.append("w9-no-tin")
         if not str(f.get("line3_classification") or "").strip():
             r.append("w9-no-classification")
+        if not str(f.get("line1_name") or "").strip():
+            r.append("w9-no-line1")
     if any("MISMATCH" in n for n in ext.crosscheck):
         r.append("crosscheck-mismatch")
     return r
@@ -191,6 +193,23 @@ def _drop_exemplar_echo(ext: Extraction, raw: RawDoc) -> None:
             ext.fields[k] = ""
             ext.warnings.append(f"{k}: dropped few-shot exemplar echo (value was "
                                 "copied from an example, not read from the document)")
+
+
+_NAME_FIELDS = ("line1_name", "line2_business_name", "account_holder", "bank_name")
+
+
+def _drop_filename_echo(ext: Extraction, raw: RawDoc) -> None:
+    """Real case: line1 came back as 'Dr. Clarke' — lifted from the FILENAME
+    ('...Donation from Dr. Clarke.pdf'), not from the form. A name value that
+    occurs in the filename but nowhere in the document text is not a reading."""
+    fname = raw.path.rsplit("/", 1)[-1].casefold()
+    doc_text = raw.raw_text.casefold()
+    for k in _NAME_FIELDS:
+        s = str(ext.fields.get(k) or "").strip()
+        if len(s) >= 4 and s.casefold() in fname and s.casefold() not in doc_text:
+            ext.fields[k] = ""
+            ext.warnings.append(f"{k}: dropped filename echo ('{s}' appears in the "
+                                "file name but not in the document)")
 
 
 def _apply_w9_zone_probe(ext: Extraction, raw: RawDoc) -> None:
@@ -299,6 +318,10 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
         ext_res.warnings.append(f"type hint 'invoice' overrides model '{ext_res.doc_type}'")
         ext_res.doc_type = "invoice"
 
+    # echo guards run BEFORE escalation: a dropped echo leaves a gap the strong
+    # tier must be given the chance to fill
+    _drop_exemplar_echo(ext_res, raw)
+    _drop_filename_echo(ext_res, raw)
     _normalize_tin(ext_res)
     ext_res.crosscheck = crosscheck_ids(ext_res.fields, raw.regex_candidates,
                                         doc_class, policy=policy)
@@ -313,6 +336,9 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
             merged, tier_notes = _merge_tiers(ext_res.fields, strong_fields, keys, policy)
             ext_res.fields = merged
             ext_res.warnings += tier_notes
+            # the strong tier reads the same filename-bearing prompt — re-guard
+            _drop_exemplar_echo(ext_res, raw)
+            _drop_filename_echo(ext_res, raw)
             strong_type = str(strong_obj.get("doc_type", "") or "").strip().lower()
             if (strong_type in types and not raw.editable
                     and raw.ext not in config.EMAIL_EXTS
@@ -329,7 +355,6 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
             ext_res.warnings.append("strong tier returned no valid JSON — fast result kept")
     ext_res.escalated_because = reasons
 
-    _drop_exemplar_echo(ext_res, raw)
     _apply_w9_zone_probe(ext_res, raw)
     _normalize_tin(ext_res)          # zone TIN passes through the date guard too
     _apply_signature_probe(ext_res, raw)

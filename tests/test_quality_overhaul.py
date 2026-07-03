@@ -169,6 +169,28 @@ def test_line_swap_not_fired_for_dba():
                                   "line3_classification": ""}, {}, {})[0] is True
 
 
+def test_filename_echo_dropped():
+    """'Dr. Clarke' from '...Donation from Dr. Clarke.pdf' is not a Line 1."""
+    from mdmdoc.stage_a import RawDoc
+    from mdmdoc.stage_b import _drop_filename_echo
+    raw = RawDoc(path="/x/AES W9 Donation from Dr. Clarke.pdf", sha256="d" * 64,
+                 ext=".pdf", doc_class="w9")
+    raw.raw_text = "Form W-9 ... American Epilepsy Society ... Chicago IL"
+    e = Extraction(doc_class="w9", doc_type="w9")
+    e.fields = {"line1_name": "Dr. Clarke", "line2_business_name": ""}
+    _drop_filename_echo(e, raw)
+    assert e.fields["line1_name"] == ""
+    assert any("filename echo" in w for w in e.warnings)
+    # a name present in BOTH filename and document is legitimate — kept
+    e2 = Extraction(doc_class="w9", doc_type="w9")
+    e2.fields = {"line1_name": "American Epilepsy Society"}
+    raw2 = RawDoc(path="/x/American Epilepsy Society W9.pdf", sha256="e" * 64,
+                  ext=".pdf", doc_class="w9")
+    raw2.raw_text = "American Epilepsy Society, Chicago"
+    _drop_filename_echo(e2, raw2)
+    assert e2.fields["line1_name"] == "American Epilepsy Society"
+
+
 def test_ein_detector_settles_tin_type():
     from mdmdoc.fields import crosscheck_ids
     fields = {"tin_raw": "", "tin_type": "SSN"}     # model guessed SSN

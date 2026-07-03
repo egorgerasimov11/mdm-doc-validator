@@ -1,0 +1,293 @@
+{
+ "ts": "2026-07-03T02:28:35Z",
+ "tag": "quality-overhaul-v2",
+ "rows": [
+  {
+   "file": "CERTIFICACION BANCARIA BANCOLOMBIA MARZO 2026.pdf",
+   "run_id": "07f0d54513f25da6",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": false
+   }
+  },
+  {
+   "file": "MTRC Company information for vendors and customers.pdf",
+   "run_id": "26d2e55a19b584ed",
+   "doc_class": "bank",
+   "doc_type": "supplier_letterhead/supplier_letterhead",
+   "verdict": "NEED_MANUAL_REVIEW/ACCEPT",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "account_holder": false,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": true
+   }
+  },
+  {
+   "file": "AES Bank Letter-10.9.25 Honorarium Donation from Dr. Clarke.pdf",
+   "run_id": "a0c5cbc35b7ac55b",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": true,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": true
+   }
+  },
+  {
+   "file": "医师协会开户许可证（盖章）.pdf",
+   "run_id": "bbb53e9752541ca2",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "WARNING/WARNING",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": false
+   }
+  },
+  {
+   "file": "Bankbestätigung_DB_220623_ConSol Consulting&Solutions Software GmbH.pdf",
+   "run_id": "bdeacd3d08106f88",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": true,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": true
+   }
+  },
+  {
+   "file": "Zajecka Banking Info LV.Nova.61.26.pdf",
+   "run_id": "bed86d7b98961e0a",
+   "doc_class": "bank",
+   "doc_type": "other/bank_letter",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "account_holder": false,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": true
+   }
+  },
+  {
+   "file": "IMIMBH-Bankverbindungen 4er.pdf",
+   "run_id": "e4356657c4b8f033",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "ACCEPT/WARNING",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": false
+   }
+  },
+  {
+   "file": "2.招商通知-麻醉医师年会企业通知.pdf",
+   "run_id": "e80df335b899b334",
+   "doc_class": "bank",
+   "doc_type": "other/other",
+   "verdict": "NEED_MANUAL_REVIEW/NEED_MANUAL_REVIEW",
+   "tier": "fast",
+   "ok": true,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": true
+   }
+  },
+  {
+   "file": "890480239 certitifación bancaria bancolombia.pdf",
+   "run_id": "f4166b63a2b90639",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "account_holder": false,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": false
+   }
+  },
+  {
+   "file": "10.CERTIFICACION BANCARIA DAVIVIENDA CORRIENTE.pdf",
+   "run_id": "003034a81d88f858",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "ACCEPT/WARNING",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": true
+   }
+  },
+  {
+   "file": "Customer Welcome Packet - USD (1).pdf",
+   "run_id": "3ba4dbff673a3eef",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": true,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": true
+   }
+  },
+  {
+   "file": "Banking support.pdf",
+   "run_id": "a279976592a9c8ba",
+   "doc_class": "bank",
+   "doc_type": "bank_letter/bank_letter",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": true,
+   "fields": {
+    "account_holder": true,
+    "bank_name": true,
+    "iban": true,
+    "swift_bic": true,
+    "account_number": true
+   }
+  },
+  {
+   "file": "w9.pdf",
+   "run_id": "457d2745f549cba8",
+   "doc_class": "w9",
+   "doc_type": "w9/w9",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": false,
+    "tin": false
+   }
+  },
+  {
+   "file": "13-Denver 2026 W9.pdf",
+   "run_id": "fe65fd5547742dfe",
+   "doc_class": "w9",
+   "doc_type": "w9/w9",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "strong",
+   "ok": true,
+   "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   }
+  },
+  {
+   "file": "AES2026 W9 Honorarium Donation from Dr. Clarke.pdf",
+   "run_id": "2e084d3edb89128c",
+   "doc_class": "w9",
+   "doc_type": "w9/w9",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": false,
+   "fields": {
+    "line1_name": false,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   }
+  },
+  {
+   "file": "EIT 2.0 W-9.pdf",
+   "run_id": "1c00e98095037572",
+   "doc_class": "w9",
+   "doc_type": "w9/w9",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "strong",
+   "ok": true,
+   "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   }
+  },
+  {
+   "file": "Zajecka W-9 completed 6.08.26.pdf",
+   "run_id": "4e84eed8b7d9bac3",
+   "doc_class": "w9",
+   "doc_type": "w9/w9",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "ok": true,
+   "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   }
+  },
+  {
+   "file": "2026 05 w8ben.pdf",
+   "run_id": "8b5f595eaaf7866b",
+   "doc_class": "w9",
+   "doc_type": "w8/w8",
+   "verdict": "NEED_MANUAL_REVIEW/NEED_MANUAL_REVIEW",
+   "tier": "fast",
+   "ok": true,
+   "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   }
+  }
+ ],
+ "diff": {
+  "improved": [],
+  "regressed": [],
+  "unchanged_wrong": []
+ }
+}
