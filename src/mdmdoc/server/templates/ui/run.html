@@ -9,8 +9,10 @@
   <span class="dot dot--{{ report.verdict }}"></span>
   <h1 style="margin:16px 0 4px">{{ report.verdict }}</h1>
   {% if pub.operator_precedent %}
-  <span class="tag" title="machine said {{ pub.operator_precedent.model_doc_type }}/{{ pub.operator_precedent.model_verdict }}{% if pub.operator_precedent.notes %} — {{ pub.operator_precedent.notes }}{% endif %}">
-    operator override (machine: {{ pub.operator_precedent.model_verdict }})
+  {% set prec = pub.operator_precedent %}
+  {% set overridden = prec.model_verdict != report.verdict or prec.model_doc_type != report.doc_type %}
+  <span class="tag" title="machine said {{ prec.model_doc_type }}/{{ prec.model_verdict }}{% if prec.notes %} — {{ prec.notes }}{% endif %}">
+    {% if overridden %}operator override (machine: {{ prec.model_verdict }}){% elif trace and trace.rows %}operator-corrected fields ✓{% else %}operator confirmed ✓{% endif %}
   </span>
   {% endif %}
 </div>
@@ -31,36 +33,43 @@
 </div>
 <pre id="job-log" hidden></pre>
 
-{% if label %}
+{% if label and trace %}
 <section>
-  <h2>Learning trace <span class="meta">(before → corrected → after)</span></h2>
+  <h2>Learning trace <span class="meta">(what the operator corrected → what the machine does now)</span></h2>
+  {% if trace.type_changed or trace.verdict_changed %}
+  <p>
+    {% if trace.type_changed %}doc_type: <code>{{ trace.type_before }}</code> → <code>{{ label.doc_type_gold }}</code>
+      <span class="{{ '' if trace.type_now_ok else 'bad' }}">{{ '✓' if trace.type_now_ok else '✗ still differs' }}</span>{% endif %}
+    {%- if trace.type_changed and trace.verdict_changed %} · {% endif %}
+    {% if trace.verdict_changed %}verdict: <code>{{ trace.verdict_before }}</code> → <code>{{ label.verdict_gold }}</code>
+      <span class="{{ '' if trace.verdict_now_ok else 'bad' }}">{{ '✓' if trace.verdict_now_ok else '✗ still differs' }}</span>{% endif %}
+  </p>
+  {% endif %}
+  {% if trace.rows %}
   <table>
-    <tr><th></th><th>doc_type</th><th>verdict</th><th>corrected fields</th></tr>
+    <tr><th>field</th><th>machine before</th><th>operator corrected</th><th>machine now</th></tr>
+    {% for r in trace.rows %}
     <tr>
-      <td class="meta">machine before</td>
-      <td>{{ pub.operator_precedent.model_doc_type if pub.operator_precedent else label.model_predicted.doc_type }}</td>
-      <td>{{ pub.operator_precedent.model_verdict if pub.operator_precedent else '—' }}</td>
-      <td class="meta">{{ label.model_predicted.fields_diff.keys() | join(', ') or '—' }}</td>
+      <td class="meta">{{ r.field }}</td>
+      <td><code>{{ r.before }}</code></td>
+      <td><code>{{ r.corrected }}</code></td>
+      <td class="{{ '' if r.ok else 'bad' }}"><code>{{ r.now }}</code> {{ '✓' if r.ok else '✗' }}</td>
     </tr>
-    <tr>
-      <td class="meta">operator correction</td>
-      <td>{{ label.doc_type_gold }}</td>
-      <td>{{ label.verdict_gold }}</td>
-      <td class="meta">{{ label.notes or '—' }}</td>
-    </tr>
-    <tr>
-      <td class="meta">machine now</td>
-      <td>{{ report.doc_type }}</td>
-      <td class="{{ 'bad' if report.verdict != label.verdict_gold }}">{{ report.verdict }}</td>
-      <td class="meta">{{ 'matches the correction ✓' if report.verdict == label.verdict_gold and report.doc_type == label.doc_type_gold else 'still differs — the label alone did not fix it; check Stage A/rules' }}</td>
-    </tr>
+    {% endfor %}
   </table>
+  <p class="meta">
+    {% if trace.now_ok %}machine now matches the correction on: {{ trace.now_ok | join(', ') }}{% endif %}
+    {% if trace.now_bad %}<span class="bad">still differs: {{ trace.now_bad | join(', ') }} — the label alone did not fix these; check Stage A / rules</span>{% endif %}
+  </p>
+  {% elif not trace.type_changed and not trace.verdict_changed %}
+  <p class="meta">no field corrections were needed — the operator confirmed the machine's reading{% if label.notes %} · “{{ label.notes }}”{% endif %}</p>
+  {% endif %}
 </section>
 {% endif %}
 
 {% if preview_pages %}
 <section>
-  <h2>Document preview</h2>
+  <h2>Document preview <span class="meta">{% if preview_pages|length < total_pages %}showing the {{ preview_pages|length }} page(s) the pipeline read of {{ total_pages }}{% else %}all {{ total_pages }} page(s){% endif %}</span></h2>
   <div class="preview-strip">
     {% for p in preview_pages %}
     <a href="/api/v1/runs/{{ run_id }}/preview/{{ p }}" target="_blank">
@@ -97,9 +106,56 @@
 </section>
 {% endif %}
 
-{% if block %}
+{% if web_rows %}
 <section>
-  <pre class="report">{{ block }}</pre>
+  <h2>External evidence <span class="meta">(external registries — advisory only)</span></h2>
+  <p class="banner">🌐 {{ web_banner }}</p>
+  <table>
+    <tr><th>check</th><th>result</th><th>source</th><th>detail</th><th>checked</th></tr>
+    {% for r in web_rows %}
+    <tr>
+      <td>{{ r.check }}</td>
+      <td class="ev ev--{{ r.status }}">{{ r.status }} — {{ r.label }}</td>
+      <td>
+        {% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.source }}</a>{% else %}{{ r.source }}{% endif %}
+        <span class="tag" title="source trust tier">{{ r.tier_name }}</span>
+      </td>
+      <td class="meta">{{ r.detail }}</td>
+      <td class="meta"><time>{{ r.ts }}</time></td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+{% if data_rows %}
+<section>
+  <h2>Extracted data <span class="meta">(source per field; click a crop to zoom)</span></h2>
+  <table class="data-table">
+    <tr><th>field</th><th>value</th><th>source</th><th>evidence</th></tr>
+    {% for r in data_rows %}
+    <tr>
+      <td class="meta" style="white-space:nowrap">{{ r.label }}</td>
+      <td>{{ r.value }}{% if r.hint and r.value != '—' %} <span class="hint">→ {{ r.hint }}</span>{% endif %}</td>
+      <td>
+        {% if r.prov %}
+        <span class="tag src-tag src-tag--{{ r.prov.source }}"
+              title="{{ r.prov.source }}{% if r.prov.page %}, page {{ r.prov.page }}{% endif %}{% if r.prov.confirmed %}; model reading confirmed by OCR regex{% endif %}">
+          {{ r.prov.source }}{% if r.prov.page %} · p{{ r.prov.page }}{% endif %}{% if r.prov.confirmed %} ✓{% endif %}
+        </span>
+        {% endif %}
+      </td>
+      <td>
+        {% if r.ev %}
+        <a href="/api/v1/runs/{{ run_id }}/evidence/{{ r.ev }}" target="_blank" title="open the {{ r.ev }} crop">
+          <img class="ev-thumb" src="/api/v1/runs/{{ run_id }}/evidence/{{ r.ev }}" alt="{{ r.ev }} evidence"
+               loading="lazy" onerror="this.closest('a').style.display='none'">
+        </a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
 </section>
 {% endif %}
 
@@ -112,6 +168,12 @@
       <span class="chip chip--{{ f.severity }}">{{ f.severity }}</span>
       <code>{{ f.rule_id }}</code>
       <span class="grow" style="white-space:normal">{{ f.message }}</span>
+      {% if f.ev %}
+      <a href="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" target="_blank" title="evidence: {{ f.ev }}">
+        <img class="ev-thumb ev-thumb--sm" src="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" alt="{{ f.ev }} evidence"
+             loading="lazy" onerror="this.closest('a').style.display='none'">
+      </a>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>

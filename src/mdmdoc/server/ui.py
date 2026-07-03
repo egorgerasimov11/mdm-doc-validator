@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -11,7 +12,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import config, dataset, model_client as mc, review_core, runstore
-from ..report import data_block
+from ..evidence import FIELD_EVIDENCE, resolve_all as resolve_evidence
+from ..report import _data_rows
 from . import jobs
 from .api import _labeled_ids, doctor as api_doctor, eval_history
 
@@ -60,23 +62,45 @@ def run_page(request: Request, run_id: str, flash: str = ""):
     if isinstance(rep, str):
         rep = json.loads(rep)
     rep = rep or {}
-    block = ""
+    # which evidence crops are actually resolvable for this document — the
+    # template only offers thumbnails for these (no broken images)
+    try:
+        evidence = resolve_evidence(rid)
+    except Exception:
+        evidence = {}
+    prov = pub.get("provenance") or {}
+    data_rows, seen_ev = [], set()
     if pub.get("fields") is not None:
         try:
-            block = data_block(pub)
+            for row_label, value, hint, fkey in _data_rows(pub):
+                ev = FIELD_EVIDENCE.get(fkey)
+                ev = ev if ev in evidence and ev not in seen_ev else None
+                if ev:
+                    seen_ev.add(ev)
+                data_rows.append({"label": row_label, "value": value, "hint": hint,
+                                  "prov": prov.get(fkey), "ev": ev})
         except Exception:
-            block = ""
+            data_rows = []
+    for f in findings:
+        if isinstance(f, dict):
+            ev = FIELD_EVIDENCE.get(f.get("field") or "")
+            f["ev"] = ev if ev in evidence else None
     stage_a_pub = runstore.load(rid, "stage_a.json") or {}
     preview_pages = _preview_pages(meta, stage_a_pub)
     sap_rows = runstore.load(rid, "sap_compare.json") or []
+    web_rows = runstore.load(rid, "web_evidence.json") or []
+    from ..web_enrichment import BANNER as web_banner
     label = next((l for l in dataset.load_labels() if l.get("doc_sha256") == rid), None)
     return templates.TemplateResponse(request, "run.html", _ctx(
         page="runs", run_id=rid, meta=meta, pub=pub, findings=findings,
-        report=rep, block=block, labeled=rid in _labeled_ids(), flash=flash,
-        preview_pages=preview_pages, has_sap_shot=bool(meta.get("sap_path")),
-        sap_rows=sap_rows, doc_class=meta.get("doc_class", "bank"), label=label,
+        report=rep, data_rows=data_rows, labeled=rid in _labeled_ids(), flash=flash,
+        preview_pages=preview_pages, total_pages=stage_a_pub.get("pages") or 1,
+        has_sap_shot=bool(meta.get("sap_path")),
+        sap_rows=sap_rows, web_rows=web_rows, web_banner=web_banner,
+        doc_class=meta.get("doc_class", "bank"), label=label,
+        trace=_learning_trace(label, pub, rep) if label else None,
         artifacts=["meta.json", "stage_a.json", "extraction.json", "findings.json",
-                   "report.json", "report.md", "sap_compare.json"]))
+                   "report.json", "report.md", "sap_compare.json", "web_evidence.json"]))
 
 
 def _preview_pages(meta: dict, stage_a_pub: dict) -> list[int]:
@@ -87,6 +111,55 @@ def _preview_pages(meta: dict, stage_a_pub: dict) -> list[int]:
     total = stage_a_pub.get("pages") or 1
     pages = sorted(set(used))[:4] if used else list(range(min(total, 3)))
     return pages or [0]
+
+
+def _display_field(pub_fields: dict, key: str) -> str:
+    """Current displayable value of a diffed field (full/masked per policy)."""
+    v = pub_fields.get("tin" if key == "tin_raw" else key, "")
+    if isinstance(v, dict):
+        if not v.get("present"):
+            return ""
+        return str(v.get("value") or v.get("masked") or "")
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    return str(v or "")
+
+
+def _tail_eq(now: str, corrected: str) -> bool:
+    """Gold values in labels are always masked while the console may show full
+    values; every mask keeps the last 4 digits, so digit-bearing values compare
+    by tail. Text values compare case-insensitively."""
+    a, b = re.sub(r"\D", "", now), re.sub(r"\D", "", corrected)
+    if len(a) >= 4 and len(b) >= 4:
+        return a[-4:] == b[-4:]
+    return now.strip().casefold() == corrected.strip().casefold()
+
+
+def _learning_trace(label: dict, pub: dict, rep: dict) -> dict:
+    """Field-level before -> corrected -> now. The trace must PROVE the machine
+    learned the correction — a verdict that never changed proves nothing."""
+    mp = label.get("model_predicted") or {}
+    prec = pub.get("operator_precedent") or {}
+    pub_fields = pub.get("fields") or {}
+    rows, now_ok, now_bad = [], [], []
+    for k, d in (mp.get("fields_diff") or {}).items():
+        now = _display_field(pub_fields, k)
+        corrected = str(d.get("gold") or "")
+        ok = _tail_eq(now, corrected) if (now or corrected) else True
+        rows.append({"field": k, "before": str(d.get("model") or "") or "—",
+                     "corrected": corrected or "—", "now": now or "—", "ok": ok})
+        (now_ok if ok else now_bad).append(k)
+    return {
+        "rows": rows, "now_ok": now_ok, "now_bad": now_bad,
+        "type_changed": bool(mp.get("doc_type"))
+                        and mp.get("doc_type") != label.get("doc_type_gold"),
+        "verdict_changed": bool(prec.get("model_verdict"))
+                           and prec.get("model_verdict") != label.get("verdict_gold"),
+        "type_before": mp.get("doc_type") or prec.get("model_doc_type") or "—",
+        "verdict_before": prec.get("model_verdict") or "—",
+        "type_now_ok": rep.get("doc_type") == label.get("doc_type_gold"),
+        "verdict_now_ok": rep.get("verdict") == label.get("verdict_gold"),
+    }
 
 
 @router_ui.get("/ui/runs/{run_id}/review", response_class=HTMLResponse)
@@ -104,6 +177,8 @@ def review_page(request: Request, run_id: str):
 
 @router_ui.get("/ui/training", response_class=HTMLResponse)
 def training_page(request: Request):
+    from .. import adoption
+    from ..training_queue import build_queue
     labs = dataset.load_labels()
     by_class: dict = {}
     for l in labs:
@@ -127,6 +202,10 @@ def training_page(request: Request):
     prev = history[-2]["metrics"] if len(history) > 1 else {}
     field_rows = [(k, v, (prev.get("fields") or {}).get(k))
                   for k, v in sorted((cur.get("fields") or {}).items())]
+    scenario_rows = sorted((cur.get("scenarios") or {}).items())
+    adoption_state = adoption.load_state()
+    candidate = adoption_state.get("candidate")
+    queue = build_queue()
 
     # recommendations: the page should say what to do next, not just show numbers
     recs: list = []
@@ -141,6 +220,17 @@ def training_page(request: Request):
         if failures:
             recs.append(("warn", f"{len(failures)} doc(s) not fully correct — label the ones "
                                  "below, they teach the most"))
+        if candidate and not candidate.get("evaluated"):
+            recs.append(("warn", "a candidate model is built but not evaluated — "
+                                 "run the gated eval below"))
+        elif candidate and candidate.get("gate_ok"):
+            recs.append(("ok", "candidate passed the gate — adopt it below"))
+        elif candidate:
+            recs.append(("bad", "candidate FAILED the gate — see reasons below; "
+                                "fix and rebuild, or keep the adopted model"))
+        if queue:
+            recs.append(("info", f"{len(queue)} document(s) in the training queue "
+                                 "are worth labeling"))
         if len(labs) < 100:
             recs.append(("info", f"LoRA still gated: {len(labs)}/100 labels"))
         if not recs:
@@ -155,6 +245,8 @@ def training_page(request: Request):
         page="training", by_class=by_class, history=history,
         series_json=json.dumps(series), lora_gate=100,
         failures=failures, diff=diff, field_rows=field_rows, recs=recs,
+        scenario_rows=scenario_rows, adoption=adoption_state, candidate=candidate,
+        queue=queue,
         last_tag=last_results.get("tag", ""), last_ts=last_results.get("ts", ""),
         current_model=current_model, strong_model=strong_model,
         running_jobs=[j.to_dict() for j in jobs.REGISTRY.list()
