@@ -66,7 +66,7 @@ def test_host_header_hardening_full_mode(isolated, monkeypatch):
 def test_check_async_job_lifecycle(isolated, monkeypatch):
     from mdmdoc.server import api as api_mod
 
-    def fake_pipeline(path, doc_class, lang, use_vision, sap_image=None):
+    def fake_pipeline(path, doc_class, lang, use_vision, sap_image=None, quality=False):
         return {"run_id": "deadbeef00000000", "verdict": "ACCEPT",
                 "report": {"schema": "mdmdoc.v1"}, "report_md": "[BANK DOC VERDICT]"}
 

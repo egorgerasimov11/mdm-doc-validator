@@ -41,10 +41,16 @@ def _field_match(key: str, pred_fields: dict, gold_fields: dict) -> bool:
 
 
 def _leak_sweep() -> int:
+    """dataset/prompts/eval are ALWAYS strict; runs/ follows the operator's
+    display policy (full banking values there are legitimate, TIN never is)."""
     from .dataset import all_fakes
     fakes = all_fakes()
     hits = 0
-    for root in (config.RUNS_DIR, config.DATASET_DIR, config.FEWSHOT_DIR, config.EVAL_DIR):
+    roots = ((config.RUNS_DIR, config.gate_policy()),
+             (config.DATASET_DIR, "strict"),
+             (config.FEWSHOT_DIR, "strict"),
+             (config.EVAL_DIR, "strict"))
+    for root, pol in roots:
         if not root.exists():
             continue
         for p in root.rglob("*"):
@@ -52,7 +58,8 @@ def _leak_sweep() -> int:
                 continue
             try:
                 hits += len(assert_no_leak(p.read_text(encoding="utf-8", errors="replace"),
-                                           allowed_fakes=fakes, raise_on_hit=False))
+                                           allowed_fakes=fakes, raise_on_hit=False,
+                                           policy=pol))
             except Exception:
                 continue
     return hits
@@ -109,8 +116,14 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             st[0] += int(ok)
             st[1] += 1
             row_fields[k] = ok
-        rows.append({"file": path.name, "doc_type": f"{pred_type}/{gold_type}",
-                     "verdict": f"{res.verdict}/{lab.get('verdict_gold')}", "fields": row_fields})
+        rows.append({"file": path.name, "run_id": res.run_id,
+                     "doc_class": lab["doc_class"],
+                     "doc_type": f"{pred_type}/{gold_type}",
+                     "verdict": f"{res.verdict}/{lab.get('verdict_gold')}",
+                     "tier": res.pub.get("tier", "fast"),
+                     "ok": (pred_type == gold_type and res.verdict == lab.get("verdict_gold")
+                            and all(row_fields.values())),
+                     "fields": row_fields})
         _p(f"[{len(rows)}/{len(labels)}] {path.name}: {res.verdict}/{lab.get('verdict_gold')}"
            + (f", misses: {', '.join(k for k, ok in row_fields.items() if not ok)}"
               if any(not ok for ok in row_fields.values()) else ""))
@@ -127,6 +140,32 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         "fields": {k: round(v[0] / v[1], 3) for k, v in sorted(field_stats.items())},
         "leakage_count": leaks,
     }
+
+    # structured per-doc results + regression diff vs the previous eval
+    results_path = config.EVAL_DIR / "last_results.json"
+    prev_rows = {}
+    if results_path.exists():
+        try:
+            prev_rows = {r["file"]: r for r in json.loads(results_path.read_text()).get("rows", [])
+                         if isinstance(r, dict)}
+        except Exception:
+            prev_rows = {}
+    diff = {"improved": [], "regressed": [], "unchanged_wrong": []}
+    for r in rows:
+        if "error" in r:
+            continue
+        prev = prev_rows.get(r["file"])
+        if prev is None or "ok" not in prev:
+            continue
+        if r["ok"] and not prev["ok"]:
+            diff["improved"].append(r["file"])
+        elif not r["ok"] and prev["ok"]:
+            diff["regressed"].append(r["file"])
+        elif not r["ok"] and not prev["ok"]:
+            diff["unchanged_wrong"].append(r["file"])
+    results_path.write_text(json.dumps(
+        {"ts": runstore.now_iso(), "tag": tag, "rows": rows, "diff": diff},
+        ensure_ascii=False, indent=1))
 
     # history + delta
     hist_path = config.EVAL_DIR / "history.jsonl"

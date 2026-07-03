@@ -32,9 +32,13 @@ def render_dir(run_id: str) -> Path:
     return d
 
 
-def write(run_id: str, name: str, payload, secrets: list[str] | None = None) -> Path:
+def write(run_id: str, name: str, payload, secrets: list[str] | None = None,
+          policy: str = "strict") -> Path:
+    """policy='tin-only' allows full BANKING values (operator display policy);
+    TIN patterns and the passed secrets are still blocked. Training-data writes
+    never go through here — dataset/fewshot/LoRA gates stay strict."""
     blob = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, indent=2)
-    assert_no_leak(blob, secrets or [])
+    assert_no_leak(blob, secrets or [], policy=policy)
     p = run_dir(run_id) / name
     p.write_text(blob, encoding="utf-8")
     return p

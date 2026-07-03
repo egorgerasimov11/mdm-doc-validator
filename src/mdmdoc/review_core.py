@@ -21,8 +21,9 @@ from .fields import BANK_DOC_TYPES, BANK_KEYS, W9_DOC_TYPES, W9_KEYS, _norm_id
 from .privacy import FIELD_KIND, SecretVault, fake_preserve_shape, mask
 from .rules.engine import VERDICTS
 
-SENSITIVE_KEYS = {"iban", "account_number", "routing_aba", "tin_raw"}
+SENSITIVE_KEYS = {"iban", "account_number", "routing_aba", "routing_aba_wires", "tin_raw"}
 BOOLEAN_KEYS = {"signed", "partial_capture"}
+_BANK_PUB_KEYS = ("iban", "account_number", "routing_aba", "routing_aba_wires")
 
 
 class RunNotFound(KeyError):
@@ -42,10 +43,23 @@ def _load_run(run_id: str) -> tuple[dict, dict, dict, dict]:
     return meta, pub, stage_a_pub, rep
 
 
-def display_value(key: str, pub_fields: dict) -> str:
+def _masked_shown(key: str, pub_fields: dict, shown: str) -> str:
+    """Masked form of what the form displayed (labels store masks only)."""
+    v = pub_fields.get("tin" if key == "tin_raw" else key, "")
+    if isinstance(v, dict) and v.get("masked"):
+        return v["masked"]
+    return mask(FIELD_KIND.get(key, "account_number"), shown) if shown else ""
+
+
+def _shown_value(key: str, pub_fields: dict) -> str:
+    """What the review form shows for a field. Prefers the full 'value' (present
+    for banking kinds under the operator display policy) over the mask — the
+    operator corrects against what they can actually read."""
     v = pub_fields.get("tin" if key == "tin_raw" else key, "")
     if isinstance(v, dict):
-        return v.get("masked", "") if v.get("present") else ""
+        if not v.get("present"):
+            return ""
+        return v.get("value") or v.get("masked", "")
     if isinstance(v, bool):
         return "yes" if v else "no"
     return str(v or "")
@@ -68,7 +82,7 @@ def review_defaults(spec: str) -> dict:
         "field_keys": [k for k in keys if k != "tin_type"],
         "booleans": sorted(BOOLEAN_KEYS & set(keys)),
         "sensitive": sorted(SENSITIVE_KEYS & set(keys)),
-        "display": {k: display_value(k, pub_fields) for k in keys if k != "tin_type"},
+        "display": {k: _shown_value(k, pub_fields) for k in keys if k != "tin_type"},
         "tin_type_current": (pub_fields.get("tin") or {}).get("type", "") if doc_class == "w9" else "",
         "doc_type": pub.get("doc_type", ""),
         "doc_types": BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES,
@@ -93,7 +107,9 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
 
     def _keep_sensitive(k: str, entry: dict) -> None:
         gk = "tin" if k == "tin_raw" else k
-        gold_fields[gk] = dict(entry)
+        entry_copy = dict(entry)
+        entry_copy.pop("value", None)   # labels NEVER store full values, any policy
+        gold_fields[gk] = entry_copy
         if not entry.get("present"):
             return
         kind = FIELD_KIND.get(k, "account_number")
@@ -112,7 +128,7 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
             continue  # consumed by the tin_raw set-path below
         corr = corrections.get(k) or {}
         action = corr.get("action", "keep")
-        shown = display_value(k, pub_fields)
+        shown = _shown_value(k, pub_fields)
 
         if k in BOOLEAN_KEYS:
             if action == "set":
@@ -145,12 +161,15 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
                         entry["country"] = c[:2] if c[:2].isalpha() else ""
                     gold_fields[k] = entry
                 masked_gold = mask(kind, val)
-                if masked_gold != shown:
-                    model_diff[k] = {"model": shown, "gold": masked_gold}
+                # 'shown' may be a FULL banking value under the display policy —
+                # the diff stored in the label must be masked on both sides
+                shown_masked = _masked_shown(k, pub_fields, shown)
+                if masked_gold != shown_masked:
+                    model_diff[k] = {"model": shown_masked, "gold": masked_gold}
             else:  # clear (or set with empty value)
                 gold_fields["tin" if k == "tin_raw" else k] = {"present": False, "masked": ""}
                 if shown:
-                    model_diff[k] = {"model": shown, "gold": ""}
+                    model_diff[k] = {"model": _masked_shown(k, pub_fields, shown), "gold": ""}
             continue
 
         # plain text field
@@ -164,6 +183,29 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
         if val != shown:
             model_diff[k] = {"model": shown, "gold": val}
 
+    # THE LABEL PATH IS ALWAYS STRICT: under the operator display policy the run
+    # artifacts legitimately hold full banking values — everything copied into a
+    # training example must be re-masked here (append_label's strict gate then
+    # fails closed if anything slips).
+    from .privacy import scrub_text
+    run_vault = SecretVault()
+    for bk in _BANK_PUB_KEYS:
+        e = pub_fields.get(bk)
+        if isinstance(e, dict) and e.get("value"):
+            run_vault.register(FIELD_KIND.get(bk, "account_number"), e["value"])
+    raw_cands = stage_a_pub.get("regex_candidates_masked") or {}
+    cand_masked: dict = {}
+    for ck, cv in raw_cands.items():
+        kind = FIELD_KIND.get(ck)
+        if ck == "ssn_masked" or not cv or not kind:
+            cand_masked[ck] = cv
+        else:
+            if kind in ("iban", "account_number", "routing_aba"):
+                run_vault.register(kind, str(cv))
+            cand_masked[ck] = mask(kind, str(cv))
+    excerpt = scrub_text((stage_a_pub.get("raw_text_excerpt") or "")[:config.EXCERPT_LIMIT],
+                         run_vault, policy="strict")
+
     label = {
         "label_id": f"lbl-{runstore.now_iso().replace(':', '').replace('-', '')}",
         "ts": runstore.now_iso(),
@@ -173,15 +215,17 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
         "doc_type_gold": str(sub.get("doc_type_gold") or pub.get("doc_type", "")),
         "fields_gold": gold_fields,
         "verdict_gold": str(sub.get("verdict_gold") or rep.get("verdict", "")),
-        "stage_a_excerpt": (stage_a_pub.get("raw_text_excerpt") or "")[:config.EXCERPT_LIMIT],
-        "regex_candidates_masked": stage_a_pub.get("regex_candidates_masked", {}),
+        "stage_a_excerpt": excerpt,
+        "regex_candidates_masked": cand_masked,
         "model_predicted": {"doc_type": pub.get("doc_type"), "fields_diff": model_diff},
         "sensitive_map": vault.sensitive_map() + smap_extra,
         "reviewer": str(sub.get("reviewer") or "egor"),
         "notes": str(sub.get("notes") or ""),
         "confirmed": True,
     }
-    return label, vault.secrets()
+    # union: typed corrections + full values harvested from the run artifacts —
+    # the strict gate must know them all
+    return label, vault.secrets() + run_vault.secrets()
 
 
 def submit_review(spec: str, sub: dict) -> dict:

@@ -53,14 +53,23 @@ def _first_diff(a: str, b: str) -> int:
 
 
 def _row(field: str, doc_val: str, sap_val: str, status: str, note: str = "",
-         kind: str | None = None) -> dict:
-    dm = mask(kind, doc_val) if kind and doc_val else (doc_val or "—")
-    sm = mask(kind, sap_val) if kind and sap_val else (sap_val or "—")
+         kind: str | None = None, policy: str = "masked") -> dict:
+    from .privacy import display_value
+    dm = display_value(kind, doc_val, policy) if kind and doc_val else (doc_val or "—")
+    sm = display_value(kind, sap_val, policy) if kind and sap_val else (sap_val or "—")
     return {"field": field, "doc": dm, "sap": sm, "status": status, "note": note}
 
 
-def compare(ext: Extraction, sap: dict) -> tuple[list[Finding], list[dict]]:
-    """Deterministic char-by-char comparison -> (findings, masked table rows)."""
+def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Finding], list[dict]]:
+    """Deterministic char-by-char comparison -> (findings, display-policy rows)."""
+    from .privacy import display_value
+
+    def _dv(kind, v):
+        return display_value(kind, v, policy)
+
+    def _row_p(*a, **kw):
+        return _row(*a, policy=policy, **kw)
+
     f = ext.fields
     findings: list[Finding] = []
     rows: list[dict] = []
@@ -75,57 +84,57 @@ def compare(ext: Extraction, sap: dict) -> tuple[list[Finding], list[dict]]:
     d_iban, s_iban = _norm_id(f.get("iban")), _norm_id(sap.get("iban"))
     if d_iban and s_iban:
         if d_iban == s_iban:
-            rows.append(_row("IBAN", d_iban, s_iban, "match", kind="iban"))
+            rows.append(_row_p("IBAN", d_iban, s_iban, "match", kind="iban"))
         else:
             pos = _first_diff(d_iban, s_iban)
-            rows.append(_row("IBAN", d_iban, s_iban, "MISMATCH",
+            rows.append(_row_p("IBAN", d_iban, s_iban, "MISMATCH",
                              f"differs from position {pos}", kind="iban"))
-            crit("SAP-001", f"IBAN mismatch: document {mask('iban', d_iban)} vs "
-                            f"SAP {mask('iban', s_iban)} (differs from position {pos}). "
+            crit("SAP-001", f"IBAN mismatch: document {_dv('iban', d_iban)} vs "
+                            f"SAP {_dv('iban', s_iban)} (differs from position {pos}). "
                             "Do not process — request corrected form or banking support.")
     elif d_iban or s_iban:
-        rows.append(_row("IBAN", d_iban, s_iban, "only-one-side", kind="iban"))
+        rows.append(_row_p("IBAN", d_iban, s_iban, "only-one-side", kind="iban"))
         warn("SAP-002", "IBAN present on only one side (document vs SAP).")
 
     # Account number — SAP pads with leading zeros
     d_acc, s_acc = _norm_id(f.get("account_number")), _norm_id(sap.get("bank_account"))
     if d_acc and s_acc:
         if d_acc == s_acc:
-            rows.append(_row("Bank Account", d_acc, s_acc, "match", kind="account_number"))
+            rows.append(_row_p("Bank Account", d_acc, s_acc, "match", kind="account_number"))
         elif d_acc.lstrip("0") == s_acc.lstrip("0"):
-            rows.append(_row("Bank Account", d_acc, s_acc, "match",
+            rows.append(_row_p("Bank Account", d_acc, s_acc, "match",
                              "leading zeros differ (SAP padding)", kind="account_number"))
         elif s_iban and d_acc and d_acc in s_iban:
-            rows.append(_row("Bank Account", d_acc, s_acc, "match",
+            rows.append(_row_p("Bank Account", d_acc, s_acc, "match",
                              "document account contained in SAP IBAN", kind="account_number"))
         else:
             pos = _first_diff(d_acc.lstrip("0"), s_acc.lstrip("0"))
-            rows.append(_row("Bank Account", d_acc, s_acc, "MISMATCH",
+            rows.append(_row_p("Bank Account", d_acc, s_acc, "MISMATCH",
                              f"differs from position {pos}", kind="account_number"))
-            crit("SAP-003", f"Account number mismatch: document {mask('account_number', d_acc)} "
-                            f"vs SAP {mask('account_number', s_acc)}. Do not process.")
+            crit("SAP-003", f"Account number mismatch: document {_dv('account_number', d_acc)} "
+                            f"vs SAP {_dv('account_number', s_acc)}. Do not process.")
     elif d_acc or s_acc:
-        rows.append(_row("Bank Account", d_acc, s_acc, "only-one-side", kind="account_number"))
+        rows.append(_row_p("Bank Account", d_acc, s_acc, "only-one-side", kind="account_number"))
 
     # SWIFT/BIC — 8-char == 11-char with XXX head-office suffix
     d_sw, s_sw = _norm_id(f.get("swift_bic")), _norm_id(sap.get("swift_bic"))
     if d_sw and s_sw:
         eq = d_sw == s_sw or d_sw + "XXX" == s_sw or d_sw == s_sw + "XXX"
         note = "XXX head-office suffix" if eq and d_sw != s_sw else ""
-        rows.append(_row("SWIFT/BIC", d_sw, s_sw, "match" if eq else "MISMATCH", note))
+        rows.append(_row_p("SWIFT/BIC", d_sw, s_sw, "match" if eq else "MISMATCH", note))
         if not eq:
             crit("SAP-004", f"SWIFT/BIC mismatch: document {d_sw} vs SAP {s_sw}.")
     elif d_sw or s_sw:
-        rows.append(_row("SWIFT/BIC", d_sw, s_sw, "only-one-side"))
+        rows.append(_row_p("SWIFT/BIC", d_sw, s_sw, "only-one-side"))
 
     # Bank country
     d_c, s_c = to_iso2(str(f.get("bank_country") or "")), to_iso2(sap.get("bank_country", ""))
     if d_c and s_c:
-        rows.append(_row("Bank Country", d_c, s_c, "match" if d_c == s_c else "MISMATCH"))
+        rows.append(_row_p("Bank Country", d_c, s_c, "match" if d_c == s_c else "MISMATCH"))
         if d_c != s_c:
             crit("SAP-005", f"Bank country mismatch: document {d_c} vs SAP {s_c}.")
     elif d_c or s_c:
-        rows.append(_row("Bank Country", d_c, s_c, "only-one-side"))
+        rows.append(_row_p("Bank Country", d_c, s_c, "only-one-side"))
 
     # Bank key — must be confirmed by DOCUMENT-side data: inside the document's
     # IBAN (after CC+check digits) or equal to the document's routing/sort code.
@@ -133,8 +142,10 @@ def compare(ext: Extraction, sap: dict) -> tuple[list[Finding], list[dict]]:
     s_key = _norm_id(sap.get("bank_key"))
     if s_key:
         d_routing = _norm_id(f.get("routing_aba"))
+        d_wires = _norm_id(f.get("routing_aba_wires"))
         in_doc_iban = bool(d_iban and s_key in d_iban[4:4 + max(len(s_key), 10)])
-        eq_routing = bool(d_routing and d_routing == s_key)
+        eq_routing = bool((d_routing and d_routing == s_key)
+                          or (d_wires and d_wires == s_key))
         if in_doc_iban or eq_routing:
             status, note = "match", ("confirmed by document IBAN" if in_doc_iban
                                      else "matches document routing")
@@ -144,21 +155,21 @@ def compare(ext: Extraction, sap: dict) -> tuple[list[Finding], list[dict]]:
                             "(not in the IBAN bank-code position, routing differs).")
         else:
             status, note = "sap-only", "document shows no routing/IBAN to compare"
-        doc_side = (mask("routing_aba", d_routing) if d_routing
+        doc_side = (_dv("routing_aba", d_routing or d_wires) if (d_routing or d_wires)
                     else ("from IBAN" if d_iban else ""))
-        rows.append(_row("Bank Key", doc_side, s_key, status, note))
+        rows.append(_row_p("Bank Key", doc_side, s_key, status, note))
 
     # Bank name — normalized containment either way
     d_bn, s_bn = _norm_name(f.get("bank_name")), _norm_name(sap.get("bank_name"))
     if d_bn and s_bn:
         eq = d_bn in s_bn or s_bn in d_bn
-        rows.append(_row("Bank Name", f.get("bank_name", ""), sap.get("bank_name", ""),
+        rows.append(_row_p("Bank Name", f.get("bank_name", ""), sap.get("bank_name", ""),
                          "match" if eq else "MISMATCH"))
         if not eq:
             warn("SAP-007", f"Bank name differs: document '{f.get('bank_name')}' vs "
                             f"SAP '{sap.get('bank_name')}'.")
     elif d_bn or s_bn:
-        rows.append(_row("Bank Name", f.get("bank_name", ""), sap.get("bank_name", ""),
+        rows.append(_row_p("Bank Name", f.get("bank_name", ""), sap.get("bank_name", ""),
                          "only-one-side"))
 
     # Account holder vs SAP Account Holder / Account Name
@@ -166,14 +177,14 @@ def compare(ext: Extraction, sap: dict) -> tuple[list[Finding], list[dict]]:
     s_h = _norm_name(sap.get("account_holder") or sap.get("account_name"))
     if d_h and s_h:
         eq = d_h in s_h or s_h in d_h
-        rows.append(_row("Account Holder", f.get("account_holder", ""),
+        rows.append(_row_p("Account Holder", f.get("account_holder", ""),
                          sap.get("account_holder") or sap.get("account_name", ""),
                          "match" if eq else "MISMATCH"))
         if not eq:
             crit("SAP-008", f"Account holder differs: document '{f.get('account_holder')}' "
                             f"vs SAP '{sap.get('account_holder') or sap.get('account_name')}'.")
     elif d_h or s_h:
-        rows.append(_row("Account Holder", f.get("account_holder", ""),
+        rows.append(_row_p("Account Holder", f.get("account_holder", ""),
                          sap.get("account_holder") or sap.get("account_name", ""),
                          "only-one-side"))
 
@@ -181,7 +192,7 @@ def compare(ext: Extraction, sap: dict) -> tuple[list[Finding], list[dict]]:
     for key, label in (("bank_details_id", "Bank Details ID"), ("control_key", "Control Key"),
                        ("reference_details", "Reference Details"), ("city", "City")):
         if sap.get(key):
-            rows.append(_row(label, "", sap[key], "sap-only"))
+            rows.append(_row_p(label, "", sap[key], "sap-only"))
 
     if not any(r["status"] == "MISMATCH" for r in rows) and rows:
         findings.append(Finding("SAP-000", "NOTE", None,

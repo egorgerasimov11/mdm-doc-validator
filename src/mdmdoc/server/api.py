@@ -85,10 +85,11 @@ def get_rules(doc_class: str = "bank") -> dict:
 
 # ---------------------------------------------------------------- check -------
 def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
-                  sap_image: Path | None = None) -> dict:
+                  sap_image: Path | None = None, quality: bool = False) -> dict:
     mc.reset_host()
     with jobs.PIPELINE_LOCK:
-        res = run_check(path, doc_class, use_vision=use_vision, lang=lang, sap_image=sap_image)
+        res = run_check(path, doc_class, use_vision=use_vision, lang=lang,
+                        sap_image=sap_image, quality=quality)
     report = json.loads(res.report_json)
     return {"run_id": res.run_id, "verdict": res.verdict, "report": report,
             "report_md": res.report_md}
@@ -98,7 +99,7 @@ def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
 def check(file: UploadFile | None = File(None), doc_class: str = Form(...),
           lang: str = Form("en"), use_vision: bool = Form(True),
           wait: bool = Form(True), sap_file: UploadFile | None = File(None),
-          rerun_run_id: str = Form("")):
+          rerun_run_id: str = Form(""), quality: bool = Form(False)):
     if doc_class not in ("bank", "w9"):
         raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
     if lang not in ("en", "ru"):
@@ -121,26 +122,33 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form(...),
             raise api_error(400, "bad_request", "SAP comparison applies to bank documents")
         sap_path = save_upload("sap__" + (sap_file.filename or "screen.png"),
                                sap_file.file.read())
+    from ..estimate import estimate_seconds, human, sniff_text_layer
+    est = estimate_seconds(doc_class, sniff_text_layer(path), use_vision=use_vision,
+                           sap=sap_path is not None, quality=quality)
     if wait:
         try:
-            return _run_pipeline(path, doc_class, lang, use_vision, sap_path)
+            out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality)
+            out["estimate_s"] = est
+            return out
         except UnreadableDocument as e:
             raise api_error(422, "unreadable_document", str(e))
         except mc.OllamaUnavailable as e:
             raise api_error(503, "model_host_down", str(e))
 
     def work(log):
+        log(f"estimated duration: {human(est)}")
         log(f"document: {path.name}")
         if sap_path:
             log(f"SAP screenshot: {sap_path.name}")
-        log(f"running {doc_class} pipeline…")
-        out = _run_pipeline(path, doc_class, lang, use_vision, sap_path)
+        log(f"running {doc_class} pipeline{' (thorough tier)' if quality else ''}…")
+        out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality)
+        out["estimate_s"] = est
         log(f"verdict: {out['verdict']} (run {out['run_id']})")
         return out
 
     job = jobs.REGISTRY.submit("check", work)
     from fastapi.responses import JSONResponse
-    return JSONResponse({"job_id": job.id}, status_code=202)
+    return JSONResponse({"job_id": job.id, "estimate_s": est}, status_code=202)
 
 
 # ---------------------------------------------------------------- runs --------

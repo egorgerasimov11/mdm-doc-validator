@@ -27,9 +27,9 @@ class CheckResult:
 
 def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders: bool = False,
               lang: str = "en", sap_image: Path | None = None,
-              apply_precedent: bool = True) -> CheckResult:
+              apply_precedent: bool = True, quality: bool = False) -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
-    not the operator's stored answers."""
+    not the operator's stored answers. quality=True forces the strong tier."""
     t0 = time.time()
     config.ensure_dirs()
     path = path.expanduser().resolve()
@@ -52,23 +52,30 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                                              "locked": True})
         raise UnreadableDocument("password-protected PDF — request an unlocked copy")
 
-    # Stage B (trainable extraction)
-    ext = stage_b.extract(raw)
+    # display/gate policy: banking values full for the operator, TIN always masked
+    policy = config.bank_values_policy()
+    gate = config.gate_policy()
+
+    # Stage B (trainable extraction, two tiers)
+    ext = stage_b.extract(raw, quality=quality, policy=policy)
 
     # rules -> verdict (+ optional SAP comparison as extra findings)
-    findings = run_rules(ext, lang=lang)
+    findings = run_rules(ext, lang=lang, policy=policy)
     sap_rows: list = []
     if sap_image is not None and doc_class == "bank":
         from . import sap_compare
         sap_image = sap_image.expanduser().resolve()
         sap_fields = sap_compare.read_sap_screen(sap_image, ext.vault)
         if sap_fields:
-            sap_findings, sap_rows = sap_compare.compare(ext, sap_fields)
+            sap_findings, sap_rows = sap_compare.compare(ext, sap_fields, policy=policy)
             findings += sap_findings
         else:
             ext.warnings.append("SAP screenshot could not be read — comparison skipped")
     verdict = decide(findings)
-    secrets = ext.vault.secrets()   # AFTER sap compare — its values are secrets too
+    # AFTER sap compare — its values are secrets too. Under the tin-only gate the
+    # run artifacts legitimately carry full banking values, so only TIN secrets
+    # are enforced there; training-data paths always get the full strict set.
+    secrets = ext.vault.tin_secrets() if gate == "tin-only" else ext.vault.secrets()
 
     # operator precedent: a confirmed label for THIS document (by content hash)
     # overrides the machine verdict/doc_type — feedback must stick immediately
@@ -87,7 +94,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                 f"({model_doc_type}/{model_verdict}).{note}"))
             verdict, ext.doc_type = gold_v, gold_t
 
-    pub = ext.to_public()
+    pub = ext.to_public(policy=policy)
     pub["file_name"] = path.name
     if precedent:
         pub["operator_precedent"] = {"verdict": verdict, "doc_type": ext.doc_type,
@@ -98,21 +105,29 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     if sap_rows:
         pub["sap_compare"] = sap_rows
 
+    from .estimate import shape_key
     report_md = rpt.render_report(pub, findings, verdict, lang=lang)
     meta = {"path": str(path), "file_name": path.name, "doc_class": doc_class,
             "run_id": run_id, "ts": runstore.now_iso(), "model": ext.model_id,
             "use_vision": use_vision, "duration_s": round(time.time() - t0, 1),
+            "tier": ext.tier, "escalated_because": ext.escalated_because,
+            "has_text_layer": raw.has_text_layer, "quality": quality,
+            "signature_pass": bool(raw.signature_probe),
+            "shape_key": shape_key(doc_class, raw.has_text_layer, use_vision,
+                                   sap_image is not None, quality),
             "sap_path": str(sap_image) if sap_image is not None else None}
     report_json = rpt.build_json(pub, findings, verdict, meta)
 
-    runstore.write(run_id, "meta.json", meta, secrets)
-    runstore.write(run_id, "stage_a.json", stage_a.to_public(raw, ext.vault), secrets)
-    runstore.write(run_id, "extraction.json", pub, secrets)
-    runstore.write(run_id, "findings.json", [f.to_dict() for f in findings], secrets)
-    runstore.write(run_id, "report.md", report_md, secrets)
-    runstore.write(run_id, "report.json", report_json, secrets)
+    runstore.write(run_id, "meta.json", meta, secrets, policy=gate)
+    runstore.write(run_id, "stage_a.json", stage_a.to_public(raw, ext.vault, policy=policy),
+                   secrets, policy=gate)
+    runstore.write(run_id, "extraction.json", pub, secrets, policy=gate)
+    runstore.write(run_id, "findings.json", [f.to_dict() for f in findings], secrets,
+                   policy=gate)
+    runstore.write(run_id, "report.md", report_md, secrets, policy=gate)
+    runstore.write(run_id, "report.json", report_json, secrets, policy=gate)
     if sap_rows:
-        runstore.write(run_id, "sap_compare.json", sap_rows, secrets)
+        runstore.write(run_id, "sap_compare.json", sap_rows, secrets, policy=gate)
     runstore.mark_last(run_id)
     if not keep_renders:
         runstore.cleanup_renders(run_id)

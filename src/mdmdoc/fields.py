@@ -15,15 +15,16 @@ BANK_DOC_TYPES = ["bank_letter", "supplier_letterhead", "bank_screenshot", "void
                   "ap_document", "invoice", "email", "editable_source", "other"]
 W9_DOC_TYPES = ["w9", "w8", "other_tax", "unknown"]
 
-BANK_KEYS = ["account_holder", "bank_name", "bank_country", "bank_address", "iban",
-             "swift_bic", "account_number", "routing_aba", "currency", "doc_date",
-             "signed", "partial_capture"]
+BANK_KEYS = ["account_holder", "account_type", "bank_name", "bank_country",
+             "bank_address", "iban", "swift_bic", "account_number", "routing_aba",
+             "routing_aba_wires", "currency", "doc_date", "signed",
+             "signature_evidence", "partial_capture"]
 W9_KEYS = ["line1_name", "line2_business_name", "line3_classification", "tin_type",
            "tin_raw", "address_street", "address_city_state_zip", "signed", "sign_date"]
 
-ID_FIELDS = ("iban", "swift_bic", "account_number", "routing_aba")
+ID_FIELDS = ("iban", "swift_bic", "account_number", "routing_aba", "routing_aba_wires")
 
-_SENSITIVE_BANK = ("iban", "account_number", "routing_aba")
+_SENSITIVE_BANK = ("iban", "account_number", "routing_aba", "routing_aba_wires")
 _SENSITIVE_W9 = ("tin_raw",)
 
 
@@ -31,14 +32,27 @@ def _norm_id(s) -> str:
     return re.sub(r"[\s\-.]", "", str(s or "")).upper()
 
 
-_BOXED_TIN_RE = re.compile(r"(?m)(?:^[ \t]*\d[ \t]*\n){8}^[ \t]*\d[ \t]*$")
+# one box digit per line; a group dash may share the line ("1  – ") or own one
+_BOXED_TIN_RE = re.compile(
+    r"(?m)(?:^[ \t]*(?:[–\-—][ \t]*)?(?:\d[ \t]*(?:[–\-—][ \t]*)?|[–\-—][ \t]*)$\n?){9,13}")
 
 
-def find_boxed_tin(text: str) -> str:
-    """W-9 digit boxes flatten to 9 single-digit LINES in the PDF text layer —
-    invisible to normal SSN/EIN regex. Returns the 9 digits joined, or ''."""
-    m = _BOXED_TIN_RE.search(text or "")
-    return re.sub(r"\s", "", m.group(0)) if m else ""
+def find_boxed_tin(text: str) -> tuple[str, str]:
+    """W-9 digit boxes flatten to single-digit LINES (sometimes with a dash line
+    between the EIN's 2-7 groups) — invisible to normal SSN/EIN regex.
+    Returns (9 digits joined, 'EIN'|'SSN'|'') — the type is settled by the
+    nearest PRECEDING box label, deterministic evidence the model can't override."""
+    t = text or ""
+    for m in _BOXED_TIN_RE.finditer(t):
+        digits = re.sub(r"\D", "", m.group(0))
+        if len(digits) != 9:
+            continue
+        before = t[max(0, m.start() - 800):m.start()].lower()
+        ei = before.rfind("employer identification")
+        ss = before.rfind("social security")
+        ttype = "EIN" if ei > ss else ("SSN" if ss > ei else "")
+        return digits, ttype
+    return "", ""
 
 
 def _norm_name(s) -> str:
@@ -46,11 +60,14 @@ def _norm_name(s) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank") -> list[str]:
+def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
+                   policy: str = "masked") -> list[str]:
     """Deterministically verify model-read banking IDs against regex-extracted IDs.
-    Fills blanks from OCR, confirms matches, flags mismatches. Masked notes only.
+    Fills blanks from OCR, confirms matches, flags mismatches. Banking values in
+    notes follow the display policy; TIN branches are hard-masked regardless.
     Scoped by doc class: tax forms only cross-check the TIN — a stray digit run on
     a W-9 must not become an 'account number'."""
+    from .privacy import display_value
     notes = []
     for k in ID_FIELDS if doc_class == "bank" else ():
         dv = det.get(k)
@@ -60,20 +77,33 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank") -> list[str
         mv = fields.get(k, "")
         if not mv:
             fields[k] = dv
-            notes.append(f"{k}=filled-from-OCR({mask(kind, dv)})")
+            notes.append(f"{k}=filled-from-OCR({display_value(kind, dv, policy)})")
         elif _norm_id(mv) == _norm_id(dv):
             notes.append(f"{k}=confirmed")
         else:
-            notes.append(f"{k}=MISMATCH(model={mask(kind, mv)} vs ocr={mask(kind, dv)})")
-    # EIN found by OCR regex backs an unread TIN
-    if doc_class == "w9" and det.get("ein") and not fields.get("tin_raw"):
-        fields["tin_raw"] = det["ein"]
-        fields.setdefault("tin_type", "EIN")
-        notes.append(f"tin=filled-from-OCR({mask('ein', det['ein'])})")
+            notes.append(f"{k}=MISMATCH(model={display_value(kind, mv, policy)} "
+                         f"vs ocr={display_value(kind, dv, policy)})")
+    # EIN found by OCR regex backs an unread TIN. The detector is EIN-specific
+    # (label/format anchored), so it also SETTLES tin_type — deterministic
+    # evidence beats a model guess.
+    if doc_class == "w9" and det.get("ein"):
+        if not str(fields.get("tin_raw") or "").strip():
+            fields["tin_raw"] = det["ein"]
+            notes.append(f"tin=filled-from-OCR({mask('ein', det['ein'])})")
+        if _norm_id(fields.get("tin_raw")) == _norm_id(det["ein"]):
+            if str(fields.get("tin_type") or "").upper() != "EIN":
+                notes.append("tin_type=EIN (settled by the EIN detector)")
+            fields["tin_type"] = "EIN"
     # W-9 digit boxes (one digit per line in the text layer)
-    if doc_class == "w9" and det.get("tin_boxed") and not str(fields.get("tin_raw") or "").strip():
-        fields["tin_raw"] = det["tin_boxed"]
-        notes.append(f"tin=filled-from-boxed-digits({mask('tin', det['tin_boxed'])})")
+    if doc_class == "w9" and det.get("tin_boxed"):
+        if not str(fields.get("tin_raw") or "").strip():
+            fields["tin_raw"] = det["tin_boxed"]
+            notes.append(f"tin=filled-from-boxed-digits({mask('tin', det['tin_boxed'])})")
+        boxed_type = str(det.get("tin_boxed_type") or "")
+        if boxed_type and _norm_id(fields.get("tin_raw")) == _norm_id(det["tin_boxed"]):
+            if str(fields.get("tin_type") or "").upper() != boxed_type:
+                notes.append(f"tin_type={boxed_type} (settled by the {boxed_type} box label)")
+            fields["tin_type"] = boxed_type
     return notes
 
 
@@ -187,7 +217,7 @@ def page_score(text: str, doc_class: str) -> int:
     score = sum(1 for k in kws if k in t)
     from . import ocr
     score += 3 * len(ocr.regex_fields(text))
-    if doc_class == "w9" and find_boxed_tin(text):
+    if doc_class == "w9" and find_boxed_tin(text)[0]:
         score += 5
     if doc_class == "bank":
         m = page_markers(text)
@@ -239,10 +269,15 @@ class Extraction:
     doc_class: str                      # "bank" | "w9"
     doc_type: str = ""
     fields: dict = field(default_factory=dict)      # FULL values — in-memory only
-    crosscheck: list = field(default_factory=list)  # masked notes
+    crosscheck: list = field(default_factory=list)  # policy-aware notes
     warnings: list = field(default_factory=list)
     model_id: str = ""
     json_valid_first_try: bool = True
+    tier: str = "fast"                  # "fast" | "strong" (escalated)
+    escalated_because: list = field(default_factory=list)
+    model_strong: str = ""
+    strong_json_valid: bool = True
+    signature_probe: dict = field(default_factory=dict)   # vision verdict on signature
     vault: SecretVault = field(default_factory=SecretVault)
 
     def register_secrets(self) -> None:
@@ -252,8 +287,10 @@ class Extraction:
             if v:
                 self.vault.register(FIELD_KIND.get(k, "account_number"), v)
 
-    def to_public(self) -> dict:
-        """Masked, persistable view: sensitive values replaced by masked + derived facts."""
+    def to_public(self, policy: str = "masked") -> dict:
+        """Persistable view. policy='full' additionally exposes BANKING values in a
+        'value' key (operator display policy); TIN never gets a value key —
+        masked+derived facts only, under every policy."""
         pub: dict = {}
         for k, v in self.fields.items():
             sv = str(v or "").strip() if not isinstance(v, bool) else v
@@ -261,9 +298,13 @@ class Extraction:
                 c = _norm_id(sv)
                 pub[k] = {"masked": mask("iban", sv), "country": c[:2] if c[:2].isalpha() else "",
                           "length": len(c), "present": True}
-            elif k in ("account_number", "routing_aba") and sv:
+                if policy == "full":
+                    pub[k]["value"] = c
+            elif k in ("account_number", "routing_aba", "routing_aba_wires") and sv:
                 pub[k] = {"masked": mask(FIELD_KIND[k], sv), "length": len(_norm_id(sv)),
                           "present": True}
+                if policy == "full":
+                    pub[k]["value"] = _norm_id(sv)
             elif k == "tin_raw":
                 if sv:
                     digits = re.sub(r"\D", "", sv)
@@ -285,6 +326,10 @@ class Extraction:
             "warnings": self.warnings,
             "model": self.model_id,
             "json_valid_first_try": self.json_valid_first_try,
+            "tier": self.tier,
+            "escalated_because": self.escalated_because,
+            "model_strong": self.model_strong,
+            "signature_probe": self.signature_probe,
             "sensitive_present": {it["kind"]: True for it in self.vault.items()},
         }
         return pub_wrap

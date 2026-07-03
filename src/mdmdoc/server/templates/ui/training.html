@@ -4,7 +4,75 @@
 <h1>Training</h1>
 <p class="meta">{{ labels_count }} labeled examples
   ({% for c, n in by_class.items() %}{{ c }}: {{ n }}{{ ", " if not loop.last }}{% endfor %})
-  · LoRA export unlocks at {{ lora_gate }}</p>
+  · extractor: <code>{{ current_model }}</code> · strong tier: <code>{{ strong_model }}</code>
+  · LoRA unlocks at {{ lora_gate }}</p>
+
+{% if running_jobs %}
+<p class="meta"><span class="dot dot--WARNING"></span>background:
+  {% for j in running_jobs %}{{ j.kind }} <code>{{ j.id }}</code> ({{ j.status }}){{ ", " if not loop.last }}{% endfor %}
+  — <a href="/ui/debug">log →</a></p>
+{% endif %}
+
+{% if recs %}
+<section>
+  <h2>What to do next</h2>
+  <ul class="timeline">
+    {% for level, text in recs %}
+    <li><span class="dot {{ 'dot--REJECT' if level == 'bad' else ('dot--WARNING' if level == 'warn' else ('dot--ACCEPT' if level == 'ok' else '')) }}"></span>
+        <span class="grow" style="white-space:normal">{{ text }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if failures or diff.improved or diff.regressed %}
+<section>
+  <h2>Last eval — what failed <span class="meta">{{ last_tag }} · {{ last_ts }}</span></h2>
+  {% if diff.improved or diff.regressed or diff.unchanged_wrong %}
+  <p class="meta">vs previous eval:
+    <span style="color:var(--accept)">▲ improved {{ diff.improved | length }}</span> ·
+    <span style="color:var(--reject)">▼ regressed {{ diff.regressed | length }}</span> ·
+    unchanged wrong {{ diff.unchanged_wrong | length }}</p>
+  {% endif %}
+  {% if failures %}
+  <table>
+    <tr><th>document</th><th>type pred/gold</th><th>verdict pred/gold</th><th>misses</th><th></th></tr>
+    {% for f in failures %}
+    <tr>
+      <td>{{ f.file }}</td>
+      {% if f.error %}
+      <td colspan="2" class="bad">ERROR: {{ f.error }}</td><td></td>
+      {% else %}
+      <td>{{ f.doc_type }}</td>
+      <td class="{{ 'bad' if f.verdict.split('/')[0] != f.verdict.split('/')[1] }}">{{ f.verdict }}</td>
+      <td class="meta">{{ f.fields | dictsort | selectattr('1', 'equalto', false) | map(attribute='0') | join(', ') }}</td>
+      {% endif %}
+      <td>{% if f.run_id %}<a href="/ui/runs/{{ f.run_id }}">open</a> ·
+          <a href="/ui/runs/{{ f.run_id }}/review">review</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="meta">All documents fully correct in the last eval.</p>{% endif %}
+</section>
+{% endif %}
+
+{% if field_rows %}
+<section>
+  <h2>Per-field accuracy <span class="meta">(last eval vs previous)</span></h2>
+  <table>
+    <tr><th>field</th><th>accuracy</th><th>previous</th></tr>
+    {% for name, val, prev in field_rows %}
+    <tr>
+      <td><code>{{ name }}</code></td>
+      <td class="{{ 'bad' if val < 1 }}">{{ val }}</td>
+      <td class="meta">{{ prev if prev is not none else '—' }}
+        {% if prev is not none and val > prev %}<span style="color:var(--accept)">▲</span>
+        {% elif prev is not none and val < prev %}<span style="color:var(--reject)">▼</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
 
 <section>
   <h2>Actions</h2>

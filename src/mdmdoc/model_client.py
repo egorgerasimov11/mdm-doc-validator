@@ -115,14 +115,23 @@ ROLES = {
     # baked in, rebuilt on every retrain); falls back to stock qwen3:4b until it
     # has been created on the model host (mdmdoc train --modelfile --apply)
     "TEXT": _role_env("TEXT", "mdmdoc-extract"),
+    # STRONG tier: escalation target when the fast tier leaves critical gaps
+    "TEXT_STRONG": _role_env("TEXT_STRONG", "qwen3:14b"),
     "EMBED": _role_env("EMBED", "nomic-embed-text"),
 }
 
 _FALLBACKS = {
     "VISION": ["qwen2.5vl:7b", "qwen2.5vl:3b", "moondream:latest"],
     "TEXT": ["qwen3:4b", "qwen3:8b", "qwen3:1.7b", "llama3.2:3b"],
+    "TEXT_STRONG": ["qwen3:14b", "qwen3:8b", "mdmdoc-extract", "qwen3:4b"],
     "EMBED": ["nomic-embed-text"],
 }
+
+
+def strong_distinct() -> bool:
+    """False when TEXT_STRONG resolves to the same model as TEXT — escalation
+    would be a pointless re-run."""
+    return resolve("TEXT_STRONG") != resolve("TEXT")
 
 
 class OllamaUnavailable(RuntimeError):

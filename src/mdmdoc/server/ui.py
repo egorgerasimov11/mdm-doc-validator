@@ -42,7 +42,9 @@ def dashboard(request: Request):
     for r in rows:
         r["labeled"] = r["run_id"] in labeled
     return templates.TemplateResponse(request, "dashboard.html",
-                                      _ctx(doctor=doc, runs=rows[:20], page="dashboard"))
+                                      _ctx(doctor=doc, runs=rows[:40], page="dashboard",
+                                           active_jobs=[j.to_dict() for j in jobs.REGISTRY.list()
+                                                        if j.status in ("queued", "running")]))
 
 
 @router_ui.get("/ui/runs/{run_id}", response_class=HTMLResponse)
@@ -67,11 +69,12 @@ def run_page(request: Request, run_id: str, flash: str = ""):
     stage_a_pub = runstore.load(rid, "stage_a.json") or {}
     preview_pages = _preview_pages(meta, stage_a_pub)
     sap_rows = runstore.load(rid, "sap_compare.json") or []
+    label = next((l for l in dataset.load_labels() if l.get("doc_sha256") == rid), None)
     return templates.TemplateResponse(request, "run.html", _ctx(
         page="runs", run_id=rid, meta=meta, pub=pub, findings=findings,
         report=rep, block=block, labeled=rid in _labeled_ids(), flash=flash,
         preview_pages=preview_pages, has_sap_shot=bool(meta.get("sap_path")),
-        sap_rows=sap_rows, doc_class=meta.get("doc_class", "bank"),
+        sap_rows=sap_rows, doc_class=meta.get("doc_class", "bank"), label=label,
         artifacts=["meta.json", "stage_a.json", "extraction.json", "findings.json",
                    "report.json", "report.md", "sap_compare.json"]))
 
@@ -108,9 +111,54 @@ def training_page(request: Request):
     history = eval_history()
     headline = ["doc_type_accuracy", "verdict_accuracy", "json_valid_first_try", "leakage_count"]
     series = {m: [h["metrics"].get(m) for h in history if h.get("metrics")] for m in headline}
+
+    # structured last-eval results: failures with links, diff, field metrics
+    last_results: dict = {}
+    p = config.EVAL_DIR / "last_results.json"
+    if p.exists():
+        try:
+            last_results = json.loads(p.read_text())
+        except Exception:
+            last_results = {}
+    failures = [r for r in last_results.get("rows", [])
+                if isinstance(r, dict) and ("error" in r or not r.get("ok", True))]
+    diff = last_results.get("diff", {})
+    cur = history[-1]["metrics"] if history else {}
+    prev = history[-2]["metrics"] if len(history) > 1 else {}
+    field_rows = [(k, v, (prev.get("fields") or {}).get(k))
+                  for k, v in sorted((cur.get("fields") or {}).items())]
+
+    # recommendations: the page should say what to do next, not just show numbers
+    recs: list = []
+    if cur:
+        if cur.get("leakage_count"):
+            recs.append(("bad", f"LEAKAGE {cur['leakage_count']} — fix before anything else"))
+        if cur.get("invoice_false_accept_rate"):
+            recs.append(("bad", "invoice false-accept > 0 — must be zero; review the invoice rules"))
+        if diff.get("regressed"):
+            recs.append(("bad", f"{len(diff['regressed'])} doc(s) regressed vs previous eval — "
+                                "review them before adopting the model"))
+        if failures:
+            recs.append(("warn", f"{len(failures)} doc(s) not fully correct — label the ones "
+                                 "below, they teach the most"))
+        if len(labs) < 100:
+            recs.append(("info", f"LoRA still gated: {len(labs)}/100 labels"))
+        if not recs:
+            recs.append(("ok", "clean eval — safe to adopt the current model/prompts"))
+    try:
+        current_model = mc.resolve("TEXT")
+        strong_model = mc.resolve("TEXT_STRONG")
+    except Exception:
+        current_model, strong_model = "?", "?"
+
     return templates.TemplateResponse(request, "training.html", _ctx(
         page="training", by_class=by_class, history=history,
-        series_json=json.dumps(series), lora_gate=100))
+        series_json=json.dumps(series), lora_gate=100,
+        failures=failures, diff=diff, field_rows=field_rows, recs=recs,
+        last_tag=last_results.get("tag", ""), last_ts=last_results.get("ts", ""),
+        current_model=current_model, strong_model=strong_model,
+        running_jobs=[j.to_dict() for j in jobs.REGISTRY.list()
+                      if j.status in ("queued", "running")]))
 
 
 @router_ui.get("/ui/debug", response_class=HTMLResponse)

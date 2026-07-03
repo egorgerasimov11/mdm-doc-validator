@@ -19,6 +19,7 @@
     <select id="lang" style="width:auto">
       <option value="en">en</option><option value="ru">ru</option>
     </select>
+    <label class="meta"><input type="checkbox" id="quality"> thorough (strong model, slower)</label>
   </div>
   <div class="drop" id="drop">Drop a PDF or image here — or click to choose a file</div>
   <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" hidden>
@@ -30,12 +31,36 @@
   <pre id="job-log" hidden></pre>
 </section>
 
+{% if active_jobs %}
+<section>
+  <h2>Background jobs</h2>
+  <ul class="timeline">
+    {% for j in active_jobs %}
+    <li><span class="dot dot--WARNING"></span>
+        <span class="meta">{{ j.kind }}</span>
+        <span class="grow"><code>{{ j.id }}</code> — {{ j.status }}{% if j.progress %} · {{ j.progress[-1] }}{% endif %}</span>
+        <a class="meta" href="/ui/debug">log →</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 <section>
   <h2>Recent runs</h2>
+  <div class="actions" id="run-filters">
+    <span class="seg">
+      <button type="button" class="active" data-f="all">all</button>
+      <button type="button" data-f="bank">bank</button>
+      <button type="button" data-f="w9">w9</button>
+      <button type="button" data-f="review">needs review</button>
+      <button type="button" data-f="unlabeled">unlabeled</button>
+    </span>
+  </div>
   {% if runs %}
-  <ul class="timeline">
+  <ul class="timeline" id="runs-list">
     {% for r in runs %}
-    <li>
+    <li data-class="{{ r.doc_class }}" data-verdict="{{ r.verdict }}"
+        data-labeled="{{ '1' if r.labeled else '0' }}">
       <span class="dot dot--{{ r.verdict }}"></span>
       <span class="meta">{{ r.doc_type }}</span>
       <a class="grow" href="/ui/runs/{{ r.run_id }}">{{ r.file }}</a>

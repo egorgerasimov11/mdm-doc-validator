@@ -22,8 +22,14 @@ def test_crosscheck_fills_and_flags():
 def test_find_boxed_tin():
     from mdmdoc.fields import find_boxed_tin
     text = "Form W-9 boilerplate\nAmerican Epilepsy Society\n3\n6\n1\n2\n3\n4\n5\n6\n7\n06/09/2026\n"
-    assert find_boxed_tin(text) == "361234567"
-    assert find_boxed_tin("only\n3\n6\ndigits\n") == ""
+    assert find_boxed_tin(text) == ("361234567", "")
+    assert find_boxed_tin("only\n3\n6\ndigits\n") == ("", "")
+    # dash line inside the run + preceding EIN label settles the type
+    ein_text = ("Employer identification number\nNote: some instructions here\n"
+                "8\n1\n–\n0\n8\n2\n6\n7\n3\n4\n Part II\n")
+    assert find_boxed_tin(ein_text) == ("810826734", "EIN")
+    ssn_text = "Social security number\n3\n2\n0\n5\n4\n0\n6\n9\n3\nor\n"
+    assert find_boxed_tin(ssn_text) == ("320540693", "SSN")
 
 
 def test_scrub_masks_boxed_tin_lines():

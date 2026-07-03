@@ -4,10 +4,29 @@ The documents this tool reads carry exactly the data that must not leak: bank
 account numbers, IBANs, routing numbers, SSN/EIN tax identifiers. The design
 treats privacy as an *invariant enforced by code*, not a policy hope.
 
+## The two-policy model (updated)
+
+There are two orthogonal levels, chosen deliberately after operator feedback:
+
+- **TIN/SSN/EIN — masked under EVERY policy, everywhere.** The display choke
+  point (`privacy.display_value`) masks TIN kinds *before* consulting any
+  configuration; no env var can reveal a tax number.
+- **Banking identifiers (account number, routing/ABA, IBAN)** follow the
+  *display policy* `MDMDOC_BANK_VALUES`: `full` (default in the operator
+  console — the operator must be able to verify digits against the form) or
+  `masked` (default in the api-only/BTP image). Under `full`, run artifacts and
+  the UI show complete banking values; the leak gate for those artifacts runs
+  in `tin-only` mode (TIN patterns + known TIN secrets still blocked).
+- **Training data is ALWAYS strict** — `dataset/labels.jsonl`,
+  `prompts/fewshot/`, `dataset/mlx-lora/` never carry full values regardless of
+  policy: the label builder re-masks anything copied from full-policy run
+  artifacts, and their gates fail closed.
+
 ## Invariants
 
-1. **Full sensitive values live only in process memory.** They are never
-   written to disk, logged, or returned in any persisted artifact.
+1. **Full TIN values live only in process memory.** Banking values persist into
+   local run artifacts only under the operator's explicit `full` display policy;
+   they never enter training data or the BTP image defaults.
 2. **Every persisted byte passes a leak gate.** `runstore.write()` (all run
    artifacts) and `dataset.append_label()` (training data) call
    `privacy.assert_no_leak()`, which scans for known full values *and* generic

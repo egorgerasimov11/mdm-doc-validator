@@ -70,6 +70,8 @@ window.mdmdoc = (() => {
       fd.append("doc_class", docClass());
       fd.append("lang", document.getElementById("lang").value);
       fd.append("wait", "false");
+      const q = document.getElementById("quality");
+      if (q && q.checked) fd.append("quality", "true");
       if (sapFile && docClass() === "bank") fd.append("sap_file", sapFile);
       try {
         const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
@@ -303,6 +305,39 @@ window.mdmdoc = (() => {
     return svg;
   }
 
+  /* ---------- dashboard: run filters -------------------------------------- */
+  function initRunFilters() {
+    const seg = document.querySelector("#run-filters .seg");
+    const list = document.getElementById("runs-list");
+    if (!seg || !list) return;
+    seg.querySelectorAll("button").forEach(b => b.onclick = () => {
+      seg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      const f = b.dataset.f;
+      list.querySelectorAll("li").forEach(li => {
+        let show = true;
+        if (f === "bank" || f === "w9") show = li.dataset.class === f;
+        else if (f === "review") show = ["NEED_MANUAL_REVIEW", "WARNING"].includes(li.dataset.verdict);
+        else if (f === "unlabeled") show = li.dataset.labeled === "0";
+        li.style.display = show ? "" : "none";
+      });
+    });
+  }
+
+  /* ---------- run page: copy report ---------------------------------------- */
+  function initCopyReport() {
+    const btn = document.getElementById("btn-copy");
+    if (!btn) return;
+    btn.onclick = async () => {
+      try {
+        const md = await api(`/api/v1/runs/${btn.dataset.run}/artifacts/report.md`);
+        await navigator.clipboard.writeText(typeof md === "string" ? md : JSON.stringify(md));
+        btn.textContent = "Copied ✓";
+        setTimeout(() => btn.textContent = "Copy report", 1500);
+      } catch (e) { btn.textContent = "copy failed"; }
+    };
+  }
+
   /* ---------- header host chip ------------------------------------------- */
   async function refreshChip() {
     const chip = document.getElementById("host-chip");
@@ -316,6 +351,9 @@ window.mdmdoc = (() => {
   }
   refreshChip();
   setInterval(refreshChip, 60000);
+
+  initRunFilters();
+  initCopyReport();
 
   return { api, pollJob, initDropZone, initArtifacts, initReview, initTraining,
            initSapCompare, initRetrainWatch };

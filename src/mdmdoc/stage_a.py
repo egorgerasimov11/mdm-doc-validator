@@ -19,6 +19,7 @@ The vision model only TRANSCRIBES here; structured extraction is Stage B's job
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,6 +43,38 @@ VISION_TARGETED_PROMPT = (
     "routing/ABA/sort code, currency. Transcribe each one exactly, with its label. "
     "If a detail is truly absent, say ABSENT."
 )
+SIGNATURE_PROMPT = (
+    "Inspect this document page for a HANDWRITTEN signature (ink strokes) or an ink "
+    "stamp/seal. IMPORTANT: a typed or printed name, title or contact block is NOT a "
+    "handwritten signature. Return strict JSON: "
+    '{"handwritten_signature": true/false, "stamp": true/false, '
+    '"date_near_signature": "<handwritten/printed date next to the signature, or empty>", '
+    '"evidence": "<short phrase describing what you see in the signature area>"}'
+)
+
+# --- W-9 zone probes: the checkbox row and the TIN boxes are tiny targets that a
+# whole-page vision read keeps missing (real cases: Individual guessed instead of
+# a checked S corporation; boxed EIN digits skipped). Cropping the standard-form
+# zones and asking pointed questions fixes the perception, not the mapping.
+# Relative coordinates of the IRS W-9 (Rev. 2018-2024) layout:
+W9_CLASS_ZONE = (0.03, 0.16, 0.82, 0.34)   # x0, y0, x1, y1 fractions
+W9_TIN_ZONE = (0.52, 0.40, 1.00, 0.60)
+W9_CLASS_PROMPT = (
+    "This is the 'federal tax classification' section of IRS Form W-9 with seven "
+    "checkboxes: Individual/sole proprietor, C corporation, S corporation, Partnership, "
+    "Trust/estate, LLC, Other. Look CAREFULLY at each small square: exactly one should "
+    "contain a checkmark, X or filled mark. Return strict JSON: "
+    '{"checked": "<the label of the CHECKED box, or none>", '
+    '"llc_code": "<C, S or P if written on the LLC line, else empty>", '
+    '"evidence": "<what the mark looks like>"}'
+)
+W9_TIN_PROMPT = (
+    "This crop shows Part I of IRS Form W-9: the 'Social security number' boxes and "
+    "the 'Employer identification number' boxes. Exactly one group is usually filled "
+    "with 9 digits. Read the digits box by box. Return strict JSON: "
+    '{"tin_type": "SSN or EIN or none", "digits": "<the 9 digits in order, no separators>", '
+    '"evidence": "<which boxes are filled>"}'
+)
 
 
 @dataclass
@@ -58,6 +91,8 @@ class RawDoc:
     rotations: dict = field(default_factory=dict)    # page index -> degrees applied
     bank_letter_pages: list = field(default_factory=list)  # 0-based, packet evidence
     invoice_pages: list = field(default_factory=list)
+    signature_probe: dict = field(default_factory=dict)    # vision verdict on signature
+    w9_probe: dict = field(default_factory=dict)           # zone probes: checkbox + TIN box
     raw_text: str = ""                  # FULL text — in-memory only, scrubbed on persist
     tesseract_text: str = ""
     vision_text: str = ""
@@ -275,6 +310,110 @@ def _collect_markers(raw: RawDoc, indexed_texts: list, doc_class: str) -> None:
             raw.invoice_pages.append(i)
 
 
+_SIG_HINTS = re.compile(r"(?i)sincerely|signature of|sign here|authorized signature|"
+                        r"certification|firma|assinatura|unterschrift|подпись")
+
+
+def _signature_page(path: Path, raw: RawDoc) -> int:
+    """Which page most likely holds the signature. W-9: the certification page
+    (usually 1). Letters: the last page mentioning a signature phrase."""
+    try:
+        doc = fitz.open(path)
+        pages = list(range(min(doc.page_count, SCAN_PAGE_CAP)))
+        hits = [i for i in pages if _SIG_HINTS.search(doc[i].get_text() or "")]
+        doc.close()
+        if hits:
+            return hits[0] if raw.doc_class == "w9" else hits[-1]
+    except Exception:
+        pass
+    if raw.pages_used:
+        return raw.pages_used[0] if raw.doc_class == "w9" else raw.pages_used[-1]
+    return 0
+
+
+def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
+    """Vision check for a real (wet) signature/stamp. Signatures are image
+    overlays — invisible to the text layer — so this runs for text-layer PDFs
+    too. Called while VISION is still resident (no extra model swap)."""
+    try:
+        if path.suffix.lower() == ".pdf":
+            doc = fitz.open(path)
+            idx = _signature_page(path, raw)
+            png = _render_page(doc, idx, render_dir, config.VISION_DPI,
+                               raw.rotations.get(idx, 0), False, "sig")
+            doc.close()
+        else:
+            png = raw.images[0] if raw.images else None
+        if not png:
+            return
+        obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [png])
+        if isinstance(obj, dict):
+            raw.signature_probe = {
+                "handwritten_signature": bool(obj.get("handwritten_signature")),
+                "stamp": bool(obj.get("stamp")),
+                "evidence": str(obj.get("evidence") or "")[:200],
+            }
+    except Exception as e:  # noqa: BLE001 — probe is best-effort
+        raw.warnings.append(f"signature probe failed ({e.__class__.__name__})")
+
+
+def _render_zone(path: Path, page_idx: int, zone: tuple, render_dir: Path,
+                 tag: str, rotation: int = 0) -> str | None:
+    """Render one page and crop a relative-coordinate zone, upscaled for the
+    vision model (small crops read far better than full pages)."""
+    try:
+        doc = fitz.open(path)
+        if page_idx >= doc.page_count:
+            page_idx = 0
+        pix = doc[page_idx].get_pixmap(dpi=220)
+        doc.close()
+        p = render_dir / f"{tag}.png"
+        pix.save(p)
+        im = Image.open(p)
+        if rotation:
+            im = im.rotate(-rotation, expand=True)
+        w, h = im.size
+        x0, y0, x1, y1 = zone
+        im = im.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1)))
+        if max(im.size) < 1100:
+            f = 1100 / max(im.size)
+            im = im.resize((int(im.width * f), int(im.height * f)), Image.LANCZOS)
+        im.convert("RGB").save(p)
+        return str(p)
+    except Exception:
+        return None
+
+
+def w9_zone_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
+    """Targeted vision reads of the W-9 checkbox row and TIN boxes. Runs while
+    VISION is resident. Digits stay in memory (registered later as secrets)."""
+    if path.suffix.lower() not in (".pdf", *config.IMAGE_EXTS):
+        return
+    page = raw.pages_used[0] if raw.pages_used else 0
+    rot = raw.rotations.get(page, 0)
+    probe: dict = {}
+    crop = _render_zone(path, page, W9_CLASS_ZONE, render_dir, "z_class", rot) \
+        if path.suffix.lower() == ".pdf" else None
+    if crop:
+        obj, _ = mc.generate_json_vision(W9_CLASS_PROMPT, [crop])
+        if isinstance(obj, dict) and str(obj.get("checked") or "").strip().lower() not in ("", "none"):
+            probe["classification"] = str(obj["checked"]).strip()
+            probe["llc_code"] = str(obj.get("llc_code") or "").strip()
+            probe["class_evidence"] = str(obj.get("evidence") or "")[:160]
+    crop = _render_zone(path, page, W9_TIN_ZONE, render_dir, "z_tin", rot) \
+        if path.suffix.lower() == ".pdf" else None
+    if crop:
+        obj, _ = mc.generate_json_vision(W9_TIN_PROMPT, [crop])
+        if isinstance(obj, dict):
+            digits = re.sub(r"\D", "", str(obj.get("digits") or ""))
+            ttype = str(obj.get("tin_type") or "").upper()
+            if len(digits) == 9 and ttype in ("SSN", "EIN"):
+                probe["tin_type"] = ttype
+                probe["tin_digits"] = digits          # FULL — memory only
+                probe["tin_evidence"] = str(obj.get("evidence") or "")[:160]
+    raw.w9_probe = probe
+
+
 def _merged(raw: RawDoc) -> str:
     return "\n".join(x for x in (raw.raw_text, raw.tesseract_text, raw.vision_text) if x)
 
@@ -350,34 +489,51 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             raw.vision_text = (raw.vision_text + "\n\n[targeted search]\n" + vt2).strip()
             raw.regex_candidates = ocr.regex_fields(_merged(raw))
             raw.warnings.append("targeted vision pass used (no IDs found on first read)")
-    if use_vision and raw.images:
+    # signature probe — ALWAYS for bank/w9 (quality first), even for text-layer
+    # PDFs (a wet signature is pixels, not text). Skipped for hard-reject types.
+    if (use_vision and not raw.editable and not raw.locked
+            and ext not in config.EMAIL_EXTS and raw.type_hint != "invoice"):
+        signature_probe(path, raw, render_dir)
+        # W-9 zone probes: checkbox + TIN boxes (tiny targets whole-page vision
+        # keeps missing) — while VISION is still resident
+        if doc_class == "w9":
+            w9_zone_probe(path, raw, render_dir)
+    if use_vision:
         mc.unload("VISION")
 
     if doc_class == "w9" and "ein" not in raw.regex_candidates:
-        boxed = fields.find_boxed_tin(_merged(raw))
+        boxed, boxed_type = fields.find_boxed_tin(_merged(raw))
         if boxed:
             raw.regex_candidates["tin_boxed"] = boxed
+            if boxed_type:
+                raw.regex_candidates["tin_boxed_type"] = boxed_type
     raw.type_hint = fields.type_hint(path.name, raw.raw_text, ext, doc_class)
     return raw
 
 
-def to_public(raw: RawDoc, vault) -> dict:
-    """Persistable (scrubbed) view of Stage A output."""
-    from .privacy import FIELD_KIND, mask, scrub_text
+def to_public(raw: RawDoc, vault, policy: str = "masked") -> dict:
+    """Persistable view of Stage A output. policy='full' shows banking values in
+    full; TIN kinds (ein/tin_boxed/ssn) stay masked under every policy."""
+    from .privacy import FIELD_KIND, display_value, scrub_text
     cand = {}
     for k, v in raw.regex_candidates.items():
         if k == "ssn_masked":
             cand[k] = v  # already masked at capture
+        elif k in ("iban", "account_number", "routing_aba", "routing_aba_wires",
+                   "ein", "tin_boxed"):
+            cand[k] = display_value(FIELD_KIND.get(k, "account_number"), v, policy)
         else:
-            cand[k] = mask(FIELD_KIND.get(k, "account_number"), v) if k in (
-                "iban", "account_number", "routing_aba", "ein", "tin_boxed") else v
+            cand[k] = v
+    scrub_policy = "tin-only" if policy == "full" else "strict"
     return {
         "path": raw.path, "sha256": raw.sha256, "ext": raw.ext, "doc_class": raw.doc_class,
         "has_text_layer": raw.has_text_layer, "locked": raw.locked, "editable": raw.editable,
         "pages": raw.pages, "pages_used": raw.pages_used, "rotations": raw.rotations,
         "bank_letter_pages": raw.bank_letter_pages, "invoice_pages": raw.invoice_pages,
         "type_hint": raw.type_hint, "warnings": raw.warnings,
-        "raw_text_excerpt": scrub_text(raw.raw_text[:config.EXCERPT_LIMIT], vault),
+        "raw_text_excerpt": scrub_text(raw.raw_text[:config.EXCERPT_LIMIT], vault,
+                                       policy=scrub_policy),
         "tesseract_chars": len(raw.tesseract_text), "vision_chars": len(raw.vision_text),
         "regex_candidates_masked": cand,
+        "w9_probe": {k: v for k, v in raw.w9_probe.items() if k != "tin_digits"} or None,
     }

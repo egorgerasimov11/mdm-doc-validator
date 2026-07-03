@@ -66,10 +66,20 @@ rules:
   - id: BNK-021
     name: missing_signature_bank_letter
     applies_to: [bank_letter]
-    when: {flag_false: signed}
+    when: {check: unsigned_no_evidence}
     severity: WARNING
     verdict_effect: WARNING
-    message: "Bank letter appears unsigned/unstamped."
+    message: "Bank letter appears unsigned/unstamped (no officer block either)."
+    message_ru: "Банковское письмо без подписи/печати (и без блока офицера)."
+
+  - id: BNK-026
+    name: typed_officer_block_instead_of_signature
+    applies_to: [bank_letter]
+    when: {check: unsigned_typed_block}
+    severity: NOTE
+    verdict_effect: null
+    message: "No wet signature/stamp; a typed bank-officer block is present ({detail}) — common for US bank confirmation letters; note for the Data Owner."
+    message_ru: "Живой подписи/печати нет; есть typed-блок офицера банка ({detail}) — типично для американских bank confirmation писем; заметка для Data Owner."
 
   - id: BNK-022
     name: partial_screenshot

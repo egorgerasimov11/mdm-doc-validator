@@ -57,7 +57,11 @@ def _evidence(pub: dict) -> list[str]:
 
 def _fmt(v, empty="—") -> str:
     if isinstance(v, dict):
-        return v.get("masked") or empty if v.get("present") else empty
+        if not v.get("present"):
+            return empty
+        # 'value' present only under the full display policy (banking kinds);
+        # TIN dicts never carry it — they fall back to the mask
+        return v.get("value") or v.get("masked") or empty
     if isinstance(v, bool):
         return "yes" if v else "no"
     return str(v).strip() or empty
@@ -70,18 +74,23 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str]]:
         iban = f.get("iban")
         iban_extra = (f" (country {iban['country']}, len {iban['length']})"
                       if isinstance(iban, dict) and iban.get("present") and iban.get("country") else "")
+        signed = "yes" if f.get("signed") else "no"
+        if not f.get("signed") and f.get("signature_evidence"):
+            signed = f"no ({f['signature_evidence']})"
         return [
             ("Account holder", _fmt(f.get("account_holder")), ""),
+            ("Account type", _fmt(f.get("account_type")), ""),
             ("Bank name", _fmt(f.get("bank_name")), ""),
             ("Bank country", _fmt(f.get("bank_country")), ""),
             ("Bank address", _fmt(f.get("bank_address")), ""),
             ("IBAN", _fmt(iban) + iban_extra, ""),
             ("SWIFT/BIC", _fmt(f.get("swift_bic")), ""),
             ("Account number", _fmt(f.get("account_number")), ""),
-            ("Routing/ABA", _fmt(f.get("routing_aba")), ""),
+            ("Routing/ABA (standard)", _fmt(f.get("routing_aba")), ""),
+            ("Routing/ABA (wires)", _fmt(f.get("routing_aba_wires")), ""),
             ("Currency", _fmt(f.get("currency")), ""),
-            ("Document date", _fmt(f.get("doc_date")), ""),
-            ("Signed/stamped", _fmt(f.get("signed", False)), ""),
+            ("Document date", _fmt(f.get("doc_date"), empty="no visible document date"), ""),
+            ("Signed/stamped", signed, ""),
         ]
     tin = f.get("tin", {}) if isinstance(f.get("tin"), dict) else {}
     tin_target = ("Tax Number 1" if tin.get("type") == "SSN"

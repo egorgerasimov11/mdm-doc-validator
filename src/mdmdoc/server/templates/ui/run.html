@@ -15,11 +15,14 @@
   {% endif %}
 </div>
 <p style="margin:0 0 4px">{{ report.next_step }}</p>
-<p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }} ·
+<p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }}{% if pub.tier == 'strong' %} · <span class="tag" title="escalated: {{ pub.escalated_because | join(', ') }}">strong tier</span>{% endif %} ·
   {{ meta.duration_s }}s · {{ meta.ts }}{% if labeled %} · <span class="tag">labeled ✓</span>{% endif %}</p>
 
 <div class="actions">
   <a class="btn" href="/ui/runs/{{ run_id }}/review"><strong>Correct</strong> — teach the model</a>
+  <button type="button" id="btn-copy" data-run="{{ run_id }}">Copy report</button>
+  <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.md" download="{{ meta.file_name }}.report.md">Export .md</a>
+  <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.json" download="{{ meta.file_name }}.report.json">Export .json</a>
   {% if doc_class == 'bank' %}
   <button type="button" id="btn-sap">Compare with SAP…</button>
   <input type="file" id="sap-input" accept=".png,.jpg,.jpeg,.pdf" hidden>
@@ -27,6 +30,33 @@
   {% endif %}
 </div>
 <pre id="job-log" hidden></pre>
+
+{% if label %}
+<section>
+  <h2>Learning trace <span class="meta">(before → corrected → after)</span></h2>
+  <table>
+    <tr><th></th><th>doc_type</th><th>verdict</th><th>corrected fields</th></tr>
+    <tr>
+      <td class="meta">machine before</td>
+      <td>{{ pub.operator_precedent.model_doc_type if pub.operator_precedent else label.model_predicted.doc_type }}</td>
+      <td>{{ pub.operator_precedent.model_verdict if pub.operator_precedent else '—' }}</td>
+      <td class="meta">{{ label.model_predicted.fields_diff.keys() | join(', ') or '—' }}</td>
+    </tr>
+    <tr>
+      <td class="meta">operator correction</td>
+      <td>{{ label.doc_type_gold }}</td>
+      <td>{{ label.verdict_gold }}</td>
+      <td class="meta">{{ label.notes or '—' }}</td>
+    </tr>
+    <tr>
+      <td class="meta">machine now</td>
+      <td>{{ report.doc_type }}</td>
+      <td class="{{ 'bad' if report.verdict != label.verdict_gold }}">{{ report.verdict }}</td>
+      <td class="meta">{{ 'matches the correction ✓' if report.verdict == label.verdict_gold and report.doc_type == label.doc_type_gold else 'still differs — the label alone did not fix it; check Stage A/rules' }}</td>
+    </tr>
+  </table>
+</section>
+{% endif %}
 
 {% if preview_pages %}
 <section>

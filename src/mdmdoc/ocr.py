@@ -148,14 +148,38 @@ def regex_fields(text: str) -> dict:
     m = EIN_RE.search(t)
     if m:
         out["ein"] = m.group(1)
+    else:
+        # scanned W-9 boxes flatten to separated digits near the EIN label:
+        # "Employer identification number ... 8 1 – 0 8 2 6 7 3 4"
+        m = re.search(r"(?is)employer\s+identification\s+number.{0,120}?"
+                      r"((?:\d[ \t]*[\-–—]?[ \t]*){8}\d)", t)
+        if m:
+            digits = re.sub(r"\D", "", m.group(1))
+            if len(digits) == 9:
+                out["ein"] = digits[:2] + "-" + digits[2:]
     m = SSN_RE.search(t)
     if m:                                  # mask immediately — never store full SSN
         s = m.group(1)
         out["ssn_masked"] = "***-**-" + s[-4:]
-    # routing/ABA: 9 digits near the keyword (US)
-    m = re.search(r"(?i)(?:routing|aba|aba\s*#|rtn)[^0-9]{0,12}(\d{9})\b", t)
-    if m:
-        out["routing_aba"] = m.group(1)
+    # routing/ABA: 9 digits near a routing keyword. US bank letters often carry
+    # TWO values (standard/ACH vs domestic wires) under labels like
+    # "Bank ABA (standard):" — wide label->digits window, ALL matches kept,
+    # qualifier words route them into separate fields.
+    seen: list = []
+    for rm in re.finditer(r"(?i)((?:bank\s+)?(?:routing|aba|ach|rtn|wire[s]?)"
+                          r"(?:[ /]*(?:aba|routing|number|no\.?|#))?"
+                          r"[^0-9]{0,28})(\d{9})\b", t):
+        label, val = rm.group(1).lower(), rm.group(2)
+        if val in seen:
+            continue
+        seen.append(val)
+        if any(w in label for w in ("wire", "domestic")):
+            out.setdefault("routing_aba_wires", val)
+        else:
+            out.setdefault("routing_aba", val)
+    # a wires-qualified value with no standard one: keep field semantics honest
+    if "routing_aba" not in out and "routing_aba_wires" in out and len(seen) == 1:
+        pass  # single wires ABA stays in routing_aba_wires only
     # account number: digits near an 'account' keyword in EN/ES/DE/FR/PT/RU/CJK
     for am in re.finditer(r"(?i)(?:acc(?:oun)?t|cuenta|cta\.?|konto(?:nummer)?|kto\.?|"
                           r"compte|conta|сч[её]т|계좌|口座|账[户戶号號]|帐[户戶号號])"

@@ -21,6 +21,27 @@ INBOX_DIR = PROJECT_ROOT / "inbox"      # uploaded documents (raw, gitignored)
 
 SERVER_DEFAULT_PORT = 8766   # 8765 is Anki's local port on this Mac
 
+# duration estimates shown to the user (seconds); refined by rolling means of
+# past runs with the same shape (see estimate.py)
+TIME_BASE_S = {"text_layer": 20, "scan": 90}
+TIME_MODIFIERS_S = {"strong": 60, "signature": 30, "sap": 30}
+
+
+def bank_values_policy() -> str:
+    """'full' | 'masked' — how BANKING identifiers (account/routing/IBAN) appear
+    in run artifacts and the UI. TIN/SSN/EIN is masked under EVERY policy.
+    Explicit MDMDOC_BANK_VALUES wins; else operator console -> full, BTP -> masked."""
+    v = os.environ.get("MDMDOC_BANK_VALUES", "").strip().lower()
+    if v in ("full", "masked"):
+        return v
+    return "masked" if os.environ.get("MDMDOC_MODE", "full") == "api-only" else "full"
+
+
+def gate_policy() -> str:
+    """Leak-gate mode for run artifacts: 'tin-only' when banking values are shown
+    in full, 'strict' otherwise. Training data is ALWAYS gated strict."""
+    return "tin-only" if bank_values_policy() == "full" else "strict"
+
 # Stage B input budget: OCR text is truncated to this many chars before the model sees it.
 STAGE_B_TEXT_LIMIT = 8000
 # Excerpt stored in labels / used for few-shot and LoRA examples.

@@ -49,9 +49,15 @@ def _cmd_check(args, doc_class: str) -> int:
         if not sap_image.exists():
             print(f"SAP screenshot not found: {sap_image}", file=sys.stderr)
             return config.EXIT_UNREADABLE
+    from .estimate import estimate_seconds, human, sniff_text_layer
+    est = estimate_seconds(doc_class, sniff_text_layer(Path(path)),
+                           use_vision=not args.no_vision,
+                           sap=sap_image is not None, quality=args.quality)
+    print(f"expected duration: {human(est)}", file=sys.stderr)
     try:
         res = run_check(Path(path), doc_class, use_vision=not args.no_vision,
-                        keep_renders=args.keep_renders, lang=args.lang, sap_image=sap_image)
+                        keep_renders=args.keep_renders, lang=args.lang,
+                        sap_image=sap_image, quality=args.quality)
     except FileNotFoundError as e:
         print(f"file not found: {e}", file=sys.stderr)
         return config.EXIT_UNREADABLE
@@ -211,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--no-vision", action="store_true", help="skip the vision model (tesseract only)")
         p.add_argument("--keep-renders", action="store_true",
                        help="keep page renders (SENSITIVE: pixels contain full account data)")
+        p.add_argument("--quality", action="store_true",
+                       help="force the strong model tier (slower, thorough)")
         if doc_class == "bank":
             p.add_argument("--sap", help="screenshot of the SAP Bank Details screen — "
                                          "compares document vs SAP char-by-char")

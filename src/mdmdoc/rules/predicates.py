@@ -82,13 +82,34 @@ def individual_with_business_name_and_ein(value, flds, args, tables):
     return False, ""
 
 
+_PERSON_NAME_RE = re.compile(r"^[A-Z][a-z]+(?:\s+[A-Z]\.?)?(?:\s+[A-Z][a-z]+){1,2}$")
+
+
+def _looks_like_person(name: str) -> bool:
+    """Strict person-name shape (First [M.] Last). 'Culligan of Denver' is a
+    trade name, NOT a person — a bare 'no business suffix' test was too eager."""
+    n = (name or "").strip()
+    if not n or any(ch.isdigit() for ch in n):
+        return False
+    low = f" {n.lower()} "
+    if any(w in low for w in (" of ", " the ", " and ", " & ", " for ")):
+        return False
+    from .. import fields as _f
+    if _f.looks_like_business(n):
+        return False
+    return bool(_PERSON_NAME_RE.match(n))
+
+
 def line_swap_suspect(value, flds, args, tables):
+    """Line 1 = legal taxpayer, Line 2 = business/DBA is the NORMAL W-9
+    structure — never flag it. Only flag an empty Line 1 with a filled Line 2,
+    or an Individual whose Line 1 is a business while Line 2 is a person name."""
     l1 = str(flds.get("line1_name") or "").strip()
     l2 = str(flds.get("line2_business_name") or "").strip()
     if not l1 and l2:
         return True, "Line 1 empty while Line 2 present — lines likely swapped/collapsed"
     cls = norm_classification(str(flds.get("line3_classification") or ""))
-    if cls == "individual_sole_prop" and looks_like_business(l1) and l2 and not looks_like_business(l2):
+    if cls == "individual_sole_prop" and looks_like_business(l1) and _looks_like_person(l2):
         return True, "Line 1 looks like a business while Line 2 looks like a person (Individual classification)"
     return False, ""
 
@@ -141,6 +162,28 @@ def date_older_than(value, flds, args, tables):
     return False, ""
 
 
+def unsigned_no_evidence(value, flds, args, tables):
+    """Unsigned AND nothing standing in for a signature — a bare letter."""
+    signed = flds.get("signed")
+    signed = signed if isinstance(signed, bool) else str(signed).lower() in ("true", "yes")
+    if signed:
+        return False, ""
+    if str(flds.get("signature_evidence") or "").strip():
+        return False, ""
+    return True, "no signature, stamp or officer block visible"
+
+
+def unsigned_typed_block(value, flds, args, tables):
+    """No wet signature, but a typed bank-officer block is present — common for
+    US bank confirmation e-letters; a note, not a blocker."""
+    signed = flds.get("signed")
+    signed = signed if isinstance(signed, bool) else str(signed).lower() in ("true", "yes")
+    ev = str(flds.get("signature_evidence") or "").strip()
+    if not signed and ev:
+        return True, ev
+    return False, ""
+
+
 def no_bank_ids(value, flds, args, tables):
     for k in ("iban", "account_number", "routing_aba"):
         if str(flds.get(k) or "").strip():
@@ -149,6 +192,8 @@ def no_bank_ids(value, flds, args, tables):
 
 
 REGISTRY = {
+    "unsigned_no_evidence": unsigned_no_evidence,
+    "unsigned_typed_block": unsigned_typed_block,
     "no_bank_ids": no_bank_ids,
     "swift_valid": swift_valid,
     "iban_valid": iban_valid,

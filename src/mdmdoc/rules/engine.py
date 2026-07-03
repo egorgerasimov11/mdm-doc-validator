@@ -93,7 +93,7 @@ def _eval_when(when: dict, ext: Extraction, tables: dict) -> tuple[bool, str, st
     raise KeyError(f"unrecognized when clause: {list(when.keys())}")
 
 
-def run_rules(ext: Extraction, lang: str = "en") -> list[Finding]:
+def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked") -> list[Finding]:
     cfg = load_rules(ext.doc_class)
     tables = cfg.get("tables", {}) or {}
     findings: list[Finding] = []
@@ -108,7 +108,8 @@ def run_rules(ext: Extraction, lang: str = "en") -> list[Finding]:
                 continue
             raw_value = str(ext.fields.get(fname, "") or "") if fname else ""
             kind = FIELD_KIND.get(fname)
-            value_masked = mask(kind, raw_value) if kind and raw_value else raw_value
+            from ..privacy import display_value
+            value_masked = display_value(kind, raw_value, policy) if kind and raw_value else raw_value
             msg_key = "message_ru" if lang == "ru" and rule.get("message_ru") else "message"
             msg = str(rule.get(msg_key, rule.get("message", ""))).format(
                 value=value_masked if kind else raw_value, value_masked=value_masked, detail=detail)
