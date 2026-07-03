@@ -160,14 +160,47 @@ def _normalize_tin(ext: Extraction) -> None:
         ext.fields["tin_raw"] = ""
 
 
+def _exemplar_values(doc_class: str) -> set:
+    """All string values that appear in few-shot exemplar OUTPUTS. These are
+    shape-preserving fakes / example data — a real document can never
+    legitimately contain them; if the model outputs one, it echoed the exemplar."""
+    vals: set = set()
+    for ex in _load_fewshot(doc_class):
+        out = ex.get("output", {})
+        for v in (out.get("fields") or {}).values():
+            s = str(v or "").strip()
+            if len(s) >= 4 and not isinstance(v, bool):
+                vals.add(s.casefold())
+    return vals
+
+
+def _drop_exemplar_echo(ext: Extraction, raw: RawDoc) -> None:
+    """Real case: a W-8 came back with 'ACME' and an exemplar's fake EIN —
+    the model copied the few-shot example instead of reading the document.
+    Any extracted value that equals an exemplar value AND does not occur in
+    the document text is an echo — drop it."""
+    exemplar_vals = _exemplar_values(ext.doc_class)
+    if not exemplar_vals:
+        return
+    doc_text = raw.raw_text.casefold()
+    for k, v in list(ext.fields.items()):
+        if isinstance(v, bool):
+            continue
+        s = str(v or "").strip()
+        if s and s.casefold() in exemplar_vals and s.casefold() not in doc_text:
+            ext.fields[k] = ""
+            ext.warnings.append(f"{k}: dropped few-shot exemplar echo (value was "
+                                "copied from an example, not read from the document)")
+
+
 def _apply_w9_zone_probe(ext: Extraction, raw: RawDoc) -> None:
     """Zone-crop vision evidence SETTLES the checkbox classification and the TIN:
     a checked box and box digits are visual facts — a text-transcription guess
     must never override them (real case: 'Individual' guessed while S corporation
     was checked; boxed EIN skipped entirely)."""
     probe = raw.w9_probe
-    if not probe or ext.doc_class != "w9":
-        return
+    if not probe or ext.doc_class != "w9" or ext.doc_type != "w9":
+        return  # zone coordinates are W-9-specific; never apply to a W-8
     vis_class = str(probe.get("classification") or "").strip()
     if vis_class:
         cur = str(ext.fields.get("line3_classification") or "").strip()
@@ -296,6 +329,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
             ext_res.warnings.append("strong tier returned no valid JSON — fast result kept")
     ext_res.escalated_because = reasons
 
+    _drop_exemplar_echo(ext_res, raw)
     _apply_w9_zone_probe(ext_res, raw)
     _normalize_tin(ext_res)          # zone TIN passes through the date guard too
     _apply_signature_probe(ext_res, raw)

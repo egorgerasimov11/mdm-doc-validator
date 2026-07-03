@@ -495,8 +495,9 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             and ext not in config.EMAIL_EXTS and raw.type_hint != "invoice"):
         signature_probe(path, raw, render_dir)
         # W-9 zone probes: checkbox + TIN boxes (tiny targets whole-page vision
-        # keeps missing) — while VISION is still resident
-        if doc_class == "w9":
+        # keeps missing) — while VISION is still resident. NOT for W-8: its
+        # layout differs, the W-9 zone coordinates would read random areas.
+        if doc_class == "w9" and raw.type_hint != "w8":
             w9_zone_probe(path, raw, render_dir)
     if use_vision:
         mc.unload("VISION")
