@@ -32,6 +32,7 @@ class Finding:
     verdict_effect: str | None
     message: str
     detail: str = ""
+    field: str = ""      # extraction field the rule fired on ('' when not field-bound)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -116,7 +117,8 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked") -> list
             sev = rule.get("severity", "WARNING")
             eff = rule.get("verdict_effect")
             findings.append(Finding(rid, sev if sev in SEVERITIES else "WARNING",
-                                    eff if eff in VERDICTS else None, msg, detail))
+                                    eff if eff in VERDICTS else None, msg, detail,
+                                    fname or ""))
         except Exception as e:
             findings.append(Finding(rid, "NOTE", None,
                                     f"engine_error: rule {rid} failed ({e.__class__.__name__}: {e})"))

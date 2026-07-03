@@ -94,6 +94,7 @@ class RawDoc:
     signature_probe: dict = field(default_factory=dict)    # vision verdict on signature
     w9_probe: dict = field(default_factory=dict)           # zone probes: checkbox + TIN box
     raw_text: str = ""                  # FULL text — in-memory only, scrubbed on persist
+    page_texts: dict = field(default_factory=dict)   # page idx -> its text; in-memory only
     tesseract_text: str = ""
     vision_text: str = ""
     regex_candidates: dict = field(default_factory=dict)   # full values in-memory
@@ -252,7 +253,9 @@ def _deep_read_pages(path: Path, picks: list, render_dir: Path, raw: RawDoc,
             raw.rotations[idx] = rot
         g = _render_page(doc, idx, render_dir, ocr.RENDER_DPI, rot, True, "t")
         if g:
-            tess_parts.append(_quick_ocr(g))
+            t = _quick_ocr(g)
+            tess_parts.append(t)
+            raw.page_texts[idx] = t
         v = _render_page(doc, idx, render_dir, config.VISION_DPI, rot, False, "v")
         if v:
             raw.images.append(v)
@@ -336,6 +339,7 @@ def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
     overlays — invisible to the text layer — so this runs for text-layer PDFs
     too. Called while VISION is still resident (no extra model swap)."""
     try:
+        idx = 0
         if path.suffix.lower() == ".pdf":
             doc = fitz.open(path)
             idx = _signature_page(path, raw)
@@ -352,6 +356,7 @@ def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
                 "handwritten_signature": bool(obj.get("handwritten_signature")),
                 "stamp": bool(obj.get("stamp")),
                 "evidence": str(obj.get("evidence") or "")[:200],
+                "page": idx,
             }
     except Exception as e:  # noqa: BLE001 — probe is best-effort
         raw.warnings.append(f"signature probe failed ({e.__class__.__name__})")
@@ -411,6 +416,8 @@ def w9_zone_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
                 probe["tin_type"] = ttype
                 probe["tin_digits"] = digits          # FULL — memory only
                 probe["tin_evidence"] = str(obj.get("evidence") or "")[:160]
+    if probe:
+        probe["page"] = page
     raw.w9_probe = probe
 
 
@@ -452,6 +459,7 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             scored = [(fields.page_score(t, doc_class), i, t, 0) for i, t in enumerate(texts)]
             picks = _select_pages(scored, max_pages)
             raw.pages_used = [i for _, i, _, _ in picks]
+            raw.page_texts = {i: t for _, i, t, _ in picks}
             raw.raw_text = "\n".join(t for _, _, t, _ in picks)
         else:
             # scanned: cheap survey of ALL pages (with rotation retry), deep-read the best
@@ -509,6 +517,10 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             if boxed_type:
                 raw.regex_candidates["tin_boxed_type"] = boxed_type
     raw.type_hint = fields.type_hint(path.name, raw.raw_text, ext, doc_class)
+    # single-page docs: everything read (incl. vision text) belongs to that page —
+    # gives provenance a page even when per-page capture missed (in-memory only)
+    if len(raw.pages_used) == 1:
+        raw.page_texts[raw.pages_used[0]] = _merged(raw)
     return raw
 
 

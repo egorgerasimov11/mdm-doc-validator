@@ -67,8 +67,10 @@ def _fmt(v, empty="—") -> str:
     return str(v).strip() or empty
 
 
-def _data_rows(pub: dict) -> list[tuple[str, str, str]]:
-    """(label, value, sap-hint) rows for the EXTRACTED DATA block."""
+def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
+    """(label, value, sap-hint, field-key) rows for the EXTRACTED DATA block.
+    The field key matches pub['fields'] / pub['provenance'] — the run page uses
+    it to attach source tags and evidence crops."""
     f = pub.get("fields", {})
     if pub["doc_class"] == "bank":
         iban = f.get("iban")
@@ -78,19 +80,19 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str]]:
         if not f.get("signed") and f.get("signature_evidence"):
             signed = f"no ({f['signature_evidence']})"
         return [
-            ("Account holder", _fmt(f.get("account_holder")), ""),
-            ("Account type", _fmt(f.get("account_type")), ""),
-            ("Bank name", _fmt(f.get("bank_name")), ""),
-            ("Bank country", _fmt(f.get("bank_country")), ""),
-            ("Bank address", _fmt(f.get("bank_address")), ""),
-            ("IBAN", _fmt(iban) + iban_extra, ""),
-            ("SWIFT/BIC", _fmt(f.get("swift_bic")), ""),
-            ("Account number", _fmt(f.get("account_number")), ""),
-            ("Routing/ABA (standard)", _fmt(f.get("routing_aba")), ""),
-            ("Routing/ABA (wires)", _fmt(f.get("routing_aba_wires")), ""),
-            ("Currency", _fmt(f.get("currency")), ""),
-            ("Document date", _fmt(f.get("doc_date"), empty="no visible document date"), ""),
-            ("Signed/stamped", signed, ""),
+            ("Account holder", _fmt(f.get("account_holder")), "", "account_holder"),
+            ("Account type", _fmt(f.get("account_type")), "", "account_type"),
+            ("Bank name", _fmt(f.get("bank_name")), "", "bank_name"),
+            ("Bank country", _fmt(f.get("bank_country")), "", "bank_country"),
+            ("Bank address", _fmt(f.get("bank_address")), "", "bank_address"),
+            ("IBAN", _fmt(iban) + iban_extra, "", "iban"),
+            ("SWIFT/BIC", _fmt(f.get("swift_bic")), "", "swift_bic"),
+            ("Account number", _fmt(f.get("account_number")), "", "account_number"),
+            ("Routing/ABA (standard)", _fmt(f.get("routing_aba")), "", "routing_aba"),
+            ("Routing/ABA (wires)", _fmt(f.get("routing_aba_wires")), "", "routing_aba_wires"),
+            ("Currency", _fmt(f.get("currency")), "", "currency"),
+            ("Document date", _fmt(f.get("doc_date"), empty="no visible document date"), "", "doc_date"),
+            ("Signed/stamped", signed, "", "signed"),
         ]
     tin = f.get("tin", {}) if isinstance(f.get("tin"), dict) else {}
     tin_target = ("Tax Number 1" if tin.get("type") == "SSN"
@@ -99,14 +101,14 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str]]:
     if f.get("sign_date"):
         signed += f" ({f['sign_date']})"
     return [
-        ("Line 1 — taxpayer name", _fmt(f.get("line1_name")), "SAP Name 1"),
-        ("Line 2 — business name", _fmt(f.get("line2_business_name")), "SAP Name 2"),
-        ("Classification (Line 3)", _fmt(f.get("line3_classification")), ""),
-        ("TIN type", tin.get("type") or "—", tin_target),
-        ("TIN (masked)", _fmt(tin), ""),
-        ("Address — street", _fmt(f.get("address_street")), ""),
-        ("Address — city/state/ZIP", _fmt(f.get("address_city_state_zip")), ""),
-        ("Signed", signed, ""),
+        ("Line 1 — taxpayer name", _fmt(f.get("line1_name")), "SAP Name 1", "line1_name"),
+        ("Line 2 — business name", _fmt(f.get("line2_business_name")), "SAP Name 2", "line2_business_name"),
+        ("Classification (Line 3)", _fmt(f.get("line3_classification")), "", "line3_classification"),
+        ("TIN type", tin.get("type") or "—", tin_target, "tin"),
+        ("TIN (masked)", _fmt(tin), "", "tin"),
+        ("Address — street", _fmt(f.get("address_street")), "", "address_street"),
+        ("Address — city/state/ZIP", _fmt(f.get("address_city_state_zip")), "", "address_city_state_zip"),
+        ("Signed", signed, "", "signed"),
     ]
 
 
@@ -114,7 +116,7 @@ def data_block(pub: dict) -> str:
     rows = _data_rows(pub)
     w = max(len(r[0]) for r in rows)
     lines = ["─" * 18 + " EXTRACTED DATA " + "─" * 18]
-    for label, value, hint in rows:
+    for label, value, hint, _key in rows:
         line = f"{label:<{w}} : {value}"
         if hint and value != "—":
             line += f"   → {hint}"
@@ -163,8 +165,10 @@ def build_json(pub: dict, findings: list[Finding], verdict: str, meta: dict) -> 
         "next_step": next_step(pub["doc_class"], verdict),
         "findings": [f.to_dict() for f in findings],
         "fields": pub.get("fields", {}),
+        "provenance": pub.get("provenance", {}),
         "crosscheck": pub.get("crosscheck", []),
         "sap_compare": pub.get("sap_compare", []),
+        "web_evidence": pub.get("web_evidence", []),
         "warnings": pub.get("warnings", []),
         "sensitive_present": pub.get("sensitive_present", {}),
         "model": pub.get("model"),

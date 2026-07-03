@@ -54,10 +54,12 @@ def _cmd_check(args, doc_class: str) -> int:
                            use_vision=not args.no_vision,
                            sap=sap_image is not None, quality=args.quality)
     print(f"expected duration: {human(est)}", file=sys.stderr)
+    web_evidence = True if getattr(args, "web_evidence", False) else None
     try:
         res = run_check(Path(path), doc_class, use_vision=not args.no_vision,
                         keep_renders=args.keep_renders, lang=args.lang,
-                        sap_image=sap_image, quality=args.quality)
+                        sap_image=sap_image, quality=args.quality,
+                        web_evidence=web_evidence)
     except FileNotFoundError as e:
         print(f"file not found: {e}", file=sys.stderr)
         return config.EXIT_UNREADABLE
@@ -87,7 +89,8 @@ def _cmd_eval(args) -> int:
         print(str(e), file=sys.stderr)
         return config.EXIT_OLLAMA_DOWN
     from .evalrun import run_eval
-    return run_eval(only=args.only, limit=args.limit, tag=args.tag)
+    return run_eval(only=args.only, limit=args.limit, tag=args.tag,
+                    scenario=args.scenario)
 
 
 def _cmd_train(args) -> int:
@@ -199,6 +202,9 @@ def _cmd_doctor(args) -> int:
         print(f"{name:13}: {'OK' if p.exists() else 'MISSING'} ({p})")
     from .dataset import count_labels
     print(f"labels       : {count_labels()} in {config.LABELS_PATH}")
+    from . import web_enrichment as webenr
+    we = "ON (opt-in)" if webenr.enabled() else "off (MDMDOC_WEB_EVIDENCE=1 to enable)"
+    print(f"web evidence : {we} — advisory external registry hints, never decides verdicts")
     return 0
 
 
@@ -219,6 +225,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="keep page renders (SENSITIVE: pixels contain full account data)")
         p.add_argument("--quality", action="store_true",
                        help="force the strong model tier (slower, thorough)")
+        p.add_argument("--web-evidence", action="store_true",
+                       help="corroborate PUBLIC ids (routing/SWIFT/bank & company names) "
+                            "against external registries — advisory NOTE hints, never a "
+                            "verdict; also enabled by MDMDOC_WEB_EVIDENCE=1")
         if doc_class == "bank":
             p.add_argument("--sap", help="screenshot of the SAP Bank Details screen — "
                                          "compares document vs SAP char-by-char")
@@ -233,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--only", choices=("bank", "w9"))
     p.add_argument("--limit", type=int)
     p.add_argument("--tag", default="")
+    p.add_argument("--scenario", default=None,
+                   help="only labels carrying this scenario tag (e.g. w9_boxed_tin)")
     p.set_defaults(func=_cmd_eval)
 
     p = sub.add_parser("train", help="build few-shot prompts and/or a custom Ollama model from labels")

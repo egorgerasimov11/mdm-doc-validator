@@ -74,6 +74,29 @@ before anything is saved; full values never leave this machine's memory.</p>
     <label class="name" for="f-notes">notes</label>
     <input type="text" id="f-notes" autocomplete="off">
   </div>
+  <div class="field-row">
+    <label class="name">error_source</label>
+    <select id="f-error_source" style="width:auto">
+      <option value="" selected>— model was right / not applicable</option>
+      {% for e in form.error_sources %}
+      <option value="{{ e }}">{{ e.replace('_', ' ') }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-row">
+    <label class="name">scenarios</label>
+    <div id="scenario-tags" class="tag-row">
+      {% for s in form.scenario_options %}
+      <label class="tag"><input type="checkbox" value="{{ s }}"
+        {{ 'checked' if s in form.scenarios_suggested }}> {{ s }}</label>
+      {% endfor %}
+      <input type="text" id="f-scenarios-extra" autocomplete="off"
+             placeholder="extra tags, comma-separated">
+      {% if form.scenarios_suggested %}
+      <span class="hint">pre-checked = suggested from this run's artifacts</span>
+      {% endif %}
+    </div>
+  </div>
 
   <div class="actions" style="margin-top:16px">
     <button type="submit" class="primary">Save &amp; retrain</button>

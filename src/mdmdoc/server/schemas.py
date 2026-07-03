@@ -18,6 +18,8 @@ class ReviewSubmission(BaseModel):
     verdict_gold: str = ""
     notes: str = ""
     reviewer: str = "egor"
+    scenarios: list[str] = Field(default_factory=list)  # scenario tags (see scenarios.py)
+    error_source: str = ""   # ocr_missed | model_mapped_wrong | rule_wrong | ...
     retrain: bool = True     # save-and-retrain is the default feedback flow
 
 
@@ -39,3 +41,4 @@ class EvalIn(BaseModel):
     only: Literal["bank", "w9"] | None = None
     limit: int | None = None
     tag: str = ""
+    scenario: str | None = None   # only labels carrying this scenario tag

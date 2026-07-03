@@ -5,8 +5,10 @@ fewshot.py — turn labeled corrections into Stage-B prompt exemplars.
 Exemplar sensitive values are shape-preserving FAKES (from the label's
 sensitive_map), never real and never masks: masked exemplars would teach the
 model to emit masks, fakes teach it to copy exact-looking values. Selection
-prefers cases the model got wrong (highest teaching value), then diversity by
-doc type.
+is greedy scenario-COVERAGE (each pick must show the model a situation the
+already-picked exemplars don't), tie-broken by teaching value (cases the
+model got wrong teach the most). Labels without scenario tags still cover
+their doc type, so the old doc-type diversity is the degenerate case.
 """
 from __future__ import annotations
 
@@ -89,6 +91,29 @@ def _teaching_value(lab: dict) -> int:
     return score + 2 * _completeness(lab)
 
 
+def _coverage_units(lab: dict) -> set:
+    """What situations this exemplar demonstrates: its scenario tags plus the
+    doc type (so untagged labels still diversify by type)."""
+    units = set(lab.get("scenarios") or [])
+    units.add(f"type:{lab.get('doc_type_gold', '?')}")
+    return units
+
+
+def _pick_by_coverage(pool: list[dict], k: int) -> list[dict]:
+    """Greedy max-coverage: each pick adds the most not-yet-shown scenario
+    units; ties go to the higher teaching value. Recency plays no part."""
+    ordered = sorted(pool, key=_teaching_value, reverse=True)
+    picked: list[dict] = []
+    covered: set = set()
+    while len(picked) < k and ordered:
+        best = max(ordered, key=lambda l: (len(_coverage_units(l) - covered),
+                                           _teaching_value(l)))
+        ordered.remove(best)
+        picked.append(best)
+        covered |= _coverage_units(best)
+    return picked
+
+
 def build_fewshot(k: int = 2) -> int:
     config.ensure_dirs()
     labels = [l for l in load_labels() if l.get("confirmed")]
@@ -97,15 +122,7 @@ def build_fewshot(k: int = 2) -> int:
         return 1
     for doc_class in ("bank", "w9"):
         pool = [l for l in labels if l.get("doc_class") == doc_class]
-        picked: list[dict] = []
-        # round-robin over doc types, highest teaching value first inside each type
-        by_type: dict = {}
-        for lab in sorted(pool, key=_teaching_value, reverse=True):
-            by_type.setdefault(lab.get("doc_type_gold", "?"), []).append(lab)
-        while len(picked) < k and any(by_type.values()):
-            for t in list(by_type.keys()):
-                if by_type[t] and len(picked) < k:
-                    picked.append(by_type[t].pop(0))
+        picked = _pick_by_coverage(pool, k)
         examples = [label_to_example(l) for l in picked]
         blob = json.dumps(examples, ensure_ascii=False, indent=2)
         fakes = [f for l in picked for f in

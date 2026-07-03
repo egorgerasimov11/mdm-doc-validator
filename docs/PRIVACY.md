@@ -65,14 +65,39 @@ that allowance because the known-secret pass runs first.
 | location | content | sensitivity | lifecycle |
 |---|---|---|---|
 | `inbox/` | original uploads (content-addressed) | **raw documents** | gitignored; delete `inbox/<sha16>__*` to erase |
-| `runs/<sha16>/` | meta, OCR excerpt (scrubbed), extraction, findings, reports, sap_compare | masked only | gitignored; delete the folder to erase |
-| page renders | pixels of pages | raw | deleted after every run; UI preview renders on demand with `Cache-Control: no-store`, never persisted |
+| `runs/<sha16>/` | meta, OCR excerpt (scrubbed), extraction, findings, reports, sap_compare, web_evidence | masked only | gitignored; delete the folder to erase |
+| page renders | pixels of pages | raw | deleted after every run; UI preview **and evidence crops** (W-9 checkbox/TIN-box, signature, bank-line zones) render on demand into a temp dir with `Cache-Control: no-store`, never persisted; both endpoints live on the teach router only (absent in BTP) |
+| `extraction.json` provenance | per-field `{source, page}` tags (model / ocr-regex / zone-probe / vision-crop / rule / precedent) | no values | part of the run artifacts above |
 | `dataset/labels.jsonl` | training examples | masked + fakes | committable by design |
 | `prompts/fewshot/` | exemplars | fakes only | committable |
 | server logs | method, path, run ids, file names | no values | in-memory ring (500 lines) |
 
 The Docker image ships **none** of the operator's data (`.dockerignore`
 excludes runs, inbox, labels, eval history).
+
+## Outbound network egress (external evidence)
+
+The optional external-evidence layer (`web_enrichment`, opt-in via
+`MDMDOC_WEB_EVIDENCE=1`, **off in the BTP image**) is the only part of the tool
+that talks to the network. It has its own outbound choke point,
+`web_enrichment.egress.assert_safe_outbound`, the mirror image of the inbound
+leak gate:
+
+- **Only these identifiers may leave the machine:** routing/ABA numbers,
+  SWIFT/BIC codes, bank names, company names.
+- **Never sent:** full TIN/SSN/EIN, bank account numbers, IBANs. The guard
+  reuses `privacy.assert_no_leak` with a forbidden set built from the run's
+  vault (account + IBAN + every TIN kind) plus the strict generic patterns, so
+  a would-be leak **raises** before any socket opens. A 9-digit routing number
+  matches none of the forbidden patterns and passes; an account/IBAN/TIN does
+  not.
+- **Every request goes through `web_enrichment.http`** (trust_env=False, short
+  timeout, descriptive User-Agent), which calls the egress guard on the rendered
+  URL before sending and returns `None` on any failure (offline degrades to an
+  `unavailable` hint — it never crashes a run or changes a verdict).
+- **Advisory only:** every external finding is severity `NOTE` with no verdict
+  effect; the run page shows a permanent banner, "web did not decide this
+  verdict." See `docs/WEB_EVIDENCE.md`.
 
 ## Sensitive values in transit
 

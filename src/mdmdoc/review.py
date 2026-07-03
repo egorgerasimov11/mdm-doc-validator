@@ -57,10 +57,17 @@ def review_run(spec: str, open_doc: bool = False) -> int:
     print(f"Verdicts: {', '.join(form['verdicts'])}")
     verdict_gold = _ask(f"verdict [{form['verdict']}]: ", form["verdict"])
     notes = _ask("notes (optional): ")
+    print(f"Scenario tags: {', '.join(form['scenario_options'])}")
+    suggested = ", ".join(form["scenarios_suggested"])
+    scen = _ask(f"scenarios (comma-separated) [{suggested}]: ", suggested)
+    print(f"Error sources: {', '.join(form['error_sources'])} (blank = model was right)")
+    error_source = _ask("error_source []: ")
 
     result = review_core.submit_review(run_id, {
         "fields": fields, "doc_type_gold": doc_type_gold,
         "verdict_gold": verdict_gold, "notes": notes,
+        "scenarios": [s.strip() for s in scen.split(",") if s.strip()],
+        "error_source": error_source,
     })
     print(f"\nSaved label for {form['file_name']} — dataset now has "
           f"{result['labels_count']} examples.")
@@ -68,6 +75,7 @@ def review_run(spec: str, open_doc: bool = False) -> int:
     build_fewshot(k=2)   # feedback trains immediately — no separate step to forget
     print("Few-shot exemplars rebuilt. Your verdict/doc_type now override the "
           "machine for this document (operator precedent). "
-          "Optionally: `mdmdoc train --modelfile --apply` to bake into mdmdoc-extract, "
-          "`mdmdoc eval` to measure.")
+          "To retrain the extractor: build & evaluate a candidate on the Training "
+          "page (adoption is gated — leakage 0, invoice false-accepts 0, no "
+          "critical-field regressions), then Adopt.")
     return 0

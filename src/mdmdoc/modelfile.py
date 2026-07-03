@@ -13,6 +13,8 @@ import subprocess
 from . import config, model_client as mc
 
 MODEL_NAME = "mdmdoc-extract"
+CANDIDATE_NAME = "mdmdoc-extract-candidate"   # adoption gate builds land here first
+STOCK_BASE = "qwen3:4b"
 
 
 def _fewshot_messages(doc_class: str, limit: int = 2) -> list[str]:
@@ -30,9 +32,10 @@ def _fewshot_messages(doc_class: str, limit: int = 2) -> list[str]:
     return out
 
 
-def build_modelfile(apply: bool = False) -> int:
+def build_modelfile(apply: bool = False, name: str = MODEL_NAME) -> int:
     config.ensure_dirs()
-    base = mc.ROLES["TEXT"] if mc.ROLES["TEXT"] != MODEL_NAME else "qwen3:4b"
+    # base is always the STOCK model — never our own builds (would self-stack)
+    base = mc.ROLES["TEXT"] if mc.ROLES["TEXT"] not in (MODEL_NAME, CANDIDATE_NAME) else STOCK_BASE
     sys_bank = (config.PROMPTS_DIR / "system_bank.txt").read_text()
     sys_w9 = (config.PROMPTS_DIR / "system_w9.txt").read_text()
     system = (sys_bank + "\n\n--- When the input is a US tax form instead of a banking document: ---\n\n"
@@ -41,26 +44,32 @@ def build_modelfile(apply: bool = False) -> int:
              "PARAMETER temperature 0.1",
              'SYSTEM """' + system + '"""']
     lines += _fewshot_messages("bank") + _fewshot_messages("w9")
-    mf = config.MODELS_DIR / f"Modelfile.{MODEL_NAME}"
+    mf = config.MODELS_DIR / f"Modelfile.{name}"
     mf.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {mf} (FROM {base})")
-    cmd = ["ollama", "create", MODEL_NAME, "-f", str(mf)]
+    cmd = ["ollama", "create", name, "-f", str(mf)]
     if not apply:
         print("to build the model (with Ollama already running):")
         print("  " + " ".join(cmd))
-        print(f"then use it: export MDMDOC_TEXT={MODEL_NAME}")
+        print(f"then use it: export MDMDOC_TEXT={name}")
         return 0
+    rc = ollama_cmd(cmd)
+    if rc == 0:
+        print(f"model {name} created. Use it: export MDMDOC_TEXT={name}")
+    return rc
+
+
+def ollama_cmd(cmd: list[str]) -> int:
+    """Run an `ollama ...` CLI command against the resolved endpoint (mini
+    tunnel). Never starts a server."""
     try:
         mc.preflight()
     except mc.OllamaUnavailable as e:
         print(str(e))
         return config.EXIT_OLLAMA_DOWN
     import os
-    env = dict(os.environ, OLLAMA_HOST=mc.host())  # target the resolved endpoint (mini tunnel)
-    r = subprocess.run(cmd, env=env)
-    if r.returncode == 0:
-        print(f"model {MODEL_NAME} created. Use it: export MDMDOC_TEXT={MODEL_NAME}")
-    return r.returncode
+    env = dict(os.environ, OLLAMA_HOST=mc.host())
+    return subprocess.run(cmd, env=env).returncode
 
 
 if __name__ == "__main__":

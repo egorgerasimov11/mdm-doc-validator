@@ -186,11 +186,18 @@ window.mdmdoc = (() => {
           if (tt) fields["tin_type"] = { action: "set", value: tt };
         }
       });
+      const scenarios = [...form.querySelectorAll("#scenario-tags input[type=checkbox]:checked")]
+        .map(c => c.value);
+      const extra = document.getElementById("f-scenarios-extra");
+      if (extra) extra.value.split(",").map(s => s.trim()).filter(Boolean)
+        .forEach(s => scenarios.push(s));
       const payload = {
         fields,
         doc_type_gold: document.getElementById("f-doc_type").value,
         verdict_gold: document.getElementById("f-verdict").value,
         notes: document.getElementById("f-notes").value,
+        scenarios,
+        error_source: document.getElementById("f-error_source").value,
       };
       const err = document.getElementById("review-error");
       const btn = form.querySelector("button[type=submit]");
@@ -246,12 +253,49 @@ window.mdmdoc = (() => {
         pollJob(job_id, say, (r) => say("done rc=" + r.rc), (e) => say("ERROR: " + e));
       } catch (e) { say("ERROR: " + e.message); }
     };
+    const btnC = document.getElementById("btn-candidate");
+    if (btnC) btnC.onclick = async () => {
+      log.textContent = "";
+      btnC.disabled = true;
+      try {
+        const { job_id } = await api("/api/v1/train/candidate", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        say("building candidate + gated eval (full pipeline per label — minutes)…");
+        pollJob(job_id, say,
+          () => { say("done — reloading…"); setTimeout(() => location.reload(), 800); },
+          (e) => { say("ERROR: " + e); btnC.disabled = false; });
+      } catch (e) { say("ERROR: " + e.message); btnC.disabled = false; }
+    };
+    const btnA = document.getElementById("btn-adopt");
+    if (btnA) btnA.onclick = async () => {
+      log.textContent = "";
+      btnA.disabled = true;
+      try {
+        const r = await api("/api/v1/train/adopt", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        say("adopted: " + JSON.stringify(r.adopted));
+        setTimeout(() => location.reload(), 800);
+      } catch (e) { say("ERROR: " + e.message); btnA.disabled = false; }
+    };
+    const btnR = document.getElementById("btn-rollback");
+    if (btnR) btnR.onclick = async () => {
+      if (!confirm("Rebuild mdmdoc-extract from the PREVIOUS Modelfile?")) return;
+      log.textContent = "";
+      btnR.disabled = true;
+      try {
+        const r = await api("/api/v1/train/rollback", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        say("rolled back: " + JSON.stringify(r.adopted));
+        setTimeout(() => location.reload(), 800);
+      } catch (e) { say("ERROR: " + e.message); btnR.disabled = false; }
+    };
     const btnE = document.getElementById("btn-eval");
     if (btnE) btnE.onclick = async () => {
       log.textContent = "";
       btnE.disabled = true;
       const body = { tag: document.getElementById("eval-tag").value,
-                     only: document.getElementById("eval-only").value || null };
+                     only: document.getElementById("eval-only").value || null,
+                     scenario: (document.getElementById("eval-scenario") || {}).value || null };
       try {
         const { job_id } = await api("/api/v1/eval", {
           method: "POST", headers: { "Content-Type": "application/json" },

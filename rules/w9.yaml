@@ -59,7 +59,7 @@ rules:
   - id: W9-011
     name: tin_type_vs_classification
     applies_to: [w9]
-    when: {check: tin_type_vs_classification}
+    when: {check: tin_type_vs_classification, field: tin_raw}
     severity: CRITICAL
     verdict_effect: NEED_MANUAL_REVIEW
     message: "TIN type conflicts with the tax classification: {detail}. Individual/Sole proprietor normally uses SSN (Tax Number 1); businesses use EIN (Tax Number 2)."

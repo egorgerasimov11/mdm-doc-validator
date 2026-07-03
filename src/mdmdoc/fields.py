@@ -61,14 +61,17 @@ def _norm_name(s) -> str:
 
 
 def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
-                   policy: str = "masked") -> list[str]:
+                   policy: str = "masked", prov: dict | None = None) -> list[str]:
     """Deterministically verify model-read banking IDs against regex-extracted IDs.
     Fills blanks from OCR, confirms matches, flags mismatches. Banking values in
     notes follow the display policy; TIN branches are hard-masked regardless.
     Scoped by doc class: tax forms only cross-check the TIN — a stray digit run on
-    a W-9 must not become an 'account number'."""
+    a W-9 must not become an 'account number'.
+    prov (optional) collects per-field provenance: OCR fills are recorded as
+    source 'ocr-regex', model reads that OCR confirms get confirmed=True."""
     from .privacy import display_value
     notes = []
+    prov = prov if prov is not None else {}
     for k in ID_FIELDS if doc_class == "bank" else ():
         dv = det.get(k)
         if not dv:
@@ -78,8 +81,11 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
         if not mv:
             fields[k] = dv
             notes.append(f"{k}=filled-from-OCR({display_value(kind, dv, policy)})")
+            prov[k] = {"source": "ocr-regex", "page": None}
         elif _norm_id(mv) == _norm_id(dv):
             notes.append(f"{k}=confirmed")
+            if prov.get(k, {}).get("source") != "ocr-regex":
+                prov[k] = {"source": "model", "page": None, "confirmed": True}
         else:
             notes.append(f"{k}=MISMATCH(model={display_value(kind, mv, policy)} "
                          f"vs ocr={display_value(kind, dv, policy)})")
@@ -90,6 +96,7 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
         if not str(fields.get("tin_raw") or "").strip():
             fields["tin_raw"] = det["ein"]
             notes.append(f"tin=filled-from-OCR({mask('ein', det['ein'])})")
+            prov["tin_raw"] = {"source": "ocr-regex", "page": None}
         if _norm_id(fields.get("tin_raw")) == _norm_id(det["ein"]):
             if str(fields.get("tin_type") or "").upper() != "EIN":
                 notes.append("tin_type=EIN (settled by the EIN detector)")
@@ -99,6 +106,7 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
         if not str(fields.get("tin_raw") or "").strip():
             fields["tin_raw"] = det["tin_boxed"]
             notes.append(f"tin=filled-from-boxed-digits({mask('tin', det['tin_boxed'])})")
+            prov["tin_raw"] = {"source": "ocr-regex", "page": None}
         boxed_type = str(det.get("tin_boxed_type") or "")
         if boxed_type and _norm_id(fields.get("tin_raw")) == _norm_id(det["tin_boxed"]):
             if str(fields.get("tin_type") or "").upper() != boxed_type:
@@ -270,6 +278,9 @@ class Extraction:
     doc_type: str = ""
     fields: dict = field(default_factory=dict)      # FULL values — in-memory only
     crosscheck: list = field(default_factory=list)  # policy-aware notes
+    # field -> {source: model|ocr-regex|vision-crop|zone-probe|rule|precedent,
+    #           page: 1-based page number or None, confirmed?: bool} — no values
+    provenance: dict = field(default_factory=dict)
     warnings: list = field(default_factory=list)
     model_id: str = ""
     json_valid_first_try: bool = True
@@ -318,10 +329,14 @@ class Extraction:
                 continue  # folded into tin above
             else:
                 pub[k] = v
+        # provenance keyed by the PUBLIC field names (tin_raw folds into tin)
+        prov = {("tin" if k == "tin_raw" else k): dict(v)
+                for k, v in self.provenance.items() if k != "tin_type"}
         pub_wrap = {
             "doc_class": self.doc_class,
             "doc_type": self.doc_type,
             "fields": pub,
+            "provenance": prov,
             "crosscheck": self.crosscheck,
             "warnings": self.warnings,
             "model": self.model_id,

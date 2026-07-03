@@ -5,7 +5,8 @@ shared by the stdin CLI (review.py) and the HTTP API/web UI.
 
 A submission is:
     {"fields": {key: {"action": "keep"|"set"|"clear", "value": str|bool|None}},
-     "doc_type_gold": str, "verdict_gold": str, "notes": str, "reviewer": str}
+     "doc_type_gold": str, "verdict_gold": str, "notes": str, "reviewer": str,
+     "scenarios": [str], "error_source": str}
 
 Sensitive fields may carry FULL values in a "set" — they live in memory only;
 the stored label holds masked values + derived facts + shape-preserving fakes
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-from . import config, runstore
+from . import config, runstore, scenarios
 from .dataset import append_label, count_labels
 from .fields import BANK_DOC_TYPES, BANK_KEYS, W9_DOC_TYPES, W9_KEYS, _norm_id
 from .privacy import FIELD_KIND, SecretVault, fake_preserve_shape, mask
@@ -70,10 +71,11 @@ def review_defaults(spec: str) -> dict:
     run_id = runstore.resolve_run(spec)
     if not run_id:
         raise RunNotFound(spec)
-    meta, pub, _, rep = _load_run(run_id)
+    meta, pub, stage_a_pub, rep = _load_run(run_id)
     doc_class = meta.get("doc_class", "bank")
     keys = BANK_KEYS if doc_class == "bank" else W9_KEYS
     pub_fields = pub.get("fields", {})
+    findings = runstore.load(run_id, "findings.json") or []
     return {
         "run_id": run_id,
         "doc_class": doc_class,
@@ -88,6 +90,9 @@ def review_defaults(spec: str) -> dict:
         "doc_types": BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES,
         "verdict": rep.get("verdict", ""),
         "verdicts": list(VERDICTS),
+        "scenario_options": scenarios.options_for(doc_class),
+        "scenarios_suggested": scenarios.suggest(meta, stage_a_pub, pub, findings),
+        "error_sources": list(scenarios.ERROR_SOURCES),
     }
 
 
@@ -221,6 +226,9 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
         "sensitive_map": vault.sensitive_map() + smap_extra,
         "reviewer": str(sub.get("reviewer") or "egor"),
         "notes": str(sub.get("notes") or ""),
+        "scenarios": scenarios.normalize_tags(sub.get("scenarios")),
+        "error_source": (str(sub.get("error_source") or "")
+                         if str(sub.get("error_source") or "") in scenarios.ERROR_SOURCES else ""),
         "confirmed": True,
     }
     # union: typed corrections + full values harvested from the run artifacts —

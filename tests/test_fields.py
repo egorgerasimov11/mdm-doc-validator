@@ -123,10 +123,11 @@ def test_clean_path_handles_spaces_quotes_and_urls():
 
 def test_no_writes_outside_choke_points():
     """Source-level guard: only runstore/privacy/evalrun/dataset/fewshot/lora_export/
-    modelfile may write files (they all call assert_no_leak or write non-document data)."""
+    modelfile/adoption may write files (they all call assert_no_leak or write
+    non-document data)."""
     src = Path(__file__).resolve().parents[1] / "src" / "mdmdoc"
     allowed = {"runstore.py", "modelfile.py", "evalrun.py", "dataset.py",
-               "fewshot.py", "lora_export.py"}
+               "fewshot.py", "lora_export.py", "adoption.py"}
     offenders = []
     for p in src.rglob("*.py"):
         if p.name in allowed:

@@ -26,7 +26,8 @@ router_teach = APIRouter(prefix="/api/v1", dependencies=[Depends(require_token)]
                          tags=["teach"])
 
 ARTIFACT_ALLOWLIST = {"meta.json", "stage_a.json", "extraction.json",
-                      "findings.json", "report.json", "report.md", "sap_compare.json"}
+                      "findings.json", "report.json", "report.md", "sap_compare.json",
+                      "web_evidence.json"}
 
 
 def _labeled_ids() -> set[str]:
@@ -244,6 +245,30 @@ def preview_page(run_id: str, page: int, src: str = "doc"):
         raise api_error(422, "unreadable_document", f"cannot render preview: {e}")
 
 
+@router_teach.get("/runs/{run_id}/evidence/{key}")
+def evidence_crop(run_id: str, key: str):
+    """On-demand crop of the zone that evidences a finding/field (W-9 checkbox
+    row, TIN boxes, signature area, bank account/routing line). Rendered into a
+    temp dir and streamed like the preview above — full sensitive pixels, never
+    persisted, teach router only (absent in BTP)."""
+    from fastapi.responses import Response
+
+    from ..evidence import EVIDENCE_KEYS, render_crop
+    if key not in EVIDENCE_KEYS:
+        raise api_error(404, "not_found", f"unknown evidence key {key!r}")
+    rid = runstore.resolve_run(run_id)
+    if not rid:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    try:
+        png = render_crop(rid, key)
+    except Exception as e:  # noqa: BLE001
+        raise api_error(422, "unreadable_document", f"cannot render evidence: {e}")
+    if png is None:
+        raise api_error(404, "not_found", f"no {key} evidence zone for run {rid}")
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
 @router_teach.get("/runs/{run_id}/review")
 def review_form(run_id: str) -> dict:
     try:
@@ -270,17 +295,17 @@ def submit_label(run_id: str, sub: ReviewSubmission) -> dict:
     meta = runstore.load(rid, "meta.json") or {}
 
     def work(log):
+        from ..adoption import build_candidate
         from ..fewshot import build_fewshot
-        from ..modelfile import build_modelfile
         log("1/3 rebuilding few-shot exemplars from your corrections…")
         build_fewshot(k=2)
-        log("2/3 rebuilding the custom model (mdmdoc-extract) on the model host…")
+        log("2/3 building the CANDIDATE model on the model host (production "
+            "mdmdoc-extract is untouched — adopt it from Training after the gated eval)…")
         try:
             mc.reset_host()
-            rc = build_modelfile(apply=True)
-            log(f"    model rebuild rc={rc}")
+            build_candidate(progress=log)
         except Exception as e:  # noqa: BLE001 — training must not block the precedent
-            log(f"    model rebuild skipped ({e.__class__.__name__}) — few-shot still applied")
+            log(f"    candidate build skipped ({e.__class__.__name__}) — few-shot still applied")
         p = Path(meta.get("path", ""))
         if p.exists():
             log("3/3 re-running the document with the corrections applied…")
@@ -328,6 +353,50 @@ def train_modelfile(body: ModelfileIn):
     return JSONResponse({"job_id": job.id}, status_code=202)
 
 
+@router_teach.get("/train/adoption")
+def adoption_state() -> dict:
+    from .. import adoption
+    return adoption.load_state()
+
+
+@router_teach.post("/train/candidate")
+def train_candidate():
+    """Build the candidate model and run the gated eval against it."""
+    if jobs.REGISTRY.running({"eval", "check", "adoption"}):
+        raise api_error(409, "job_conflict", "an eval/check/adoption job is already running")
+    from .. import adoption
+
+    def work(log):
+        mc.reset_host()
+        with jobs.PIPELINE_LOCK:
+            state = adoption.build_and_eval_candidate(progress=log)
+        return {"candidate": state.get("candidate")}
+
+    job = jobs.REGISTRY.submit("adoption", work, capture_stdout=True)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"job_id": job.id}, status_code=202)
+
+
+@router_teach.post("/train/adopt")
+def train_adopt() -> dict:
+    from .. import adoption
+    try:
+        state = adoption.adopt()
+    except RuntimeError as e:
+        raise api_error(409, "gate_failed", str(e))
+    return {"adopted": state.get("adopted")}
+
+
+@router_teach.post("/train/rollback")
+def train_rollback() -> dict:
+    from .. import adoption
+    try:
+        state = adoption.rollback()
+    except RuntimeError as e:
+        raise api_error(409, "rollback_failed", str(e))
+    return {"adopted": state.get("adopted")}
+
+
 @router_teach.post("/train/export-lora")
 def train_export_lora(body: LoraIn) -> dict:
     from ..lora_export import export_lora
@@ -350,7 +419,8 @@ def eval_start(body: EvalIn):
     def work(log):
         mc.reset_host()
         with jobs.PIPELINE_LOCK:
-            rc = run_eval(only=body.only, limit=body.limit, tag=body.tag, progress=log)
+            rc = run_eval(only=body.only, limit=body.limit, tag=body.tag,
+                          scenario=body.scenario, progress=log)
         hist = eval_history()
         return {"rc": rc, "metrics": (hist[-1]["metrics"] if hist else None)}
 

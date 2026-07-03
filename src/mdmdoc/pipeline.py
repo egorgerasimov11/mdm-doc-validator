@@ -27,9 +27,12 @@ class CheckResult:
 
 def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders: bool = False,
               lang: str = "en", sap_image: Path | None = None,
-              apply_precedent: bool = True, quality: bool = False) -> CheckResult:
+              apply_precedent: bool = True, quality: bool = False,
+              web_evidence: bool | None = None) -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
-    not the operator's stored answers. quality=True forces the strong tier."""
+    not the operator's stored answers. quality=True forces the strong tier.
+    web_evidence: None -> honour the MDMDOC_WEB_EVIDENCE env flag; True/False
+    force it (eval passes False — network calls are non-deterministic)."""
     t0 = time.time()
     config.ensure_dirs()
     path = path.expanduser().resolve()
@@ -93,9 +96,22 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                 f"verdict={gold_v} — overrides the machine result "
                 f"({model_doc_type}/{model_verdict}).{note}"))
             verdict, ext.doc_type = gold_v, gold_t
+            ext.provenance["doc_type"] = {"source": "precedent", "page": None}
+
+    # External evidence (opt-in): corroborate PUBLIC identifiers against outside
+    # registries. Runs AFTER the verdict is decided and only ever yields NOTE
+    # findings — it is structurally impossible for the web to move the verdict.
+    from . import web_enrichment as webenr
+    do_web = web_evidence if web_evidence is not None else webenr.enabled()
+    web_rows: list = []
+    if do_web:
+        web_findings, web_rows = webenr.gather(ext, policy=policy)
+        findings += web_findings   # NOTE-only; verdict already decided above
 
     pub = ext.to_public(policy=policy)
     pub["file_name"] = path.name
+    if web_rows:
+        pub["web_evidence"] = web_rows
     if precedent:
         pub["operator_precedent"] = {"verdict": verdict, "doc_type": ext.doc_type,
                                      "model_verdict": model_verdict,
@@ -112,7 +128,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
             "use_vision": use_vision, "duration_s": round(time.time() - t0, 1),
             "tier": ext.tier, "escalated_because": ext.escalated_because,
             "has_text_layer": raw.has_text_layer, "quality": quality,
-            "signature_pass": bool(raw.signature_probe),
+            "signature_pass": bool(raw.signature_probe), "web_evidence": bool(do_web),
             "shape_key": shape_key(doc_class, raw.has_text_layer, use_vision,
                                    sap_image is not None, quality),
             "sap_path": str(sap_image) if sap_image is not None else None}
@@ -128,6 +144,14 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     runstore.write(run_id, "report.json", report_json, secrets, policy=gate)
     if sap_rows:
         runstore.write(run_id, "sap_compare.json", sap_rows, secrets, policy=gate)
+    if web_rows:
+        # Routing/ABA numbers legitimately APPEAR here (they are the check subject
+        # and are egress-allowed public identifiers), so they must not be in this
+        # artifact's forbidden-secret set — otherwise the strict gate (masked
+        # policy) would flag a routing number and crash the run. account/IBAN/TIN
+        # are still enforced (both known-secrets and the strict generic patterns).
+        web_secrets = ext.vault.secrets(webenr.egress.FORBIDDEN_KINDS)
+        runstore.write(run_id, "web_evidence.json", web_rows, web_secrets, policy=gate)
     runstore.mark_last(run_id)
     if not keep_renders:
         runstore.cleanup_renders(run_id)

@@ -42,18 +42,26 @@ doc → eval scenario slice → adopt only if no regressions`.
 7. Quality diagnostics в отчёте: image-only / rotated / low contrast / OCR weak /
    vision crop used.
 
-### Обучаемость (замкнутый цикл)
-8. **Review v2**: error_source (OCR missed / model mapped wrong / rule wrong /
-   workbook mismatch / doc type wrong) + scenario tags (w9_image_only,
-   w9_checkbox_error, w9_boxed_tin, bank_invoice_plus_letter, ...).
-9. **Scenario-based eval slices**: W-9 checkbox accuracy, TIN extraction,
-   signature detection, bank IDs, invoice false-accept, SAP compare exact —
-   regression buckets из reального корпуса.
-10. **Few-shot по покрытию сценариев**, не по последним k.
-11. **Training queue**: сервис сам поднимает высокоценные документы для разметки
-    (manual review, model/rule conflict, eval regression, new scenario).
-12. **Model adoption gate**: candidate → eval gate (leakage=0, invoice FA=0,
-    no critical-field regressions) → Adopt / Rollback кнопки.
+### Обучаемость (замкнутый цикл) — DONE 2026-07-03 (кроме 13)
+8. ~~**Review v2**~~ DONE: error_source (ocr_missed / model_mapped_wrong /
+   rule_wrong / doc_type_wrong / workbook_mismatch) + scenario tags
+   (scenarios.py — таксономия + автоподсказка из артефактов прогона);
+   в веб-форме и CLI review; хранится в label.
+9. ~~**Scenario-based eval slices**~~ DONE: eval --scenario <tag> фильтр +
+   автоматические срезы по тегам labels в metrics.scenarios /
+   last_results.json / секция на Training-странице.
+10. ~~**Few-shot по покрытию сценариев**~~ DONE: greedy max-coverage по
+    scenario-тегам (+doc_type как вырожденный случай), tie-break по teaching
+    value; recency больше не участвует.
+11. ~~**Training queue**~~ DONE (training_queue.py): manual-review вердикты,
+    эскалации strong-tier, model/evidence конфликты, непокрытые сценарии,
+    eval-регрессии (протухший gold) — секция на Training-странице.
+12. ~~**Model adoption gate**~~ DONE (adoption.py): Save&retrain теперь строит
+    ТОЛЬКО mdmdoc-extract-candidate; гейт-eval (record=False, история
+    нетронута) — leakage=0, invoice FA=0, критичные поля (bank.iban/
+    account_number/swift_bic, w9.tin/line3) без регресса vs baseline;
+    Adopt (ollama cp) / Rollback (Modelfile.mdmdoc-extract.previous) на
+    Training-странице; production меняется только через Adopt.
 13. Label quality dashboard (missing fields, only-verdict labels, duplicates,
     not-used-in-fewshot).
 

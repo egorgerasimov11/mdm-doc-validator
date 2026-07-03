@@ -25,6 +25,66 @@
 </section>
 {% endif %}
 
+{% if queue %}
+<section>
+  <h2>Training queue <span class="meta">high-value documents to label next</span></h2>
+  <table>
+    <tr><th>document</th><th>class</th><th>verdict</th><th>why</th><th></th></tr>
+    {% for q in queue %}
+    <tr>
+      <td>{{ q.file }}{% if q.labeled %} <span class="tag">labeled</span>{% endif %}</td>
+      <td>{{ q.doc_class }}</td>
+      <td><span class="dot dot--{{ q.verdict }}"></span>{{ q.verdict }}</td>
+      <td class="meta">{{ q.reasons | join('; ') }}</td>
+      <td><a href="/ui/runs/{{ q.run_id }}">open</a> ·
+          <a href="/ui/runs/{{ q.run_id }}/review">review</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+<section>
+  <h2>Model adoption <span class="meta">candidate → gated eval → adopt/rollback</span></h2>
+  {% if candidate %}
+  <p class="meta">candidate <code>{{ candidate.model }}</code> built {{ candidate.built_ts or candidate.ts }}
+    {% if not candidate.evaluated %} — <strong>not evaluated yet</strong>{% endif %}</p>
+  {% if candidate.evaluated %}
+  <ul class="timeline">
+    <li><span class="dot {{ 'dot--ACCEPT' if candidate.gate_ok else 'dot--REJECT' }}"></span>
+      <span class="grow" style="white-space:normal">
+        {% if candidate.gate_ok %}gate PASSED — safe to adopt{% else %}
+        gate FAILED: {{ candidate.gate_reasons | join('; ') }}{% endif %}</span></li>
+    {% if candidate.metrics %}
+    <li><span class="dot"></span><span class="grow" style="white-space:normal">
+      candidate: doc_type {{ candidate.metrics.doc_type_accuracy }},
+      verdict {{ candidate.metrics.verdict_accuracy }},
+      leakage {{ candidate.metrics.leakage_count }}
+      {% if candidate.baseline %} · baseline: doc_type {{ candidate.baseline.doc_type_accuracy }},
+      verdict {{ candidate.baseline.verdict_accuracy }}{% endif %}</span></li>
+    {% endif %}
+    {% if candidate.diff and (candidate.diff.regressed or candidate.diff.improved) %}
+    <li><span class="dot"></span><span class="grow" style="white-space:normal">
+      vs adopted model: ▲ {{ candidate.diff.improved | length }} improved,
+      ▼ {{ candidate.diff.regressed | length }} regressed</span></li>
+    {% endif %}
+  </ul>
+  {% endif %}
+  {% else %}
+  <p class="meta">No candidate yet — saving a correction builds one automatically,
+    or build it here. Production <code>mdmdoc-extract</code> only changes on Adopt.</p>
+  {% endif %}
+  <div class="actions">
+    <button id="btn-candidate" class="primary">Build &amp; evaluate candidate</button>
+    <button id="btn-adopt" {{ 'disabled' if not (candidate and candidate.gate_ok) }}>Adopt candidate</button>
+    <button id="btn-rollback">Rollback to previous</button>
+    {% if adoption.adopted %}
+    <span class="hint">last adopted: {{ adoption.adopted.ts }}
+      {{ '(rollback)' if adoption.adopted.rolled_back }}</span>
+    {% endif %}
+  </div>
+</section>
+
 {% if failures or diff.improved or diff.regressed %}
 <section>
   <h2>Last eval — what failed <span class="meta">{{ last_tag }} · {{ last_ts }}</span></h2>
@@ -74,6 +134,24 @@
 </section>
 {% endif %}
 
+{% if scenario_rows %}
+<section>
+  <h2>Scenario slices <span class="meta">(last eval, by label scenario tags)</span></h2>
+  <table>
+    <tr><th>scenario</th><th>n</th><th>fully correct</th><th>doc_type</th><th>verdict</th></tr>
+    {% for name, s in scenario_rows %}
+    <tr>
+      <td><code>{{ name }}</code></td>
+      <td>{{ s.n }}</td>
+      <td class="{{ 'bad' if s.accuracy < 1 }}">{{ s.accuracy }}</td>
+      <td>{{ s.doc_type_accuracy }}</td>
+      <td>{{ s.verdict_accuracy }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
 <section>
   <h2>Actions</h2>
   <div class="actions">
@@ -87,6 +165,7 @@
     <select id="eval-only" style="width:auto">
       <option value="">all</option><option value="bank">bank</option><option value="w9">w9</option>
     </select>
+    <input type="text" id="eval-scenario" placeholder="scenario tag (optional)" style="width:200px">
   </div>
   <pre id="train-log" hidden></pre>
 </section>

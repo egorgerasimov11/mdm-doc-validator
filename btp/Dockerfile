@@ -26,10 +26,14 @@ USER mdmdoc
 # Mount persistence volumes at /app/runs and /app/inbox (NOT over /app).
 ENV MDMDOC_HOME=/app \
     MDMDOC_MODE=api-only \
+    MDMDOC_WEB_EVIDENCE=0 \
     PATH="/app/.venv/bin:$PATH"
 # Point at the model endpoint (Ollama-compatible API) at deploy time:
 #   MDMDOC_OLLAMA_HOST=http://<model-host>:11434   (see docs/BTP_INTEGRATION.md)
 # Set MDMDOC_API_TOKEN — bearer auth is mandatory outside localhost.
+# MDMDOC_WEB_EVIDENCE stays 0: the sealed BTP image makes NO outbound registry
+# calls. Enable the external-evidence layer only in the local operator console,
+# and only with the egress privacy guard (docs/WEB_EVIDENCE.md).
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \

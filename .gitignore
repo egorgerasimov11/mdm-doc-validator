@@ -6,5 +6,5 @@ inbox/
 dataset/mlx-lora/
 eval/report.md
 eval/history.jsonl
-models/Modelfile.mdmdoc-extract
+models/
 .env

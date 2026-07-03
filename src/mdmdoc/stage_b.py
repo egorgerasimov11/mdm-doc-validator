@@ -159,7 +159,9 @@ def _normalize_tin(ext: Extraction) -> None:
         ext.warnings.append(f"model put a date-shaped value into tin_raw — discarded")
         if not str(ext.fields.get("sign_date") or "").strip() and "/" in tin:
             ext.fields["sign_date"] = tin
+            ext.provenance["sign_date"] = {"source": "rule", "page": None}
         ext.fields["tin_raw"] = ""
+        ext.provenance.pop("tin_raw", None)
 
 
 def _exemplar_values(doc_class: str) -> set:
@@ -191,6 +193,7 @@ def _drop_exemplar_echo(ext: Extraction, raw: RawDoc) -> None:
         s = str(v or "").strip()
         if s and s.casefold() in exemplar_vals and s.casefold() not in doc_text:
             ext.fields[k] = ""
+            ext.provenance.pop(k, None)
             ext.warnings.append(f"{k}: dropped few-shot exemplar echo (value was "
                                 "copied from an example, not read from the document)")
 
@@ -208,6 +211,7 @@ def _drop_filename_echo(ext: Extraction, raw: RawDoc) -> None:
         s = str(ext.fields.get(k) or "").strip()
         if len(s) >= 4 and s.casefold() in fname and s.casefold() not in doc_text:
             ext.fields[k] = ""
+            ext.provenance.pop(k, None)
             ext.warnings.append(f"{k}: dropped filename echo ('{s}' appears in the "
                                 "file name but not in the document)")
 
@@ -220,6 +224,7 @@ def _apply_w9_zone_probe(ext: Extraction, raw: RawDoc) -> None:
     probe = raw.w9_probe
     if not probe or ext.doc_class != "w9" or ext.doc_type != "w9":
         return  # zone coordinates are W-9-specific; never apply to a W-8
+    probe_page = probe.get("page", 0) + 1 if isinstance(probe.get("page"), int) else None
     vis_class = str(probe.get("classification") or "").strip()
     if vis_class:
         cur = str(ext.fields.get("line3_classification") or "").strip()
@@ -229,6 +234,7 @@ def _apply_w9_zone_probe(ext: Extraction, raw: RawDoc) -> None:
             ext.warnings.append(f"classification: visual checkbox = {vis_class}, "
                                 f"text model said {cur} — using the visual evidence")
         ext.fields["line3_classification"] = shown
+        ext.provenance["line3_classification"] = {"source": "zone-probe", "page": probe_page}
     digits = str(probe.get("tin_digits") or "")
     ttype = str(probe.get("tin_type") or "")
     if len(digits) == 9 and ttype in ("SSN", "EIN"):
@@ -245,6 +251,7 @@ def _apply_w9_zone_probe(ext: Extraction, raw: RawDoc) -> None:
                                   f"({'EIN' if ttype == 'EIN' else 'SSN'})")
         ext.fields["tin_raw"] = formatted
         ext.fields["tin_type"] = ttype
+        ext.provenance["tin_raw"] = {"source": "zone-probe", "page": probe_page}
 
 
 def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
@@ -254,6 +261,7 @@ def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
     if not probe:
         return
     from .privacy import scrub_text
+    probe_page = probe.get("page", 0) + 1 if isinstance(probe.get("page"), int) else None
     visual = bool(probe.get("handwritten_signature")) or (
         ext.doc_class == "bank" and bool(probe.get("stamp")))
     model_said = ext.fields.get("signed")
@@ -262,15 +270,57 @@ def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
     if visual != model_said:
         ext.warnings.append(f"signature: vision says {visual}, text model said {model_said}")
     ext.fields["signed"] = visual
+    ext.provenance["signed"] = {"source": "vision-crop", "page": probe_page}
     # the probe often reads the handwritten date next to the signature
     sig_date = str(probe.get("date_near_signature") or "").strip()
     if sig_date and ext.doc_class == "w9" and not str(ext.fields.get("sign_date") or "").strip():
         ext.fields["sign_date"] = sig_date
+        ext.provenance["sign_date"] = {"source": "vision-crop", "page": probe_page}
     evidence = scrub_text(str(probe.get("evidence") or ""), ext.vault)
     ext.signature_probe = {"handwritten_signature": bool(probe.get("handwritten_signature")),
-                           "stamp": bool(probe.get("stamp")), "evidence": evidence}
+                           "stamp": bool(probe.get("stamp")), "evidence": evidence,
+                           "page": probe_page}
     if ext.doc_class == "bank" and not visual and evidence:
         ext.fields["signature_evidence"] = evidence
+        ext.provenance["signature_evidence"] = {"source": "vision-crop", "page": probe_page}
+
+
+def _attribute_page(raw: RawDoc, value) -> int | None:
+    """Which page (1-based) a value was read from — by searching the per-page
+    texts kept in memory. Best-effort: None when the pages can't be told apart."""
+    from .fields import _norm_id
+    if isinstance(value, bool):
+        return None
+    s = str(value or "").strip()
+    if not s:
+        return None
+    if len(raw.pages_used) == 1:
+        return raw.pages_used[0] + 1
+    sc = s.casefold()
+    for i in raw.pages_used:
+        if sc in (raw.page_texts.get(i) or "").casefold():
+            return i + 1
+    s_id = _norm_id(s)
+    if len(s_id) >= 4 and s_id.isdigit():
+        for i in raw.pages_used:
+            if s_id in _norm_id(raw.page_texts.get(i) or ""):
+                return i + 1
+    return None
+
+
+def _finalize_provenance(ext: Extraction, raw: RawDoc) -> None:
+    """Every non-empty field gets a provenance entry: special sources (probes,
+    OCR fills, guards) were recorded where they fired; everything else was read
+    by the text model. Pages are attributed by per-page text search."""
+    for k, v in ext.fields.items():
+        filled = isinstance(v, bool) or str(v or "").strip()
+        if not filled:
+            ext.provenance.pop(k, None)
+            continue
+        p = ext.provenance.setdefault(k, {"source": "model", "page": None})
+        if p.get("page") is None and not isinstance(v, bool):
+            p["page"] = _attribute_page(raw, v)
+    ext.provenance.setdefault("doc_type", {"source": "model", "page": None})
 
 
 def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extraction:
@@ -283,8 +333,10 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     # deterministic overrides that need no model
     if raw.editable:
         ext_res.doc_type = "editable_source"
+        ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
     elif raw.ext in config.EMAIL_EXTS:
         ext_res.doc_type = "email"
+        ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
 
     if raw.raw_text.strip():
         obj, first_try, model_id = _run_model(raw, "TEXT")
@@ -313,10 +365,13 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
             f"packet contains invoice page(s), but classified by the bank confirmation "
             f"letter on page {pages} — an invoice elsewhere does not poison the packet")
         ext_res.doc_type = "bank_letter"
+        ext_res.provenance["doc_type"] = {"source": "rule",
+                                          "page": raw.bank_letter_pages[0] + 1}
     # deterministic type hints beat a hesitant model on hard-reject types
     elif raw.type_hint == "invoice" and ext_res.doc_type not in ("invoice",):
         ext_res.warnings.append(f"type hint 'invoice' overrides model '{ext_res.doc_type}'")
         ext_res.doc_type = "invoice"
+        ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
 
     # echo guards run BEFORE escalation: a dropped echo leaves a gap the strong
     # tier must be given the chance to fill
@@ -324,7 +379,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     _drop_filename_echo(ext_res, raw)
     _normalize_tin(ext_res)
     ext_res.crosscheck = crosscheck_ids(ext_res.fields, raw.regex_candidates,
-                                        doc_class, policy=policy)
+                                        doc_class, policy=policy,
+                                        prov=ext_res.provenance)
 
     # --- escalation to the strong tier (quality first) -------------------------
     reasons = escalation_reasons(ext_res, raw, quality)
@@ -349,7 +405,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
             _normalize_tin(ext_res)
             # regex stays the highest authority — re-run the crosscheck on the merge
             ext_res.crosscheck = crosscheck_ids(ext_res.fields, raw.regex_candidates,
-                                                doc_class, policy=policy)
+                                                doc_class, policy=policy,
+                                                prov=ext_res.provenance)
             ext_res.tier, ext_res.model_strong = "strong", strong_model
         else:
             ext_res.warnings.append("strong tier returned no valid JSON — fast result kept")
@@ -358,6 +415,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     _apply_w9_zone_probe(ext_res, raw)
     _normalize_tin(ext_res)          # zone TIN passes through the date guard too
     _apply_signature_probe(ext_res, raw)
+    _finalize_provenance(ext_res, raw)
 
     ext_res.register_secrets()
     # regex candidates hold full values too — register so the leak gate knows them

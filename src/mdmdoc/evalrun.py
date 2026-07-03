@@ -65,20 +65,48 @@ def _leak_sweep() -> int:
     return hits
 
 
+def scenario_slices(rows: list[dict]) -> dict:
+    """Per-scenario regression buckets from scored rows (pure, unit-testable).
+    A row counts toward every scenario tag on its label."""
+    slices: dict = {}
+    for r in rows:
+        if "error" in r:
+            continue
+        for tag in r.get("scenarios") or []:
+            s = slices.setdefault(tag, {"n": 0, "ok": 0, "type_ok": 0, "verdict_ok": 0})
+            s["n"] += 1
+            s["ok"] += int(bool(r.get("ok")))
+            s["type_ok"] += int(bool(r.get("type_ok")))
+            s["verdict_ok"] += int(bool(r.get("verdict_ok")))
+    return {tag: {"n": s["n"],
+                  "accuracy": round(s["ok"] / s["n"], 3),
+                  "doc_type_accuracy": round(s["type_ok"] / s["n"], 3),
+                  "verdict_accuracy": round(s["verdict_ok"] / s["n"], 3)}
+            for tag, s in sorted(slices.items())}
+
+
 def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
-             progress=None) -> int:
+             progress=None, scenario: str | None = None, record: bool = True,
+             results_name: str = "last_results.json") -> int:
     """progress: optional Callable[[str], None] for live line-by-line status
-    (used by the server's job log); CLI output is unchanged."""
+    (used by the server's job log); CLI output is unchanged.
+    scenario: only labels carrying that scenario tag.
+    record=False (candidate/model-adoption evals): write results to results_name
+    but do NOT touch history.jsonl or the main report — gate evals must never
+    masquerade as the adopted model's track record."""
     def _p(line: str) -> None:
         if progress:
             progress(line)
 
     config.ensure_dirs()
     labels = [l for l in load_labels() if not only or l.get("doc_class") == only]
+    if scenario:
+        labels = [l for l in labels if scenario in (l.get("scenarios") or [])]
     if limit:
         labels = labels[:limit]
     if not labels:
-        print("no labels yet — run some checks and label them with `mdmdoc review`")
+        print("no labels yet — run some checks and label them with `mdmdoc review`"
+              + (f" (no label carries scenario {scenario!r})" if scenario else ""))
         return 1
 
     rows = []
@@ -93,7 +121,7 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             continue
         try:
             # precedents OFF: eval measures the machine, not stored operator answers
-            res = run_check(path, lab["doc_class"], apply_precedent=False)
+            res = run_check(path, lab["doc_class"], apply_precedent=False, web_evidence=False)
         except Exception as e:  # noqa: BLE001 — eval must survive any doc
             from .privacy import scrub_text
             rows.append({"file": path.name, "error": scrub_text(str(e))})
@@ -121,6 +149,9 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
                      "doc_type": f"{pred_type}/{gold_type}",
                      "verdict": f"{res.verdict}/{lab.get('verdict_gold')}",
                      "tier": res.pub.get("tier", "fast"),
+                     "type_ok": pred_type == gold_type,
+                     "verdict_ok": res.verdict == lab.get("verdict_gold"),
+                     "scenarios": lab.get("scenarios") or [],
                      "ok": (pred_type == gold_type and res.verdict == lab.get("verdict_gold")
                             and all(row_fields.values())),
                      "fields": row_fields})
@@ -138,15 +169,19 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         "invoice_false_accept_rate": (round(invoice_false_accept / invoice_total, 3)
                                       if invoice_total else None),
         "fields": {k: round(v[0] / v[1], 3) for k, v in sorted(field_stats.items())},
+        "scenarios": scenario_slices(rows),
         "leakage_count": leaks,
     }
 
-    # structured per-doc results + regression diff vs the previous eval
-    results_path = config.EVAL_DIR / "last_results.json"
+    # structured per-doc results + regression diff vs the previous MAIN eval
+    # (candidate evals diff against the adopted model's last results, read-only)
+    main_results_path = config.EVAL_DIR / "last_results.json"
+    results_path = config.EVAL_DIR / results_name
     prev_rows = {}
-    if results_path.exists():
+    if main_results_path.exists():
         try:
-            prev_rows = {r["file"]: r for r in json.loads(results_path.read_text()).get("rows", [])
+            prev_rows = {r["file"]: r
+                         for r in json.loads(main_results_path.read_text()).get("rows", [])
                          if isinstance(r, dict)}
         except Exception:
             prev_rows = {}
@@ -164,7 +199,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         elif not r["ok"] and not prev["ok"]:
             diff["unchanged_wrong"].append(r["file"])
     results_path.write_text(json.dumps(
-        {"ts": runstore.now_iso(), "tag": tag, "rows": rows, "diff": diff},
+        {"ts": runstore.now_iso(), "tag": tag, "scenario": scenario, "rows": rows,
+         "diff": diff, "metrics": metrics},
         ensure_ascii=False, indent=1))
 
     # history + delta
@@ -175,12 +211,14 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         if lines:
             prev = json.loads(lines[-1])
     entry = {"ts": runstore.now_iso(), "tag": tag, "metrics": metrics}
-    with open(hist_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    if record:
+        with open(hist_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # report
     lines = [f"# mdmdoc eval — {entry['ts']}" + (f" ({tag})" if tag else ""), ""]
-    lines.append(f"Labels evaluated: {n} (errors: {len(rows) - n})")
+    lines.append(f"Labels evaluated: {n} (errors: {len(rows) - n})"
+                 + (f", scenario filter: {scenario}" if scenario else ""))
     lines.append("")
     lines.append("| metric | value |" + (" previous |" if prev else ""))
     lines.append("|---|---|" + ("---|" if prev else ""))
@@ -195,6 +233,12 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         if prev:
             pv = f" (prev {prev['metrics'].get('fields', {}).get(k, '—')})"
         lines.append(f"- {k}: {v}{pv}")
+    if metrics["scenarios"]:
+        lines.append("")
+        lines.append("## Scenario slices")
+        for s, m in metrics["scenarios"].items():
+            lines.append(f"- {s}: {m['accuracy']} of {m['n']} fully correct "
+                         f"(doc_type {m['doc_type_accuracy']}, verdict {m['verdict_accuracy']})")
     lines.append("")
     lines.append("## Confusion (gold -> predicted)")
     for g, preds in sorted(confusion.items()):
@@ -209,7 +253,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             lines.append(f"- {r['file']}: type {r['doc_type']}, verdict {r['verdict']}"
                          + (f", field misses: {', '.join(bad)}" if bad else ", all fields OK"))
     report = "\n".join(lines) + "\n"
-    (config.EVAL_DIR / "report.md").write_text(report, encoding="utf-8")
+    report_name = "report.md" if record else results_name.replace("_results.json", "_report.md")
+    (config.EVAL_DIR / report_name).write_text(report, encoding="utf-8")
     print(report)
     _p(f"done: doc_type={metrics['doc_type_accuracy']} verdict={metrics['verdict_accuracy']} "
        f"leakage={leaks}")

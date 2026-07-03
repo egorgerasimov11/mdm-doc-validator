@@ -79,6 +79,13 @@ button:disabled { color: var(--faint); border-color: var(--divider); cursor: def
 .tag { font-size: 11px; color: var(--secondary); border: 1px solid var(--divider);
        border-radius: 4px; padding: 0 5px; }
 
+.tag-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tag-row .tag { cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+                font-size: 12px; padding: 2px 8px; user-select: none; }
+.tag-row .tag input { margin: 0; }
+.tag-row .tag:has(input:checked) { border-color: var(--ink); color: var(--ink); font-weight: 600; }
+.tag-row input[type=text] { width: 230px; }
+
 .chip { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
         padding: 1px 6px; border-radius: 4px; }
 .chip--CRITICAL { color: var(--reject); background: #fdeef0; }
@@ -90,6 +97,16 @@ th { text-align: left; font-weight: 600; color: var(--secondary); padding: 6px 1
      border-bottom: 1px solid var(--divider); }
 td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--divider); }
 td.bad { color: var(--reject); font-weight: 600; }
+
+/* External evidence panel — advisory hints from outside registries. The banner
+   is a permanent reminder that the web never decides the verdict. */
+.banner { font-size: 13px; color: var(--secondary); background: var(--code-bg);
+          border: 1px solid var(--divider); border-radius: 6px; padding: 8px 12px;
+          margin: 4px 0 12px; }
+td.ev--found { color: var(--accept); }
+td.ev--conflict { color: var(--reject); font-weight: 600; }
+td.ev--not_found { color: var(--secondary); }
+td.ev--unavailable { color: var(--faint); }
 
 .field-row { display: grid; grid-template-columns: 220px 1fr; gap: 8px 14px;
              padding: 8px 0; border-top: 1px solid var(--divider); align-items: center; }
@@ -126,3 +143,13 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
 .verdict-h { display: flex; align-items: center; gap: 10px; }
 .verdict-h .dot { width: 12px; height: 12px; }
+
+.ev-thumb { display: block; height: 46px; max-width: 300px; object-fit: cover;
+            border: 1px solid var(--divider); border-radius: 4px; background: var(--code-bg); }
+.ev-thumb:hover { border-color: var(--secondary); }
+.ev-thumb--sm { height: 34px; max-width: 200px; flex: 0 0 auto; }
+.timeline .ev-thumb--sm { margin-left: auto; }
+.data-table td { vertical-align: middle; }
+.src-tag { white-space: nowrap; }
+.src-tag--ocr-regex, .src-tag--zone-probe, .src-tag--vision-crop { color: var(--review); border-color: var(--review); }
+.src-tag--precedent { color: var(--accept); border-color: var(--accept); }
