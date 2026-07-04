@@ -42,6 +42,33 @@ rules:
     message: "Editable file (.docx/.xlsx/.txt/.rtf) is not acceptable as bank proof. Request a PDF/scan on letterhead."
     message_ru: "Редактируемый файл (.docx/.xlsx/.txt/.rtf) не принимается как банковское подтверждение. Запросить PDF/скан."
 
+  - id: BNK-005
+    name: ap_form_self_certified
+    applies_to: [ap_document]
+    when: {always: true}
+    severity: NOTE
+    verdict_effect: null
+    message: "Self-certified AP/HCP bank-information form (not bank-issued). Acceptable per the HCP/AP policy for this request type; verify every detail against SAP and the request context."
+    message_ru: "Самозаполненная AP/HCP форма банковских данных (не выпущена банком). Приемлемо по политике HCP/AP для этого типа запроса; каждую деталь сверить с SAP и контекстом запроса."
+
+  - id: BNK-006
+    name: statement_swift_not_shown
+    applies_to: [bank_statement]
+    when: {check: field_empty, field: swift_bic}
+    severity: NOTE
+    verdict_effect: null
+    message: "Bank statement shows no SWIFT/BIC — normal for statements; take SWIFT from the SAP/request-form comparison, not from this document."
+    message_ru: "В выписке нет SWIFT/BIC — для выписок это норма; SWIFT берётся из сверки с SAP/формой запроса, не из этого документа."
+
+  - id: BNK-004
+    name: payment_instructions_context
+    applies_to: [payment_instructions]
+    when: {always: true}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "Supplier payment instructions — NOT an invoice. Acceptable only as an official, non-editable supplier document (letterhead) whose details match SAP; otherwise request a bank letter or bank statement. Mind payment-method limits printed on it (e.g. 'ACH only — not for wire transfers'). Any kickback reason is 'no official supplier support', never 'invoice'."
+    message_ru: "Платёжные инструкции поставщика — это НЕ инвойс. Принимается только как официальный нередактируемый документ поставщика (letterhead) с реквизитами, совпадающими с SAP; иначе запросить bank letter / bank statement. Учитывай ограничения способа платежа (например, «ACH only — не для wire»). Причина kickback — «нет официального подтверждения поставщика», не «инвойс»."
+
   - id: BNK-010
     name: swift_shape
     when: {check: swift_valid, field: swift_bic, args: {lengths: [8, 11]}}
@@ -78,8 +105,8 @@ rules:
     when: {check: unsigned_typed_block, field: signed}
     severity: NOTE
     verdict_effect: null
-    message: "No wet signature/stamp; a typed bank-officer block is present ({detail}) — common for US bank confirmation letters; note for the Data Owner."
-    message_ru: "Живой подписи/печати нет; есть typed-блок офицера банка ({detail}) — типично для американских bank confirmation писем; заметка для Data Owner."
+    message: "No wet signature/stamp; compensating evidence present ({detail}) — normal for system-issued bank letters; note for the Data Owner."
+    message_ru: "Живой подписи/печати нет; есть компенсирующее свидетельство ({detail}) — норма для системно выпускаемых банковских писем; заметка для Data Owner."
 
   - id: BNK-022
     name: partial_screenshot

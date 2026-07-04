@@ -37,7 +37,10 @@ doc → eval scenario slice → adopt only if no regressions`.
    vs BOFAUS6S) — не перетирать primary FX-кодом.
 4. **Verdict text с указанием страницы-источника**: "ACCEPT based on page 3 bank
    letter; invoice page 4 ignored" (mixed_packet=true уже детектится).
-5. Supplier letterhead payment instructions как явный подтип с чек-листом.
+5. ~~Supplier payment instructions как явный подтип~~ DONE 2026-07-03
+   (payment_instructions + BNK-004 WARNING; remittance-контекст больше не
+   считается invoice-признаком — invoice_marks() структурный); чек-лист
+   letterhead-признаков — следующий шаг.
 6. Email-support exception mode: только WARNING/exception с approver evidence.
 7. Quality diagnostics в отчёте: image-only / rotated / low contrast / OCR weak /
    vision crop used.
@@ -81,6 +84,10 @@ authorized payer. Source trust tiers: Tier1 IRS/FDIC/Fed/OFAC/SEC/SAM/registry;
 Tier2 official domain; Tier3 каталоги; Tier4 не decision-grade.
 
 ### Инфраструктура
-16. Batch-режим: PDF + workbook + SAP screenshot одним пакетом.
+16. Batch-режим: PDF + workbook + SAP screenshot одним пакетом. Первый шаг DONE
+    2026-07-03: единый вход Auto (stage_a.sniff_doc_class), .zip/.eml-контейнеры
+    (pipeline._resolve_container: вложения писем распаковываются, лучший документ
+    выбирается по page_score + bank-letter бонусу с быстрым OCR стр.1, остальные
+    перечислены в warnings); дальше — прогон ВСЕХ документов пакета.
 17. Jobs persistence через рестарты сервера (сейчас — in-memory + Dashboard strip).
 18. Export отчёта в PDF; RU-версия отчёта целиком.

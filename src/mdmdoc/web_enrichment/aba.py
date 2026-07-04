@@ -146,10 +146,8 @@ def _routing_evidence(aba: str, which: str, bank_name: str, vault) -> list[Evide
     out: list[Evidence] = []
     src = "ABA routing checksum (FFIEC/Fed algorithm)"
     if len(aba) != 9:
-        out.append(Evidence("aba_checksum", CONFLICT,
-                            f"{which} routing '{aba}' is not 9 digits",
-                            src, 1, "WEB-ABA-1", detail="malformed routing number",
-                            query=f"aba:{aba}"))
+        # not a US ABA at all (Italian ABI/CAB, JP bank/branch codes, …) —
+        # a US checksum verdict on a domestic code is noise, not evidence
         return out
     if checksum_valid(aba):
         out.append(Evidence("aba_checksum", FOUND,
@@ -179,7 +177,7 @@ def collect(ext) -> list[Evidence]:
     seen: set[str] = set()
     for key, which in (("routing_aba", "standard"), ("routing_aba_wires", "wire")):
         aba = _digits(f.get(key))
-        if aba and aba not in seen:
+        if len(aba) == 9 and aba not in seen:
             seen.add(aba)
             out.extend(_routing_evidence(aba, which, bank_name, ext.vault))
     # FDIC name/active check — only meaningful for US banks; gate on a routing

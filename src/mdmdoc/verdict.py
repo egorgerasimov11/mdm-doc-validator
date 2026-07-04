@@ -9,7 +9,7 @@ _PRECEDENCE = ["REJECT", "NEED_MANUAL_REVIEW", "WARNING", "ACCEPT"]
 
 _NEXT_STEP = {
     "bank": {
-        "ACCEPT": "use as banking support",
+        "ACCEPT": "use as banking support — compare against SAP/the request form before entry",
         "WARNING": "usable with caution — note the warnings for the Data Owner",
         "NEED_MANUAL_REVIEW": "hold — resolve the flagged items manually before use",
         "REJECT": "kick back — request a bank letter / bank statement / supplier letterhead",

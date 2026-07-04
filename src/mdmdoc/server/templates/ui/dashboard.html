@@ -13,7 +13,8 @@
 <section>
   <div class="actions">
     <span class="seg" id="class-seg">
-      <button type="button" class="active" data-v="bank">Bank document</button>
+      <button type="button" class="active" data-v="auto">Auto</button>
+      <button type="button" data-v="bank">Bank document</button>
       <button type="button" data-v="w9">W-9 / W-8</button>
     </span>
     <select id="lang" style="width:auto">
@@ -21,8 +22,8 @@
     </select>
     <label class="meta"><input type="checkbox" id="quality"> thorough (strong model, slower)</label>
   </div>
-  <div class="drop" id="drop">Drop a PDF or image here — or click to choose a file</div>
-  <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" hidden>
+  <div class="drop" id="drop">Drop a PDF, image, .eml or .zip here — or click to choose a file</div>
+  <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.eml,.zip" hidden>
   <div class="actions" id="sap-row">
     <button type="button" id="sap-attach">+ SAP screenshot (optional)</button>
     <span class="meta" id="sap-name"></span>

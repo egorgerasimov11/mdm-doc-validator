@@ -1,6 +1,7 @@
 {
- "ts": "2026-07-03T02:28:35Z",
- "tag": "quality-overhaul-v2",
+ "ts": "2026-07-04T00:20:16Z",
+ "tag": "audit-fixes-v2",
+ "scenario": null,
  "rows": [
   {
    "file": "CERTIFICACION BANCARIA BANCOLOMBIA MARZO 2026.pdf",
@@ -9,9 +10,12 @@
    "doc_type": "bank_letter/bank_letter",
    "verdict": "ACCEPT/ACCEPT",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": false,
    "fields": {
-    "account_holder": true,
+    "account_holder": false,
     "bank_name": true,
     "iban": true,
     "swift_bic": true,
@@ -22,9 +26,12 @@
    "file": "MTRC Company information for vendors and customers.pdf",
    "run_id": "26d2e55a19b584ed",
    "doc_class": "bank",
-   "doc_type": "supplier_letterhead/supplier_letterhead",
+   "doc_type": "ap_document/supplier_letterhead",
    "verdict": "NEED_MANUAL_REVIEW/ACCEPT",
-   "tier": "fast",
+   "tier": "strong",
+   "type_ok": false,
+   "verdict_ok": false,
+   "scenarios": [],
    "ok": false,
    "fields": {
     "account_holder": false,
@@ -41,6 +48,9 @@
    "doc_type": "bank_letter/bank_letter",
    "verdict": "ACCEPT/ACCEPT",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": true,
    "fields": {
     "account_holder": true,
@@ -55,13 +65,16 @@
    "run_id": "bbb53e9752541ca2",
    "doc_class": "bank",
    "doc_type": "bank_letter/bank_letter",
-   "verdict": "WARNING/WARNING",
+   "verdict": "NEED_MANUAL_REVIEW/WARNING",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": false,
+   "scenarios": [],
    "ok": false,
    "fields": {
     "account_holder": true,
-    "bank_name": true,
-    "iban": true,
+    "bank_name": false,
+    "iban": false,
     "swift_bic": true,
     "account_number": false
    }
@@ -73,6 +86,9 @@
    "doc_type": "bank_letter/bank_letter",
    "verdict": "ACCEPT/ACCEPT",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": true,
    "fields": {
     "account_holder": true,
@@ -86,12 +102,15 @@
    "file": "Zajecka Banking Info LV.Nova.61.26.pdf",
    "run_id": "bed86d7b98961e0a",
    "doc_class": "bank",
-   "doc_type": "other/bank_letter",
+   "doc_type": "bank_letter/bank_letter",
    "verdict": "ACCEPT/ACCEPT",
    "tier": "fast",
-   "ok": false,
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
+   "ok": true,
    "fields": {
-    "account_holder": false,
+    "account_holder": true,
     "bank_name": true,
     "iban": true,
     "swift_bic": true,
@@ -105,6 +124,9 @@
    "doc_type": "bank_letter/bank_letter",
    "verdict": "ACCEPT/WARNING",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": false,
+   "scenarios": [],
    "ok": false,
    "fields": {
     "account_holder": true,
@@ -120,7 +142,10 @@
    "doc_class": "bank",
    "doc_type": "other/other",
    "verdict": "NEED_MANUAL_REVIEW/NEED_MANUAL_REVIEW",
-   "tier": "fast",
+   "tier": "strong",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": true,
    "fields": {
     "account_holder": true,
@@ -135,13 +160,16 @@
    "run_id": "f4166b63a2b90639",
    "doc_class": "bank",
    "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/ACCEPT",
+   "verdict": "NEED_MANUAL_REVIEW/ACCEPT",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": false,
+   "scenarios": [],
    "ok": false,
    "fields": {
     "account_holder": false,
-    "bank_name": true,
-    "iban": true,
+    "bank_name": false,
+    "iban": false,
     "swift_bic": true,
     "account_number": false
    }
@@ -151,9 +179,12 @@
    "run_id": "003034a81d88f858",
    "doc_class": "bank",
    "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/WARNING",
+   "verdict": "WARNING/WARNING",
    "tier": "fast",
-   "ok": false,
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
+   "ok": true,
    "fields": {
     "account_holder": true,
     "bank_name": true,
@@ -163,12 +194,15 @@
    }
   },
   {
-   "file": "Customer Welcome Packet - USD (1).pdf",
+   "file": "3ba4dbff673a3eef__Customer Welcome Packet - USD _1_.pdf",
    "run_id": "3ba4dbff673a3eef",
    "doc_class": "bank",
    "doc_type": "bank_letter/bank_letter",
    "verdict": "ACCEPT/ACCEPT",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": true,
    "fields": {
     "account_holder": true,
@@ -183,9 +217,12 @@
    "run_id": "a279976592a9c8ba",
    "doc_class": "bank",
    "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/ACCEPT",
+   "verdict": "WARNING/ACCEPT",
    "tier": "fast",
-   "ok": true,
+   "type_ok": true,
+   "verdict_ok": false,
+   "scenarios": [],
+   "ok": false,
    "fields": {
     "account_holder": true,
     "bank_name": true,
@@ -195,45 +232,18 @@
    }
   },
   {
-   "file": "w9.pdf",
-   "run_id": "457d2745f549cba8",
-   "doc_class": "w9",
-   "doc_type": "w9/w9",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "ok": false,
-   "fields": {
-    "line1_name": true,
-    "line2_business_name": true,
-    "line3_classification": false,
-    "tin": false
-   }
-  },
-  {
    "file": "13-Denver 2026 W9.pdf",
    "run_id": "fe65fd5547742dfe",
    "doc_class": "w9",
    "doc_type": "w9/w9",
    "verdict": "ACCEPT/ACCEPT",
    "tier": "strong",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": true,
    "fields": {
     "line1_name": true,
-    "line2_business_name": true,
-    "line3_classification": true,
-    "tin": true
-   }
-  },
-  {
-   "file": "AES2026 W9 Honorarium Donation from Dr. Clarke.pdf",
-   "run_id": "2e084d3edb89128c",
-   "doc_class": "w9",
-   "doc_type": "w9/w9",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "ok": false,
-   "fields": {
-    "line1_name": false,
     "line2_business_name": true,
     "line3_classification": true,
     "tin": true
@@ -246,6 +256,9 @@
    "doc_type": "w9/w9",
    "verdict": "ACCEPT/ACCEPT",
    "tier": "strong",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": true,
    "fields": {
     "line1_name": true,
@@ -261,6 +274,9 @@
    "doc_type": "w9/w9",
    "verdict": "ACCEPT/ACCEPT",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": true,
    "fields": {
     "line1_name": true,
@@ -276,6 +292,45 @@
    "doc_type": "w8/w8",
    "verdict": "NEED_MANUAL_REVIEW/NEED_MANUAL_REVIEW",
    "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
+   "ok": false,
+   "fields": {
+    "line1_name": false,
+    "line2_business_name": true,
+    "line3_classification": false,
+    "tin": true
+   }
+  },
+  {
+   "file": "w9.pdf",
+   "run_id": "457d2745f549cba8",
+   "doc_class": "w9",
+   "doc_type": "w9/w9",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
+   "ok": true,
+   "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   }
+  },
+  {
+   "file": "AES2026 W9 Honorarium Donation from Dr. Clarke.pdf",
+   "run_id": "2e084d3edb89128c",
+   "doc_class": "w9",
+   "doc_type": "w9/w9",
+   "verdict": "ACCEPT/ACCEPT",
+   "tier": "fast",
+   "type_ok": true,
+   "verdict_ok": true,
+   "scenarios": [],
    "ok": true,
    "fields": {
     "line1_name": true,
@@ -287,7 +342,36 @@
  ],
  "diff": {
   "improved": [],
-  "regressed": [],
-  "unchanged_wrong": []
+  "regressed": [
+   "MTRC Company information for vendors and customers.pdf"
+  ],
+  "unchanged_wrong": [
+   "CERTIFICACION BANCARIA BANCOLOMBIA MARZO 2026.pdf",
+   "医师协会开户许可证（盖章）.pdf",
+   "IMIMBH-Bankverbindungen 4er.pdf",
+   "890480239 certitifación bancaria bancolombia.pdf",
+   "Banking support.pdf",
+   "2026 05 w8ben.pdf"
+  ]
+ },
+ "metrics": {
+  "n": 18,
+  "doc_type_accuracy": 0.944,
+  "verdict_accuracy": 0.722,
+  "json_valid_first_try": 1.0,
+  "invoice_false_accept_rate": null,
+  "fields": {
+   "bank.account_holder": 0.75,
+   "bank.account_number": 0.667,
+   "bank.bank_name": 0.833,
+   "bank.iban": 0.833,
+   "bank.swift_bic": 1.0,
+   "w9.line1_name": 0.833,
+   "w9.line2_business_name": 1.0,
+   "w9.line3_classification": 0.833,
+   "w9.tin": 1.0
+  },
+  "scenarios": {},
+  "leakage_count": 0
  }
 }

@@ -67,7 +67,10 @@ def label_to_example(lab: dict) -> dict:
     excerpt = _defake(lab.get("stage_a_excerpt", ""), smap)[-800:]
     inp = ("OCR-VERIFIED CANDIDATES:\n" + json.dumps(cand, ensure_ascii=False)
            + "\n\nDOCUMENT TEXT:\n" + excerpt)
-    return {"input": inp, "output": {"doc_type": lab.get("doc_type_gold", ""), "fields": out_fields}}
+    # doc_sha256 lets the echo guard skip exemplars built from the SAME document
+    # (its own legit values must not be dropped as "echo" when OCR garbles the text)
+    return {"input": inp, "output": {"doc_type": lab.get("doc_type_gold", ""), "fields": out_fields},
+            "doc_sha256": lab.get("doc_sha256", "")}
 
 
 def _completeness(lab: dict) -> int:

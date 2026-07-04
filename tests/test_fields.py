@@ -84,6 +84,28 @@ def test_invoice_text_hint_suppressed_by_bank_letter_page():
     assert type_hint("scan.pdf", INVOICE, ".pdf", "bank") == "invoice"
 
 
+REMIT = ("(For ACH Payments Only - Do not use for wire transfers)\n"
+         "Bank Name:\nIntrust Bank\nRouting Number:\n021000021\n"
+         "Account Type:\nChecking\n"
+         "Each ACH payment must be accompanied by an email remittance sent to\n"
+         "billpay@example.com and must include the following:\n"
+         "Customer Account Number\nInvoice Number(s) being paid\n"
+         "Individual payment amount per invoice\n"
+         "Example:\nAcct: 12345  |  Inv: 12345, 67890  |  Amt: $1,500.00, $500.00\n")
+
+
+def test_remittance_instructions_are_not_invoice():
+    from mdmdoc.fields import page_markers
+    # "invoice" wording that only describes FUTURE invoices being paid is not
+    # invoice evidence — this doc is supplier payment instructions (WARNING),
+    # never REJECT-as-invoice
+    assert page_markers(REMIT)["invoice"] is False
+    assert type_hint("13-TBD ACH Payment Instructions.pdf", REMIT, ".pdf", "bank") \
+        == "payment_instructions"
+    # a real invoice (own number/date/amount) still classifies as invoice
+    assert type_hint("scan.pdf", INVOICE, ".pdf", "bank") == "invoice"
+
+
 def test_find_precedent(tmp_path, monkeypatch):
     import json
     from mdmdoc import config

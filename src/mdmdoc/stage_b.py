@@ -20,7 +20,8 @@ import re
 
 from . import config, model_client as mc
 from .fields import (BANK_DOC_TYPES, BANK_KEYS, W9_DOC_TYPES, W9_KEYS, Extraction,
-                     crosscheck_ids, to_iso2)
+                     crosscheck_ids, iban_mod97_ok, to_iso2)
+from .fields import find_valid_ibans as fields_valid_ibans
 from .stage_a import RawDoc
 
 _DATE_SHAPE = re.compile(r"^\s*\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}\s*$")
@@ -62,6 +63,14 @@ def build_prompt(raw: RawDoc, role: str = "TEXT") -> str:
                        + ". A packet that CONTAINS a bank confirmation letter is classified "
                          "by that letter (doc_type bank_letter) — invoice pages elsewhere "
                          "do not make the packet an invoice.")
+    elif raw.invoice_pages:
+        packet_note = ("\nPACKET SIGNALS: page(s) "
+                       + ", ".join(str(p + 1) for p in raw.invoice_pages)
+                       + " look like an invoice. Careful: remittance/payment instructions "
+                         "mention invoices being PAID ('invoice number(s) being paid', "
+                         "'must include', example amounts) but have no invoice "
+                         "number/date/amount-due of their own — that is doc_type "
+                         "payment_instructions, not invoice.")
     cand = {k: v for k, v in raw.regex_candidates.items()}
     parts.append(
         "DOCUMENT FILENAME: " + raw.path.rsplit("/", 1)[-1]
@@ -73,6 +82,10 @@ def build_prompt(raw: RawDoc, role: str = "TEXT") -> str:
         + "\n\nReturn JSON with exactly these keys: doc_type (one of "
         + ", ".join(types) + "), fields {" + ", ".join(keys) + "}. "
         + "Use \"\" for absent string fields, false for absent boolean flags. Do not invent values."
+        + ("\nClassify by what the document IS, not by keywords: supplier ACH/remittance "
+           "payment instructions are doc_type payment_instructions even though they "
+           "mention invoices; a real invoice carries its own invoice number, date and "
+           "amount due." if doc_class == "bank" else "")
     )
     return "\n\n".join(parts)
 
@@ -108,6 +121,12 @@ def escalation_reasons(ext: Extraction, raw: RawDoc, quality: bool) -> list[str]
             r.append("us-bank-no-routing")
         if not str(f.get("account_number") or "").strip() and not str(f.get("iban") or "").strip():
             r.append("bank-no-account-id")
+        if not str(f.get("account_holder") or "").strip():
+            r.append("bank-no-holder")
+        if not str(f.get("bank_name") or "").strip():
+            r.append("bank-no-bank-name")
+        if ext.doc_type in ("", "other"):
+            r.append("bank-type-unclear")
     if ext.doc_class == "w9" and ext.doc_type == "w9":
         if not str(f.get("tin_raw") or "").strip():
             r.append("w9-no-tin")
@@ -164,12 +183,16 @@ def _normalize_tin(ext: Extraction) -> None:
         ext.provenance.pop("tin_raw", None)
 
 
-def _exemplar_values(doc_class: str) -> set:
+def _exemplar_values(doc_class: str, exclude_sha: str = "") -> set:
     """All string values that appear in few-shot exemplar OUTPUTS. These are
     shape-preserving fakes / example data — a real document can never
-    legitimately contain them; if the model outputs one, it echoed the exemplar."""
+    legitimately contain them; if the model outputs one, it echoed the exemplar.
+    Exemplars built from `exclude_sha` (the document being processed) are
+    skipped: its own gold values are NOT echoes."""
     vals: set = set()
     for ex in _load_fewshot(doc_class):
+        if exclude_sha and ex.get("doc_sha256") == exclude_sha:
+            continue
         out = ex.get("output", {})
         for v in (out.get("fields") or {}).values():
             s = str(v or "").strip()
@@ -183,7 +206,7 @@ def _drop_exemplar_echo(ext: Extraction, raw: RawDoc) -> None:
     the model copied the few-shot example instead of reading the document.
     Any extracted value that equals an exemplar value AND does not occur in
     the document text is an echo — drop it."""
-    exemplar_vals = _exemplar_values(ext.doc_class)
+    exemplar_vals = _exemplar_values(ext.doc_class, exclude_sha=raw.sha256)
     if not exemplar_vals:
         return
     doc_text = raw.raw_text.casefold()
@@ -199,6 +222,169 @@ def _drop_exemplar_echo(ext: Extraction, raw: RawDoc) -> None:
 
 
 _NAME_FIELDS = ("line1_name", "line2_business_name", "account_holder", "bank_name")
+
+
+def _cross_note(ext: Extraction, msg: str) -> None:
+    if msg not in ext.crosscheck:
+        ext.crosscheck.append(msg)
+
+
+def _audit_bank_ids(ext: Extraction, raw: RawDoc) -> None:
+    """Deterministic audit of bank identifiers (idempotent — runs again after the
+    strong-tier merge):
+    - routing fields hold 9-digit US ABA numbers ONLY; Italian ABI/CAB and other
+      domestic codes move into a crosscheck note, verified against the IBAN
+      structure when possible (CAB doubles as branch_code);
+    - the printed account number wins over the zero-padded IBAN account part;
+    - the IBAN mod-97 checksum is stated out loud (audit fact, not silence)."""
+    if ext.doc_class != "bank":
+        return
+    f = ext.fields
+    iban = re.sub(r"\s", "", str(f.get("iban") or "")).upper()
+    if iban and not iban_mod97_ok(iban):
+        # the model dropped/garbled a character — the DOCUMENT is the authority:
+        # look for a checksum-valid IBAN in the raw text (spaced prints included)
+        cands = fields_valid_ibans(raw.raw_text)
+        same_cc = [c for c in cands if c[:2] == iban[:2]]
+        same_tail = [c for c in same_cc if c[-4:] == iban[-4:]]
+        pick = (same_tail or same_cc)
+        if len(set(pick)) == 1 and pick[0] != iban:
+            f["iban"] = pick[0]
+            ext.provenance["iban"] = {"source": "ocr-regex", "page": None}
+            _cross_note(ext, "iban repaired from the document text (model read "
+                             "failed the mod-97 checksum)")
+            iban = pick[0]
+    if iban:
+        _cross_note(ext, "iban checksum (ISO 13616 mod-97): "
+                    + ("valid" if iban_mod97_ok(iban) else "INVALID"))
+    domestic: list[str] = []
+    for k in ("routing_aba", "routing_aba_wires"):
+        d = re.sub(r"\D", "", str(f.get(k) or ""))
+        if d and len(d) != 9:
+            domestic.append(d)
+            f[k] = ""
+            ext.provenance.pop(k, None)
+    if domestic:
+        if iban.startswith("IT") and len(iban) >= 15:
+            abi, cab = iban[5:10], iban[10:15]
+            ok = set(domestic) <= {abi, cab}
+            _cross_note(ext, f"domestic bank codes {'/'.join(domestic)} (ABI/CAB, not ABA): "
+                             + ("match the IBAN structure" if ok
+                                else f"do NOT match the IBAN structure (ABI {abi} / CAB {cab})"))
+            if not str(f.get("branch_code") or "").strip():
+                f["branch_code"] = cab
+                ext.provenance["branch_code"] = {"source": "rule", "page": None}
+        else:
+            _cross_note(ext, "domestic bank code(s) (not a US ABA), removed from "
+                             f"routing fields: {'/'.join(domestic)}")
+    acct = re.sub(r"\D", "", str(f.get("account_number") or ""))
+    if iban and acct and acct.lstrip("0") != acct and iban.endswith(acct) \
+            and acct.lstrip("0") in (raw.raw_text or ""):
+        printed = acct.lstrip("0")
+        f["account_number"] = printed
+        _cross_note(ext, f"account number: printed form {printed} "
+                         f"(IBAN account part is the zero-padded {acct})")
+
+
+def _fix_jp_form(ext: Extraction, raw: RawDoc) -> None:
+    """Japanese domestic bank forms: 〒NNN-NNNN is a POSTAL CODE, not an account;
+    labeled 口座番号/支店 fields rescue the real values; country is inferable.
+    NFKC first — JP documents print digits/hyphens full-width (８１３−００４４),
+    which no ASCII regex would ever match."""
+    if ext.doc_class != "bank":
+        return
+    import unicodedata
+    text = unicodedata.normalize("NFKC", raw.raw_text or "")
+    if "〒" not in text and "口座" not in text:
+        return
+    f = ext.fields
+    acct = re.sub(r"\D", "", str(f.get("account_number") or ""))
+    if len(acct) == 7 and re.search(rf"〒\s*{acct[:3]}[-‐−–]?\s*{acct[3:]}", text):
+        ext.warnings.append(f"account_number …{acct[-4:]} equalled the postal code (〒) — dropped")
+        f["account_number"] = ""
+        ext.provenance.pop("account_number", None)
+    if not str(f.get("account_number") or "").strip():
+        m = re.search(r"(?:口座番号|Account\s*Number)[^\d]{0,20}(\d{4,10})", text)
+        if m:
+            f["account_number"] = m.group(1)
+            ext.provenance["account_number"] = {"source": "ocr-regex", "page": None}
+            _cross_note(ext, "account number taken from the labeled 口座番号/Account Number field")
+    # split-stream forms (labels and values live in separate text runs): the
+    # account value comes BEFORE the bank-name token in the value stream, while
+    # a postal-code-like token from the address block comes after it
+    acct = re.sub(r"\D", "", str(f.get("account_number") or ""))
+    bank_pos = text.find("銀行")
+    if acct and bank_pos > 0 and text.find(acct) > bank_pos:
+        earlier = {m.group(0) for m in re.finditer(r"\b\d{6,8}\b", text[:bank_pos])}
+        earlier.discard(acct)
+        if len(earlier) == 1:
+            new = earlier.pop()
+            ext.warnings.append(
+                f"account_number …{acct[-4:]} sits after the bank name (address zone) — "
+                f"took …{new[-4:]} from the form-value stream instead; verify")
+            f["account_number"] = new
+            ext.provenance["account_number"] = {"source": "rule", "page": None}
+    if not str(f.get("branch_code") or "").strip():
+        m = re.search(r"(?:支店(?:番号|コード|名)?|Branch\s*(?:Name/number|Number|No\.?|Code)?)"
+                      r"\s*[:：]?\s*0?(\d{3})\b", text)
+        if m:
+            f["branch_code"] = m.group(1)
+            ext.provenance["branch_code"] = {"source": "ocr-regex", "page": None}
+    if "普通" in text and not str(f.get("account_type") or "").strip():
+        f["account_type"] = "普通口座 (ordinary account)"
+        ext.provenance["account_type"] = {"source": "ocr-regex", "page": None}
+    if not str(f.get("bank_country") or "").strip():
+        f["bank_country"] = "JP"
+        ext.provenance["bank_country"] = {"source": "rule", "page": None}
+        _cross_note(ext, "bank country inferred: JP (Japanese domestic form markers)")
+
+
+def _fix_statement_period(ext: Extraction, raw: RawDoc) -> None:
+    """A statement's date IS its period — rescue it when the model left doc_date
+    empty ('no visible document date' on a dated statement reads as a miss)."""
+    if ext.doc_class != "bank" or ext.doc_type != "bank_statement":
+        return
+    if str(ext.fields.get("doc_date") or "").strip():
+        return
+    m = re.search(r"(\d{1,2}[- ]?[A-Za-z]{3}[- ]?\d{4})\s*(?:to|through|–|—|-)\s*"
+                  r"(\d{1,2}[- ]?[A-Za-z]{3}[- ]?\d{4})", raw.raw_text or "")
+    if m:
+        ext.fields["doc_date"] = f"{m.group(1)} to {m.group(2)}"
+        ext.provenance["doc_date"] = {"source": "ocr-regex", "page": None}
+        _cross_note(ext, "document date = statement period")
+
+
+def _esignature_guard(ext: Extraction, raw: RawDoc) -> None:
+    """A DocuSign/Adobe-Sign envelope IS a signature (electronic) — 'unsigned'
+    would be wrong; the timestamp near it is the signing date."""
+    text_low = (raw.raw_text or "").lower()
+    if ext.doc_class != "bank" or ext.fields.get("signed"):
+        return
+    if "docusign envelope" in text_low or "docusigned by" in text_low \
+            or "adobe sign" in text_low:
+        ext.fields["signed"] = True
+        ext.fields["signature_evidence"] = \
+            "electronically signed (DocuSign/e-signature envelope present)"
+        ext.provenance["signed"] = {"source": "rule", "page": None}
+        if not str(ext.fields.get("doc_date") or "").strip():
+            m = re.search(r"(\d{4}-\d{2}-\d{2})\s*\|\s*\d{1,2}:\d{2}", raw.raw_text or "")
+            if m:
+                ext.fields["doc_date"] = m.group(1)
+                ext.provenance["doc_date"] = {"source": "ocr-regex", "page": None}
+
+
+_BANKNAME_NOISE = ("vigilado", "superintendencia", "supervised by", "regulated by")
+
+
+def _drop_regulator_noise(ext: Extraction) -> None:
+    """Regulator watermarks (e.g. Colombia's margin stamp 'VIGILADO
+    Superintendencia Financiera') get read as the bank name — drop them so the
+    gap escalates to the strong tier instead of persisting as a wrong value."""
+    v = str(ext.fields.get("bank_name") or "")
+    if v and any(n in v.lower() for n in _BANKNAME_NOISE):
+        ext.warnings.append(f"bank_name '{v}' looks like a regulator watermark — dropped")
+        ext.fields["bank_name"] = ""
+        ext.provenance.pop("bank_name", None)
 
 
 def _drop_filename_echo(ext: Extraction, raw: RawDoc) -> None:
@@ -377,10 +563,18 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     # tier must be given the chance to fill
     _drop_exemplar_echo(ext_res, raw)
     _drop_filename_echo(ext_res, raw)
+    _drop_regulator_noise(ext_res)
     _normalize_tin(ext_res)
     ext_res.crosscheck = crosscheck_ids(ext_res.fields, raw.regex_candidates,
                                         doc_class, policy=policy,
                                         prov=ext_res.provenance)
+    # audit guards AFTER the crosscheck assignment (it REPLACES the list — notes
+    # added earlier would be wiped) and before escalation (a dropped postal-code
+    # 'account' must open the gap the strong tier is asked to fill)
+    _audit_bank_ids(ext_res, raw)
+    _fix_jp_form(ext_res, raw)
+    _fix_statement_period(ext_res, raw)
+    _esignature_guard(ext_res, raw)
 
     # --- escalation to the strong tier (quality first) -------------------------
     reasons = escalation_reasons(ext_res, raw, quality)
@@ -395,6 +589,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
             # the strong tier reads the same filename-bearing prompt — re-guard
             _drop_exemplar_echo(ext_res, raw)
             _drop_filename_echo(ext_res, raw)
+            _drop_regulator_noise(ext_res)
             strong_type = str(strong_obj.get("doc_type", "") or "").strip().lower()
             if (strong_type in types and not raw.editable
                     and raw.ext not in config.EMAIL_EXTS
@@ -407,6 +602,11 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
             ext_res.crosscheck = crosscheck_ids(ext_res.fields, raw.regex_candidates,
                                                 doc_class, policy=policy,
                                                 prov=ext_res.provenance)
+            # re-audit AFTER the re-crosscheck (it replaced the notes again)
+            _audit_bank_ids(ext_res, raw)
+            _fix_jp_form(ext_res, raw)
+            _fix_statement_period(ext_res, raw)
+            _esignature_guard(ext_res, raw)
             ext_res.tier, ext_res.model_strong = "strong", strong_model
         else:
             ext_res.warnings.append("strong tier returned no valid JSON — fast result kept")
@@ -415,6 +615,9 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     _apply_w9_zone_probe(ext_res, raw)
     _normalize_tin(ext_res)          # zone TIN passes through the date guard too
     _apply_signature_probe(ext_res, raw)
+    # the vision probe judges PIXELS and would overwrite an electronic signature
+    # (DocuSign box reads as 'typed name') — the e-signature fact wins back here
+    _esignature_guard(ext_res, raw)
     _finalize_provenance(ext_res, raw)
 
     ext_res.register_secrets()

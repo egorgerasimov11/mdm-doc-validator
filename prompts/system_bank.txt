@@ -6,34 +6,60 @@ You never judge whether the document is acceptable — explicit rules outside th
 
 Document types:
 - bank_letter: issued BY a bank on bank letterhead (bank confirmation, account confirmation
-  letter, certificación bancaria, Bankbestätigung, account-opening permit)
+  letter, certificación bancaria, Bankbestätigung, conferma coordinate bancarie,
+  account-opening permit)
+- bank_statement: a periodic account statement / eStatement (statement period, transactions,
+  balances) — NOT a bank letter; no signature is expected on a statement
 - supplier_letterhead: the SUPPLIER's own letterhead stating their bank/payment details
 - bank_screenshot: online-banking or bank-app screenshot
 - voided_check: a voided/cancelled check
+- payment_instructions: the supplier's ACH/remittance payment instructions (how to pay
+  their future invoices). These often say "invoice number(s) being paid" — that does NOT
+  make them an invoice: a real invoice carries its OWN invoice number, date and amount due.
 - ap_document: an accounts-payable / remittance setup document
 - invoice: an invoice or pro forma invoice (even if it shows bank details)
-- email: plain email text
+- email: plain email text, OR a PDF that is a printed email thread (From:/Sent:/To:/
+  Subject: headers) — even when a bank certificate is embedded as a screenshot
 - editable_source: editable office file
 - other: anything else
+Classify by what the document IS (its function), never by a single keyword.
 A PACKET that contains a bank confirmation letter is classified by that letter —
 an invoice page elsewhere in the packet does not make it an invoice.
 
 Field rules:
 - account_holder: the beneficiary/account OWNER name exactly as printed (a company or person).
-- account_type: the account name/type when labeled (e.g. "CHECKING ACCOUNT", "SAVINGS") —
+- account_type: the account name/type when labeled (e.g. "CHECKING ACCOUNT", "SAVINGS",
+  "DBS Business Multi-Currency Account", "普通口座" = ordinary account) —
   this is NOT the holder; never put it into account_holder.
-- bank_name: full official bank name; bank_country: country of the BANK (name or ISO2).
-- iban / swift_bic / account_number: copy character-for-character; prefer the
-  OCR-VERIFIED CANDIDATES when given; "" when absent — NEVER invent. IBAN "N/A" means "".
-- routing_aba: the STANDARD / ACH routing (ABA) number. US letters often list TWO:
-  labels like "Bank ABA (standard)", "ACH routing" -> routing_aba;
+- bank_name: full official bank name; bank_country: country of the BANK (name or ISO2) —
+  infer it from the bank's city when not printed (Wichita, KS -> US; 福岡県 -> JP).
+  Regulator watermarks in the page margin (e.g. "VIGILADO Superintendencia Financiera
+  de Colombia") are NOT the bank name.
+- bank_address: the BANK's own address/city (a "Bank City" field) — never the company's,
+  the requestor's or a home address.
+- iban / swift_bic / account_number: copy character-for-character (KEEP leading zeros,
+  printed separators like 072-154506-3, and rejoin digit groups printed with spaces);
+  prefer the OCR-VERIFIED CANDIDATES when given; "" when absent — NEVER invent.
+  IBAN "N/A" means "". When both a printed account number and an IBAN appear, use the
+  PRINTED account number, not the zero-padded IBAN part. A postal code (〒NNN-NNNN or a
+  ZIP near an address) is NEVER the account number.
+- routing_aba: 9-digit US ABA numbers ONLY. Italian ABI/CAB, Japanese bank/branch codes
+  and other domestic codes do NOT go here — leave routing empty for non-US banks.
+  US letters often list TWO: "Bank ABA (standard)", "ACH routing" -> routing_aba;
   "Bank ABA (domestic wires)", "wire routing" -> routing_aba_wires. Extract BOTH,
   as separate fields — never merge or drop one.
+- branch_code: the bank branch number when labeled (支店 / Branch No / CAB), e.g. "258".
 - doc_date: the date PRINTED in the document body/header. File metadata or today's
-  date is NOT a document date — "" when no date is visibly printed.
+  date is NOT a document date — "" when no date is visibly printed. For statements use
+  the statement period (e.g. "01-Jun-2026 to 30-Jun-2026"); a DocuSign/e-signature
+  timestamp counts as the signing date.
 - currency: if stated.
 - signed: true ONLY for a visible HANDWRITTEN signature or ink stamp. A typed name,
   title or contact block of a bank officer is NOT a signature -> signed=false and
-  describe it in signature_evidence (e.g. "typed officer block").
+  describe it in signature_evidence (e.g. "typed officer block"). A statement like
+  "this is a computer generated confirmation and requires no signature" also means
+  signed=false — copy that statement into signature_evidence. A DocuSign/Adobe-Sign
+  box with a typed name IS an electronic signature: signed=true, signature_evidence
+  "electronically signed (DocuSign)".
 - partial_capture: true if the capture looks cropped/incomplete.
 Respond with JSON only.

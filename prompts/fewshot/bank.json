@@ -1,25 +1,52 @@
 [
   {
-    "input": "OCR-VERIFIED CANDIDATES:\n{}\n\nDOCUMENT TEXT:\n",
+    "input": "OCR-VERIFIED CANDIDATES:\n{\"account_number\": \"021524501554810\"}\n\nDOCUMENT TEXT:\n expedición de esta certificación, tiene con el banco los siguientes productos:\n\n| Producto | No. Producto | Fecha Apertura | Estado |\n|----------|---------------|-----------------|--------|\n| CUENTA CORRIENTE | …0477 | 2009/04/24 | ACTIVA |\n\n*Importante: Esta constancia solo hace referencia a los productos mencionados anteriormente.\n*Si desea verificar la veracidad de esta información, puede comunicarse con la Sucursal Telefónica Bancolombia los siguientes números: Medellín - Local: (60-4) 510 90 00 - Bogotá - Local: (60-1) 343 00 00 - Barranquilla - Local: (60-5) 361 88 88 - Cali - Local: (60-2) 554 05 05 - Resto del país: …2345. Sucursales Telefónicas en el exterior: España (34) …5717 - Estados Unidos (1) …9714.\n\nCatalina Cortés Uribe.\nGerente Servicios Contact Center & BPO.\nBancolombia",
     "output": {
       "doc_type": "bank_letter",
       "fields": {
-        "account_holder": "ACME",
+        "account_holder": "Catalina Cortés Uribe",
         "account_type": "",
-        "bank_name": "DB",
-        "bank_country": "DE",
+        "bank_name": "BANCOLOMBIA S.A.",
+        "bank_country": "CO",
         "bank_address": "",
-        "iban": "DE68085275482053092979",
+        "iban": "",
         "swift_bic": "",
-        "account_number": "",
+        "account_number": "021524501554810",
         "routing_aba": "",
         "routing_aba_wires": "",
+        "branch_code": "",
         "currency": "",
-        "doc_date": "",
+        "doc_date": "2026-03-06",
         "signed": true,
         "signature_evidence": "",
         "partial_capture": false
       }
-    }
+    },
+    "doc_sha256": "07f0d54513f25da6"
+  },
+  {
+    "input": "OCR-VERIFIED CANDIDATES:\n{\"iban\": \"LT504565180313402103\", \"swift_bic\": \"REVOLT21\", \"account_number\": \"105713545300515300\"}\n\nDOCUMENT TEXT:\nes: Maria Vishnevskaya, Chief Operating Officer; Oleg \nBorisenko, Director \n \nBank account information: \n• \nName of the bank: Revolut Bank UAB \n• \nBank address: Konstitucijos ave. 21B, 08130, Vilnius, Lithuania \n• \nBIC: REVOLT21 \n• \nIntermediary BIC: CHASDEFX \n• \nRecipient: EUROPEAN MED TECH AND IVD REIMBURSEMENT CONSULTING LTD \nEOOD \n• \nBank account in EUR: LTLT504565180313402103 \n• \nBank account in USD: LT**…5622 \n \nPlease note that our bank account details have changed, effective April 2026. The \ncurrent document contains the updated information. \n \nShould you require confirmation of our new bank account details, please do not hesitate \nto contact us at accounts@mtrconsult.com or by phone at +…9224. \n \nSincerely yours,  \n \n \n \nOleg Borisenko  \nDirector \n \nMobile: +…1642  \nEmail: oleg.bo",
+    "output": {
+      "doc_type": "supplier_letterhead",
+      "fields": {
+        "account_holder": "EUROPEAN MED TECH AND IVD REIMBURSEMENT CONSULTING LTD EOOD",
+        "account_type": "",
+        "bank_name": "Revolut Bank UAB",
+        "bank_country": "Lithuania",
+        "bank_address": "Konstitucijos ave. 21B, 08130, Vilnius, Lithuania",
+        "iban": "LT504565180313402103",
+        "swift_bic": "REVOLT21",
+        "account_number": "105713545300515300",
+        "routing_aba": "",
+        "routing_aba_wires": "",
+        "branch_code": "",
+        "currency": "EUR",
+        "doc_date": "06.04.2026",
+        "signed": true,
+        "signature_evidence": "",
+        "partial_capture": false
+      }
+    },
+    "doc_sha256": "26d2e55a19b584ed"
   }
 ]

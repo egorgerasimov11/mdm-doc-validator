@@ -90,6 +90,7 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
             ("Account number", _fmt(f.get("account_number")), "", "account_number"),
             ("Routing/ABA (standard)", _fmt(f.get("routing_aba")), "", "routing_aba"),
             ("Routing/ABA (wires)", _fmt(f.get("routing_aba_wires")), "", "routing_aba_wires"),
+            ("Branch code", _fmt(f.get("branch_code")), "", "branch_code"),
             ("Currency", _fmt(f.get("currency")), "", "currency"),
             ("Document date", _fmt(f.get("doc_date"), empty="no visible document date"), "", "doc_date"),
             ("Signed/stamped", signed, "", "signed"),

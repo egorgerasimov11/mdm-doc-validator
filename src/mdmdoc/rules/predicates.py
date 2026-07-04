@@ -45,6 +45,9 @@ def iban_valid(value, flds, args, tables):
     bank_country = to_iso2(str(flds.get("bank_country") or ""))
     if bank_country and cc != bank_country:
         return True, f"IBAN prefix ({cc}) differs from bank country ({bank_country})"
+    from ..fields import iban_mod97_ok
+    if not iban_mod97_ok(iban):
+        return True, "checksum failed (ISO 13616 mod-97) — an OCR misread or a typo"
     return False, ""
 
 
@@ -162,26 +165,55 @@ def date_older_than(value, flds, args, tables):
     return False, ""
 
 
+_EV_POSITIVE = ("computer generated", "computer-generated", "system generated",
+                "system-generated", "electronically", "electronic confirmation",
+                "requires no signature", "no signature required", "verification code",
+                "typed officer", "officer block", "officer name", "contact block",
+                "digital signature", "digitally signed", "qr code", "printed signature",
+                "signature-like", "docusign", "e-signature", "electronic signature",
+                "title block", "name and title")
+
+
+def _positive_evidence(ev: str) -> bool:
+    """Evidence compensates for a missing wet signature only when it NAMES a
+    compensating artifact (officer block, computer-generated notice, digital
+    verification). 'No signature or stamp is present' is a finding of ABSENCE,
+    not evidence — it must not silence the unsigned warning."""
+    t = (ev or "").strip().lower()
+    return bool(t) and any(m in t for m in _EV_POSITIVE)
+
+
 def unsigned_no_evidence(value, flds, args, tables):
     """Unsigned AND nothing standing in for a signature — a bare letter."""
     signed = flds.get("signed")
     signed = signed if isinstance(signed, bool) else str(signed).lower() in ("true", "yes")
     if signed:
         return False, ""
-    if str(flds.get("signature_evidence") or "").strip():
+    ev = str(flds.get("signature_evidence") or "").strip()
+    if _positive_evidence(ev):
         return False, ""
-    return True, "no signature, stamp or officer block visible"
+    return True, (f"no signature, and the noted '{ev}' is a statement of absence, "
+                  "not a compensating artifact") if ev else \
+                 "no signature, stamp or officer block visible"
 
 
 def unsigned_typed_block(value, flds, args, tables):
-    """No wet signature, but a typed bank-officer block is present — common for
-    US bank confirmation e-letters; a note, not a blocker."""
+    """No wet signature, but a compensating artifact IS present (typed officer
+    block / computer-generated notice) — common for bank e-letters; a note,
+    not a blocker."""
     signed = flds.get("signed")
     signed = signed if isinstance(signed, bool) else str(signed).lower() in ("true", "yes")
     ev = str(flds.get("signature_evidence") or "").strip()
-    if not signed and ev:
+    if not signed and _positive_evidence(ev):
         return True, ev
     return False, ""
+
+
+def field_empty(value, flds, args, tables):
+    """Generic 'the field is not shown in the document' predicate."""
+    if str(value or "").strip():
+        return False, ""
+    return True, "not shown in the document"
 
 
 def no_bank_ids(value, flds, args, tables):
@@ -194,6 +226,7 @@ def no_bank_ids(value, flds, args, tables):
 REGISTRY = {
     "unsigned_no_evidence": unsigned_no_evidence,
     "unsigned_typed_block": unsigned_typed_block,
+    "field_empty": field_empty,
     "no_bank_ids": no_bank_ids,
     "swift_valid": swift_valid,
     "iban_valid": iban_valid,

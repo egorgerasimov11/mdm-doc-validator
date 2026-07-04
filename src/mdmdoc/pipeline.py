@@ -48,6 +48,12 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     run_id = h.hexdigest()[:16]
     rdir = runstore.render_dir(run_id)
 
+    container_note = ""
+    if path.suffix.lower() == ".zip" or path.suffix.lower() in (".eml", ".msg"):
+        path, container_note = _resolve_container(path, run_id)
+    if doc_class in ("auto", ""):
+        doc_class = stage_a.sniff_doc_class(path)
+
     raw = stage_a.perceive(path, doc_class, rdir, use_vision=use_vision)
     if raw.locked:
         runstore.write(run_id, "meta.json", {"path": str(path), "doc_class": doc_class,
@@ -61,6 +67,8 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
 
     # Stage B (trainable extraction, two tiers)
     ext = stage_b.extract(raw, quality=quality, policy=policy)
+    if container_note:
+        ext.warnings.insert(0, container_note)
 
     # rules -> verdict (+ optional SAP comparison as extra findings)
     findings = run_rules(ext, lang=lang, policy=policy)
@@ -105,7 +113,9 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     do_web = web_evidence if web_evidence is not None else webenr.enabled()
     web_rows: list = []
     if do_web:
-        web_findings, web_rows = webenr.gather(ext, policy=policy)
+        # force=True: do_web already carries the opt-in decision (env flag or the
+        # operator's explicit web_evidence=True request from the console button)
+        web_findings, web_rows = webenr.gather(ext, policy=policy, force=True)
         findings += web_findings   # NOTE-only; verdict already decided above
 
     pub = ext.to_public(policy=policy)
@@ -160,6 +170,110 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
 
 class UnreadableDocument(RuntimeError):
     pass
+
+
+def _extract_eml_attachments(eml: Path, out: Path) -> None:
+    """Save real document attachments (pdf / sizeable images) of an email into
+    `out`. Inline logos and signature images are skipped by size."""
+    import email
+    from email import policy
+    try:
+        msg = email.message_from_bytes(eml.read_bytes(), policy=policy.default)
+    except Exception:
+        return
+    for part in msg.walk():
+        fn = part.get_filename()
+        if not fn:
+            continue
+        try:
+            payload = part.get_payload(decode=True)
+        except Exception:
+            continue
+        if not payload or len(payload) < 10_000:
+            continue
+        ext = Path(fn).suffix.lower()
+        if ext == ".pdf" or ext in config.IMAGE_EXTS:
+            out.mkdir(parents=True, exist_ok=True)
+            (out / Path(fn).name.replace("/", "_")).write_bytes(payload)
+
+
+def _resolve_container(cpath: Path, run_id: str) -> tuple[Path, str]:
+    """.zip / .eml packets: extract into a persistent inbox folder and analyse
+    the single best DOCUMENT inside — a bank confirmation letter outranks
+    declarations, invoices, email bodies and logos; an emailed invoice still
+    outranks the bare email body (the invoice IS the evidence to judge). The
+    report states what was chosen and what was skipped. Full multi-document
+    batch mode is on the roadmap."""
+    from . import fields as fdefs, ocr
+    out = config.INBOX_DIR / f"{run_id}__packet"
+    ext0 = cpath.suffix.lower()
+    if ext0 == ".zip":
+        import zipfile
+        out.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(cpath) as z:
+            z.extractall(out)  # ZipFile.extract sanitizes absolute/.. member names
+    else:  # .eml / .msg — analyse the attached documents, not the mail body
+        _extract_eml_attachments(cpath, out)
+        if not out.exists():
+            return cpath, ""  # plain email without document attachments
+    # emails inside a zip carry their documents as attachments — expand them too
+    for eml in list(out.rglob("*.eml")) + list(out.rglob("*.msg")):
+        _extract_eml_attachments(eml, out / (eml.stem[:40] + "_attachments"))
+
+    docs = []
+    for p in sorted(out.rglob("*")):
+        if not p.is_file() or p.name.startswith("._"):
+            continue
+        e = p.suffix.lower()
+        if e == ".pdf" or e in config.EMAIL_EXTS \
+                or (e in config.IMAGE_EXTS and p.stat().st_size > 50_000):
+            docs.append(p)
+    if not docs:
+        if ext0 in config.EMAIL_EXTS:
+            return cpath, ""
+        raise UnreadableDocument(
+            "zip contains no readable document (pdf/image/eml) — extract it manually")
+
+    def _peek_text(p: Path) -> str:
+        """Text layer, else ONE fast OCR of page 1 — the packet choice needs eyes."""
+        if p.suffix.lower() == ".pdf":
+            try:
+                import fitz
+                d = fitz.open(p)
+                t = "".join(d[i].get_text() for i in range(min(d.page_count, 3)))
+                d.close()
+                if len(t.strip()) >= 40:
+                    return t
+            except Exception:
+                pass
+        try:
+            import tempfile
+            with tempfile.TemporaryDirectory() as td:
+                pngs = (ocr.render_pdf_pages(p, Path(td), max_pages=1)
+                        if p.suffix.lower() == ".pdf" else [ocr.prepare_image(p, Path(td))])
+                return ocr.tesseract_text(pngs[0]) if pngs else ""
+        except Exception:
+            return ""
+
+    def _score(p: Path) -> int:
+        e = p.suffix.lower()
+        if e in config.EMAIL_EXTS:
+            return 1
+        s = 4 if e == ".pdf" else 2
+        t = _peek_text(p)
+        s += fdefs.page_score(t, "bank")
+        m = fdefs.page_markers(t)
+        if m["bank_letter"]:
+            s += 10
+        if m["invoice"] and not m["bank_letter"]:
+            s -= 3
+        return s
+
+    docs.sort(key=_score, reverse=True)
+    chosen, rest = docs[0], [d.name for d in docs[1:]]
+    note = (f"packet ({cpath.name}): analysed '{chosen.name}'"
+            + (f"; other documents inside NOT analysed: {', '.join(rest)}" if rest else ""))
+    return chosen, note
 
 
 def _find_precedent(run_id: str) -> dict | None:

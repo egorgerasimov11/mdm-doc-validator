@@ -11,13 +11,14 @@ from dataclasses import dataclass, field
 
 from .privacy import FIELD_KIND, SecretVault, mask
 
-BANK_DOC_TYPES = ["bank_letter", "supplier_letterhead", "bank_screenshot", "voided_check",
-                  "ap_document", "invoice", "email", "editable_source", "other"]
+BANK_DOC_TYPES = ["bank_letter", "bank_statement", "supplier_letterhead", "bank_screenshot",
+                  "voided_check", "payment_instructions", "ap_document", "invoice", "email",
+                  "editable_source", "other"]
 W9_DOC_TYPES = ["w9", "w8", "other_tax", "unknown"]
 
 BANK_KEYS = ["account_holder", "account_type", "bank_name", "bank_country",
              "bank_address", "iban", "swift_bic", "account_number", "routing_aba",
-             "routing_aba_wires", "currency", "doc_date", "signed",
+             "routing_aba_wires", "branch_code", "currency", "doc_date", "signed",
              "signature_evidence", "partial_capture"]
 W9_KEYS = ["line1_name", "line2_business_name", "line3_classification", "tin_type",
            "tin_raw", "address_street", "address_city_state_zip", "signed", "sign_date"]
@@ -84,6 +85,12 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
             prov[k] = {"source": "ocr-regex", "page": None}
         elif _norm_id(mv) == _norm_id(dv):
             notes.append(f"{k}=confirmed")
+            if prov.get(k, {}).get("source") != "ocr-regex":
+                prov[k] = {"source": "model", "page": None, "confirmed": True}
+        elif k == "account_number" \
+                and _norm_id(mv).lstrip("0") == _norm_id(dv).lstrip("0") != "":
+            # printed account vs the zero-padded IBAN part — same account
+            notes.append(f"{k}=confirmed (zero-padded variant)")
             if prov.get(k, {}).get("source") != "ocr-regex":
                 prov[k] = {"source": "model", "page": None, "confirmed": True}
         else:
@@ -195,10 +202,67 @@ _BANK_LETTER_PHRASES = ("please accept this letter", "account confirmation",
                         "confirmation that", "we confirm that", "maintained at",
                         "routing instructions", "letter as confirmation",
                         "bank confirmation", "treasury analyst", "to whom it may concern",
-                        "this letter is to confirm")
+                        "this letter is to confirm", "account confirmation certificate",
+                        # IT / ES / DE bank-confirmation wording
+                        "conferma coordinate bancarie", "coordinate bancarie",
+                        "vi confermiamo", "certificación bancaria",
+                        "certificacion bancaria", "certificado bancario",
+                        "bankbestätigung", "kontobestätigung")
 _INVOICE_HEADER_RE = re.compile(r"(?im)^\s*(invoice|rechnung|fattura|factura)\s*$")
 _INVOICE_MARKS = ("invoice number", "invoice no", "invoice date", "amount due",
-                  "subtotal", "payment terms", "purchase order number", "pro forma")
+                  "subtotal", "payment terms", "purchase order number", "pro forma",
+                  "rechnungsnummer", "rechnungsdatum", "numero fattura",
+                  "número de factura")
+# "invoice ..." inside remittance/payment instructions describes the payer's
+# FUTURE invoices, not this document — such lines are not invoice evidence
+_REMIT_CONTEXT = ("remit", "being paid", "must include", "must be accompanied",
+                  "when making payment", "payments received without", "amt:",
+                  "payment amount per invoice", "ach payment", "payment instruction",
+                  "wire transfer", "include the following")
+
+
+def iban_mod97_ok(iban: str) -> bool:
+    """ISO 13616 IBAN checksum. Explicit audit fact — reports state it out loud
+    instead of leaving auditors to trust silence."""
+    s = re.sub(r"\s", "", str(iban or "")).upper()
+    if not re.match(r"^[A-Z]{2}\d{2}[A-Z0-9]{8,30}$", s):
+        return False
+    num = "".join(str(int(c, 36)) for c in s[4:] + s[:4])
+    return int(num) % 97 == 1
+
+
+def find_valid_ibans(text: str) -> list[str]:
+    """IBAN candidates from raw text: spaces/full-width tolerated, mod-97-valid
+    only. The deterministic source for repairing a model-garbled IBAN read."""
+    import unicodedata
+    t = unicodedata.normalize("NFKC", (text or "")).upper()
+    out: list[str] = []
+    for m in re.finditer(r"\b([A-Z]{2}\s?\d{2}(?:\s?[A-Z0-9]){10,32})\b", t):
+        cand = re.sub(r"\s", "", m.group(1))
+        if iban_mod97_ok(cand) and cand not in out:
+            out.append(cand)
+    return out
+
+
+def looks_like_printed_email(text: str) -> bool:
+    """A PDF that is a PRINTED EMAIL thread (Outlook-style headers) is email
+    evidence even when a bank certificate is embedded as a screenshot."""
+    head = (text or "")[:2000].lower()
+    hits = sum(bool(re.search(rf"(?m)^\s*{h}:\s?\S", head))
+               for h in ("from", "sent", "to", "subject"))
+    return hits >= 3
+
+
+def invoice_marks(text: str) -> int:
+    """Structural invoice evidence: count invoice marks on lines OUTSIDE
+    remittance-instruction context. A document is an invoice because it HAS an
+    invoice number/date/amount of its own, not because it mentions the word."""
+    n = 0
+    for line in (text or "").lower().splitlines():
+        if any(c in line for c in _REMIT_CONTEXT):
+            continue
+        n += sum(1 for m in _INVOICE_MARKS if m in line)
+    return n
 
 
 def page_markers(text: str) -> dict:
@@ -209,8 +273,7 @@ def page_markers(text: str) -> dict:
     letter_hits = sum(1 for p in _BANK_LETTER_PHRASES if p in t)
     bank_letter = letter_hits >= 2 or "account confirmation" in t \
         or "please accept this letter" in t or "this letter is to confirm" in t
-    invoice = bool(_INVOICE_HEADER_RE.search(text or "")) \
-        or sum(1 for m in _INVOICE_MARKS if m in t) >= 2
+    invoice = bool(_INVOICE_HEADER_RE.search(text or "")) or invoice_marks(text) >= 2
     return {"bank_letter": bank_letter, "invoice": invoice}
 
 
@@ -256,18 +319,32 @@ def type_hint(filename: str, text: str, ext: str, doc_class: str) -> str:
         if has("w-8", "w8ben", "w-8ben", "w8-ben", "certificate of foreign status"):
             return "w8"
         return ""
-    # banking — the TEXT-based invoice hint must not fire when the packet also
-    # contains a bank confirmation letter page (packet != invoice)
-    if "invoice" in f:
+    # banking — a printed-out email thread is email evidence no matter what is
+    # embedded in it; the TEXT-based invoice hint needs STRUCTURAL evidence (its
+    # own invoice number/date/amount outside remittance context) and must not
+    # fire when the packet also contains a bank confirmation letter page
+    if looks_like_printed_email(text):
+        return "email"
+    if "invoice" in f or "rechnung" in f or "fattura" in f:
         return "invoice"
-    if has("pro forma invoice", "proforma invoice", "invoice no", "invoice number",
-           "rechnung", "fattura", "factura comercial") and not page_markers(t)["bank_letter"]:
+    if (bool(_INVOICE_HEADER_RE.search(text or "")) or invoice_marks(text) >= 2) \
+            and not page_markers(t)["bank_letter"]:
         return "invoice"
     if has("voided check", "void check"):
         return "voided_check"
+    if has("account statement", "e-statement", "estatement", "statement period",
+           "statement of account", "kontoauszug", "extracto bancario",
+           "estado de cuenta"):
+        return "bank_statement"
     if has("certificación bancaria", "certificacion bancaria", "bankbestätigung",
            "bank confirmation", "bank letter", "开户许可证", "开户银行"):
         return "bank_letter"
+    if has("bank account information") and has("docusign", "for sap", "s/4hana"):
+        return "ap_document"
+    if has("payment instruction", "ach payments only", "for ach payments",
+           "remittance advice", "remittance sent", "email remittance",
+           "banking details are confidential", "ach payment type"):
+        return "payment_instructions"
     return ""
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mdmdoc — Local MDM Document Validator CLI.
 
-Commands: check-bank, check-w9, review, eval, train, export-lora, runs, doctor.
+Commands: check (auto), check-bank, check-w9, review, eval, train, export-lora, runs, doctor.
 Exit codes: 0 ACCEPT, 1 REJECT, 2 WARNING/NEED_MANUAL_REVIEW, 3 Ollama down, 4 unreadable.
 """
 from __future__ import annotations
@@ -213,8 +213,11 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    for name, doc_class in (("check-bank", "bank"), ("check-w9", "w9")):
-        p = sub.add_parser(name, help=f"validate a {'banking document' if doc_class == 'bank' else 'W-9/W-8 form'}")
+    _check_help = {"auto": "validate any supported document (bank vs W-9/W-8 auto-detected)",
+                   "bank": "validate a banking document",
+                   "w9": "validate a W-9/W-8 form"}
+    for name, doc_class in (("check", "auto"), ("check-bank", "bank"), ("check-w9", "w9")):
+        p = sub.add_parser(name, help=_check_help[doc_class])
         p.add_argument("path", nargs="+", help="path to the PDF/image (quotes optional — "
                        "spaces and Finder drag-and-drop are handled)")
         p.add_argument("--json", action="store_true", help="print machine JSON instead of the report")
@@ -229,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
                        help="corroborate PUBLIC ids (routing/SWIFT/bank & company names) "
                             "against external registries — advisory NOTE hints, never a "
                             "verdict; also enabled by MDMDOC_WEB_EVIDENCE=1")
-        if doc_class == "bank":
+        if doc_class in ("bank", "auto"):
             p.add_argument("--sap", help="screenshot of the SAP Bank Details screen — "
                                          "compares document vs SAP char-by-char")
         p.set_defaults(func=lambda a, dc=doc_class: _cmd_check(a, dc))

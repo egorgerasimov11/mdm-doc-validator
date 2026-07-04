@@ -29,6 +29,8 @@
   <button type="button" id="btn-sap">Compare with SAP…</button>
   <input type="file" id="sap-input" accept=".png,.jpg,.jpeg,.pdf" hidden>
   <span class="hint">re-runs this document together with an SAP Bank Details screenshot</span>
+  <button type="button" id="btn-web" data-class="{{ doc_class }}">Verify externally 🌐</button>
+  <span class="hint">checks routing/SWIFT/bank &amp; company names against public registries — advisory only, the web never decides the verdict</span>
   {% endif %}
 </div>
 <pre id="job-log" hidden></pre>
@@ -197,4 +199,4 @@
   {% endfor %}
 </section>
 {% endblock %}
-{% block script %}<script>mdmdoc.initArtifacts(); mdmdoc.initSapCompare(); mdmdoc.initRetrainWatch();</script>{% endblock %}
+{% block script %}<script>mdmdoc.initArtifacts(); mdmdoc.initSapCompare(); mdmdoc.initWebVerify(); mdmdoc.initRetrainWatch();</script>{% endblock %}

@@ -15,6 +15,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "LORA_DIR", tmp_path / "dataset" / "mlx-lora")
     monkeypatch.setattr(config, "EVAL_DIR", tmp_path / "eval")
     monkeypatch.setattr(config, "INBOX_DIR", tmp_path / "inbox")
+    monkeypatch.setattr(config, "FEWSHOT_DIR", tmp_path / "prompts" / "fewshot")
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path / "models")
     return tmp_path
 
 
@@ -66,7 +68,8 @@ def test_host_header_hardening_full_mode(isolated, monkeypatch):
 def test_check_async_job_lifecycle(isolated, monkeypatch):
     from mdmdoc.server import api as api_mod
 
-    def fake_pipeline(path, doc_class, lang, use_vision, sap_image=None, quality=False):
+    def fake_pipeline(path, doc_class, lang, use_vision, sap_image=None, quality=False,
+                      web=False):
         return {"run_id": "deadbeef00000000", "verdict": "ACCEPT",
                 "report": {"schema": "mdmdoc.v1"}, "report_md": "[BANK DOC VERDICT]"}
 

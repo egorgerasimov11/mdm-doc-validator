@@ -60,6 +60,53 @@ def test_unsigned_bank_letter_warns():
     assert any(x.rule_id == "BNK-021" for x in f)
 
 
+def test_negative_signature_statement_is_not_evidence():
+    # "no signature is present" states ABSENCE — it must not silence BNK-021
+    f = run_rules(_bank("bank_letter", account_holder="ACME", bank_name="DB",
+                        account_number="12345678", signed=False,
+                        signature_evidence="No handwritten signature or ink stamp/seal is present."))
+    assert decide(f) == "WARNING"
+    assert any(x.rule_id == "BNK-021" for x in f)
+
+
+def test_computer_generated_statement_is_evidence():
+    # a bank-standard computer-generated notice compensates: NOTE, not WARNING
+    f = run_rules(_bank("bank_letter", account_holder="ACME", bank_name="DB",
+                        account_number="12345678", signed=False,
+                        signature_evidence="This is a computer generated confirmation "
+                                           "and requires no signature."))
+    assert decide(f) == "ACCEPT"
+    assert any(x.rule_id == "BNK-026" for x in f)
+    assert not any(x.rule_id == "BNK-021" for x in f)
+
+
+def test_bank_statement_no_unsigned_noise_and_swift_gap_note():
+    # statements carry no signature by design: no BNK-021/026; missing SWIFT is a
+    # NOTE pointing at the SAP/form comparison, and the verdict stays ACCEPT
+    f = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
+                        bank_name="DBS Bank Ltd", account_number="072-154506-3",
+                        signed=False))
+    assert decide(f) == "ACCEPT"
+    assert any(x.rule_id == "BNK-006" for x in f)
+    assert not any(x.rule_id in ("BNK-021", "BNK-026") for x in f)
+
+
+def test_ap_document_self_certified_note():
+    f = run_rules(_bank("ap_document", account_holder="タカキ ユウスケ",
+                        bank_name="福岡銀行", account_number="1442667", signed=True))
+    assert any(x.rule_id == "BNK-005" for x in f)
+    assert decide(f) == "ACCEPT"
+
+
+def test_payment_instructions_warn_not_reject():
+    f = run_rules(_bank("payment_instructions", account_holder="CRH Management LLC",
+                        bank_name="Intrust Bank", account_number="86601269",
+                        routing_aba="101100029", signed=False))
+    assert decide(f) == "WARNING"
+    assert any(x.rule_id == "BNK-004" for x in f)
+    assert not any(x.rule_id == "BNK-001" for x in f)
+
+
 def test_masked_values_in_messages():
     f = run_rules(_bank("bank_letter", account_holder="ACME", bank_name="DB",
                         bank_country="DE", iban="DE4450010517540732493"))

@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 
 from . import aba, egress, entity, swift
-from .evidence import UNAVAILABLE, Evidence
+from .evidence import CONFLICT, FOUND, UNAVAILABLE, Evidence
 
 BANNER = ("Web did not decide this verdict. These rows are advisory hints from "
           "external sources; the verdict comes only from the document and the rules.")
@@ -36,13 +36,15 @@ def enabled() -> bool:
     return os.environ.get("MDMDOC_WEB_EVIDENCE", "").strip().lower() in ("1", "true", "on", "yes")
 
 
-def gather(ext, policy: str = "masked") -> tuple[list, list[dict]]:
+def gather(ext, policy: str = "masked", force: bool = False) -> tuple[list, list[dict]]:
     """Run every connector and return (findings, rows).
 
-    Returns ([], []) when disabled. Each connector is isolated: an EgressBlocked
-    (a would-be leak, caught by the guard — nothing sent) or any other error
-    becomes a visible 'unavailable' hint instead of failing the document run."""
-    if not enabled():
+    Returns ([], []) when disabled (force=True bypasses the env flag — used for
+    the operator's explicit 'Verify externally' action, where the click IS the
+    opt-in). Each connector is isolated: an EgressBlocked (a would-be leak,
+    caught by the guard — nothing sent) or any other error becomes a visible
+    'unavailable' hint instead of failing the document run."""
+    if not (force or enabled()):
         return [], []
     evidence: list[Evidence] = []
     for mod in _PROVIDERS:
@@ -58,7 +60,10 @@ def gather(ext, policy: str = "masked") -> tuple[list, list[dict]]:
             evidence.append(Evidence(
                 f"{name}_error", UNAVAILABLE, f"{name} connector error",
                 name, 1, "WEB-ERR-1", detail=f"{e.__class__.__name__}: {e}"))
-    findings = [e.to_finding() for e in evidence]
+    # Only FOUND/CONFLICT become report notes — not_found/unavailable are normal
+    # for private/foreign entities and would read as decision noise; they stay
+    # visible in the External-evidence panel (rows) with their status.
+    findings = [e.to_finding() for e in evidence if e.status in (CONFLICT, FOUND)]
     # Belt-and-suspenders: the layer can NEVER contribute a verdict effect.
     findings = [f for f in findings if f.severity == "NOTE" and f.verdict_effect is None]
     rows = [e.to_row() for e in evidence]

@@ -46,7 +46,11 @@ VISION_TARGETED_PROMPT = (
 SIGNATURE_PROMPT = (
     "Inspect this document page for a HANDWRITTEN signature (ink strokes) or an ink "
     "stamp/seal. IMPORTANT: a typed or printed name, title or contact block is NOT a "
-    "handwritten signature. Return strict JSON: "
+    "handwritten signature. A handwritten-LOOKING scribble on a scan counts as a "
+    "signature even if you cannot prove it is original ink — then say "
+    "'signature-like mark present; wet/original cannot be confirmed from a scan' in "
+    "evidence. A DocuSign/Adobe-Sign box with a typed name is an ELECTRONIC signature: "
+    "handwritten_signature=false, but mention it in evidence. Return strict JSON: "
     '{"handwritten_signature": true/false, "stamp": true/false, '
     '"date_near_signature": "<handwritten/printed date next to the signature, or empty>", '
     '"evidence": "<short phrase describing what you see in the signature area>"}'
@@ -550,3 +554,43 @@ def to_public(raw: RawDoc, vault, policy: str = "masked") -> dict:
         "regex_candidates_masked": cand,
         "w9_probe": {k: v for k, v in raw.w9_probe.items() if k != "tin_digits"} or None,
     }
+
+
+_W9_SNIFF = ("form w-9", "request for taxpayer", "taxpayer identification number",
+             "w-8ben", "w-8ben-e", "certificate of foreign status", "substitute w-9",
+             "substitute form w-9")
+_W9_NAME_RE = re.compile(r"(?i)\bw[-_ ]?(9|8(ben)?)\b")
+
+
+def sniff_doc_class(path: Path) -> str:
+    """Cheap upfront guess for the single 'Auto' entry point: W-9/W-8 tax form
+    vs banking document. Filename first, then the text layer, then ONE fast OCR
+    of page 1 for image-only files. W-9 markers are explicit, so 'bank' is the
+    safe default when nothing matches."""
+    if _W9_NAME_RE.search(path.name):
+        return "w9"
+    ext = path.suffix.lower()
+    text = ""
+    try:
+        if ext == ".pdf":
+            doc = fitz.open(path)
+            text = "".join(doc[i].get_text() for i in range(min(doc.page_count, 2)))
+            doc.close()
+        elif ext in config.EMAIL_EXTS or ext in (".txt", ".csv"):
+            text = path.read_text(errors="replace")[:8000]
+    except Exception:
+        text = ""
+    if len(text.strip()) < 40 and (ext == ".pdf" or ext in config.IMAGE_EXTS):
+        # image-only: one low-cost tesseract pass over page 1, classification only
+        try:
+            import tempfile
+            with tempfile.TemporaryDirectory() as td:
+                pngs = (ocr.render_pdf_pages(path, Path(td), max_pages=1)
+                        if ext == ".pdf" else [ocr.prepare_image(path, Path(td))])
+                text = ocr.tesseract_text(pngs[0]) if pngs else ""
+        except Exception:
+            text = ""
+    t = text.lower()
+    if any(k in t for k in _W9_SNIFF):
+        return "w9"
+    return "bank"

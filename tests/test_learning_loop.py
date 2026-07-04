@@ -48,6 +48,11 @@ def run_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "LABELS_PATH", tmp_path / "dataset" / "labels.jsonl")
     monkeypatch.setattr(config, "LORA_DIR", tmp_path / "dataset" / "mlx-lora")
     monkeypatch.setattr(config, "EVAL_DIR", tmp_path / "eval")
+    # build_fewshot() writes here — without this patch a TEST overwrites the
+    # PRODUCTION prompts/fewshot/*.json (caught by the eval leak sweep: a test
+    # fake IBAN is not in the real labels' fakes registry)
+    monkeypatch.setattr(config, "FEWSHOT_DIR", tmp_path / "prompts" / "fewshot")
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path / "models")
     rid = "abcd1234abcd1234"
     d = tmp_path / "runs" / rid
     d.mkdir(parents=True)

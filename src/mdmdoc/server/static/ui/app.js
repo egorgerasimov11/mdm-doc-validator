@@ -134,6 +134,31 @@ window.mdmdoc = (() => {
     };
   }
 
+  /* ---------- run page: external web evidence ----------------------------- */
+  function initWebVerify() {
+    const btn = document.getElementById("btn-web");
+    if (!btn) return;
+    const log = document.getElementById("job-log");
+    const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+    btn.onclick = async () => {
+      btn.disabled = true;
+      log.textContent = "";
+      say("re-running with external registry checks (ABA/FDIC, SWIFT, entity match)…");
+      say("advisory only — the web never decides the verdict");
+      const fd = new FormData();
+      fd.append("doc_class", btn.dataset.class || "bank");
+      fd.append("wait", "false");
+      fd.append("web", "true");
+      fd.append("rerun_run_id", location.pathname.split("/")[3]);
+      try {
+        const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
+        pollJob(job_id, say,
+          (res) => location = `/ui/runs/${res.run_id}`,
+          (err) => { say("ERROR: " + err); btn.disabled = false; });
+      } catch (e) { say("ERROR: " + e.message); btn.disabled = false; }
+    };
+  }
+
   /* ---------- review form ------------------------------------------------ */
   function initReview() {
     const form = document.getElementById("review-form");
@@ -400,5 +425,5 @@ window.mdmdoc = (() => {
   initCopyReport();
 
   return { api, pollJob, initDropZone, initArtifacts, initReview, initTraining,
-           initSapCompare, initRetrainWatch };
+           initSapCompare, initWebVerify, initRetrainWatch };
 })();
