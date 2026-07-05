@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — rules{% endblock %}
+{% block content %}
+<h1>Rules</h1>
+<p class="meta">The model only classifies and extracts — <strong>verdicts come only from these
+rules</strong>. Edit the YAML, save, and (optionally) push to the SAP/ABAP side. Delete a rule by
+removing its block; replace a whole "skill" by pasting a new file.</p>
+
+<section>
+  <div class="header-row" style="gap:12px">
+    <span class="seg" data-doc>
+      <button type="button" class="{{ 'active' if doc_class == 'bank' }}" data-v="bank">banking</button>
+      <button type="button" class="{{ 'active' if doc_class == 'w9' }}" data-v="w9">W-9</button>
+    </span>
+    <span class="meta">{{ doc_class }} — {{ rule_count }} rule(s)</span>
+  </div>
+
+  <textarea id="rules-yaml" spellcheck="false"
+            style="width:100%;height:60vh;font-family:ui-monospace,Menlo,monospace;font-size:13px;
+                   white-space:pre;overflow:auto;margin-top:12px">{{ yaml_text }}</textarea>
+
+  <div class="header-row" style="gap:10px;margin-top:10px">
+    <button type="button" class="btn" id="save-btn"><strong>Save</strong></button>
+    <button type="button" class="btn" id="regen-btn">Regenerate for SAP →</button>
+    <span id="rules-flash" class="meta"></span>
+  </div>
+  <pre id="regen-out" class="meta" style="margin-top:8px"></pre>
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+(function () {
+  var docClass = {{ doc_class | tojson }};
+  var tokenMeta = document.querySelector('meta[name="mdmdoc-token"]');
+  function headers() {
+    var h = { 'Content-Type': 'application/json' };
+    if (tokenMeta && tokenMeta.content) h['Authorization'] = 'Bearer ' + tokenMeta.content;
+    return h;
+  }
+  var flash = document.getElementById('rules-flash');
+  function say(msg, bad) { flash.textContent = msg; flash.className = 'meta' + (bad ? ' bad' : ''); }
+
+  document.querySelectorAll('[data-doc] button').forEach(function (b) {
+    b.addEventListener('click', function () { location.href = '/ui/rules?doc_class=' + b.dataset.v; });
+  });
+
+  document.getElementById('save-btn').addEventListener('click', function () {
+    say('saving…');
+    fetch('/api/v1/rules/' + docClass + '/raw', {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ yaml: document.getElementById('rules-yaml').value })
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (res.ok) say('saved — ' + res.j.rules + ' rule(s)');
+        else say((res.j.detail && res.j.detail.message) || 'save failed', true);
+      }).catch(function (e) { say('save failed: ' + e, true); });
+  });
+
+  document.getElementById('regen-btn').addEventListener('click', function () {
+    say('regenerating for SAP…');
+    fetch('/api/v1/rules/regenerate', { method: 'POST', headers: headers() })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        say(j.ok ? 'regenerated for SAP' : (j.detail || 'regenerate reported an issue'), !j.ok);
+        document.getElementById('regen-out').textContent =
+          [j.stdout, j.stderr].filter(Boolean).join('\n');
+      }).catch(function (e) { say('regenerate failed: ' + e, true); });
+  });
+})();
+</script>
+{% endblock %}

@@ -76,13 +76,46 @@ def config_mode() -> str:
     return os.environ.get("MDMDOC_MODE", "full")
 
 
+def _rules_path(doc_class: str) -> Path:
+    from .. import rules_io
+    return rules_io.rules_path(doc_class)
+
+
 @router_core.get("/rules", tags=["system"])
 def get_rules(doc_class: str = "bank") -> dict:
     import yaml
-    p = config.RULES_DIR / ("banking.yaml" if doc_class == "bank" else "w9.yaml")
+    p = _rules_path(doc_class)
     if not p.exists():
         raise api_error(404, "not_found", f"rules file for {doc_class} not found")
     return yaml.safe_load(p.read_text()) or {}
+
+
+@router_core.get("/rules/raw", response_class=PlainTextResponse, tags=["system"])
+def get_rules_raw(doc_class: str = "bank") -> str:
+    p = _rules_path(doc_class)
+    if not p.exists():
+        raise api_error(404, "not_found", f"rules file for {doc_class} not found")
+    return p.read_text()
+
+
+# ---- rule authoring (operator-only): edit / delete / regenerate for SAP ------
+@router_teach.post("/rules/{doc_class}/raw", tags=["rules"])
+def save_rules_raw(doc_class: str, payload: dict) -> dict:
+    """Overwrite a doc-class rule file with edited YAML (delete = remove a block).
+    The model never decides verdicts — rules stay explicit and editable. The write
+    is done in rules_io (the named rule-write choke point)."""
+    from .. import rules_io
+    try:
+        n = rules_io.save_rules(doc_class, payload.get("yaml", ""))
+    except ValueError as e:
+        raise api_error(400, "bad_yaml", str(e))
+    return {"ok": True, "doc_class": doc_class, "rules": n}
+
+
+@router_teach.post("/rules/regenerate", tags=["rules"])
+def regenerate_rules() -> dict:
+    from .. import rules_io
+    return rules_io.regenerate_abap()
 
 
 # ---------------------------------------------------------------- check -------

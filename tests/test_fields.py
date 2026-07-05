@@ -148,8 +148,9 @@ def test_no_writes_outside_choke_points():
     modelfile/adoption may write files (they all call assert_no_leak or write
     non-document data)."""
     src = Path(__file__).resolve().parents[1] / "src" / "mdmdoc"
+    # rules_io.py writes rules/*.yaml — no PII, so no leak gate, but a named write point
     allowed = {"runstore.py", "modelfile.py", "evalrun.py", "dataset.py",
-               "fewshot.py", "lora_export.py", "adoption.py"}
+               "fewshot.py", "lora_export.py", "adoption.py", "rules_io.py"}
     offenders = []
     for p in src.rglob("*.py"):
         if p.name in allowed:

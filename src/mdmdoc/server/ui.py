@@ -267,3 +267,21 @@ def debug_page(request: Request):
         page="debug", doctor=doc, doctor_json=json.dumps(doc, indent=2, ensure_ascii=False),
         jobs=[j.to_dict() for j in jobs.REGISTRY.list()], sizes=sizes,
         log_lines=list(jobs.LOG_RING)[-200:]))
+
+
+@router_ui.get("/ui/rules", response_class=HTMLResponse)
+def rules_page(request: Request, doc_class: str = "bank"):
+    """Edit the verdict rules (rules/*.yaml) — the model never decides verdicts.
+    Save writes the YAML; 'Regenerate for SAP' pushes them to the ABAP side."""
+    from .api import _rules_path
+    doc_class = "w9" if doc_class == "w9" else "bank"
+    p = _rules_path(doc_class)
+    text = p.read_text() if p.exists() else ""
+    n = 0
+    try:
+        import yaml
+        n = len((yaml.safe_load(text) or {}).get("rules") or [])
+    except Exception:  # rendering must never fail on bad YAML
+        pass
+    return templates.TemplateResponse(request, "rules.html", _ctx(
+        page="rules", doc_class=doc_class, yaml_text=text, rule_count=n))

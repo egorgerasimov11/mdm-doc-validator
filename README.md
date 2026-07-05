@@ -19,7 +19,21 @@ mdmdoc runs | mdmdoc doctor
 (drag-drop checks with live progress, optional SAP screenshot), run pages with
 document preview + EXTRACTED DATA + findings + SAP comparison table, a review
 form that turns corrections into training examples, Training (few-shot /
-Modelfile / eval with metric sparklines) and Debug pages.
+Modelfile / eval with metric sparklines), a **Rules** editor, and Debug pages.
+
+**Local companion to the ABAP/SAP validator.** This console is optional and runs
+locally, in parallel with SAP — it is where the *analyses* and *training* live
+(the ABAP clone [`mdm-doc-validator-abap`](../mdm-doc-validator-abap) does the
+in-MDG deterministic validation). The two connect two ways:
+- **Same report schema** `mdmdoc.v1`: the ABAP report `ZMDMDOC` exports JSON
+  (`cb_json`) that opens on the run pages here, so a SAP-side check is reviewable
+  in the console.
+- **Same rules**: the **Rules** page (`/ui/rules`) edits `rules/*.yaml` — the model
+  never decides verdicts, only these rules do. Save writes the YAML; **Regenerate
+  for SAP** copies them into the ABAP repo and runs its generator
+  (`MDMDOC_ABAP_HOME`, default `~/Projects/mdm-doc-validator-abap`), so a rule you
+  change locally reaches SAP. Delete a rule by removing its block; replace a whole
+  "skill" (banking / W-9) by pasting a new file.
 
 **SAP BTP packaging**: the same API ships as an api-only Docker image with an
 OpenAPI contract and CF/Kyma artifacts — see [`btp/`](btp/) and
