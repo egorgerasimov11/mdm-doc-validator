@@ -208,6 +208,29 @@ def _cmd_doctor(args) -> int:
     return 0
 
 
+def _cmd_skill_rules(args) -> int:
+    """Show an mdm-*-checker skill's active rules and how they map to the validator."""
+    from . import skill_rules as sr
+    try:
+        path = sr.resolve_skill(args.skill)
+    except FileNotFoundError as e:
+        print(e)
+        return 1
+    rules = sr.active_rules(path)
+    print(f"{len(rules)} active rule(s) in {args.skill}  ({path})\n")
+    covered, advisory, review = [], [], []
+    for r in rules:
+        cov = r["coverage"]
+        bucket = review if not cov else (advisory if cov.startswith(("advisory", "needs")) else covered)
+        bucket.append(r)
+        print(f"{r['id']}  [{r['severity'] or '?':8}] {r['header']}")
+        print(f"      -> {cov or 'REVIEW — no mapping yet; decide: promote to a rule or mark advisory'}")
+    print(f"\nmechanized: {len(covered)}  ·  advisory/needs-context: {len(advisory)}  ·  to review: {len(review)}")
+    if review:
+        print("Run the mdmdoc-skill-sync procedure to promote reviewable rules into rules/*.yaml.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="mdmdoc", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -279,6 +302,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("doctor", help="check ollama/tesseract/models/dirs")
     p.set_defaults(func=_cmd_doctor)
+
+    p = sub.add_parser("skill-rules", help="show an mdm-*-checker skill's rules + validator mapping")
+    p.add_argument("skill", help="skill name (mdm-w9-checker), skill dir, or dynamic_rules.md path")
+    p.set_defaults(func=_cmd_skill_rules)
 
     args = ap.parse_args(argv)
     return args.func(args)
