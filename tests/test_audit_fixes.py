@@ -59,6 +59,26 @@ def test_docusign_counts_as_electronic_signature():
     assert ext.fields["doc_date"] == "2026-07-01"
 
 
+def test_us_numeric_iban_field_is_account_not_malformed():
+    # US "IBAN account no." holds a plain number — not a malformed IBAN.
+    # account_number empty -> value relocated there; iban cleared.
+    ext = Extraction(doc_class="bank", fields={
+        "iban": "591564501132927", "account_number": "", "bank_country": "US"})
+    _audit_bank_ids(ext, _raw("IBAN account no. 591564501132927 ... US"))
+    assert ext.fields["iban"] == ""
+    assert ext.fields["account_number"] == "591564501132927"
+    assert any("this country has no IBAN" in n for n in ext.crosscheck)
+
+
+def test_us_numeric_iban_duplicate_of_account_is_cleared():
+    ext = Extraction(doc_class="bank", fields={
+        "iban": "591564501132927", "account_number": "591564501132927",
+        "bank_country": "US"})
+    _audit_bank_ids(ext, _raw("IBAN account no. 591564501132927"))
+    assert ext.fields["iban"] == ""
+    assert ext.fields["account_number"] == "591564501132927"
+
+
 def test_statement_type_hint():
     text = ("DBS Account Statement\nStatement period: 01-Jun-2026 to 30-Jun-2026\n"
             "Balance brought forward ...")

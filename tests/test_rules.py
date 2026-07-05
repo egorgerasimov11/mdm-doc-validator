@@ -98,6 +98,16 @@ def test_ap_document_self_certified_note():
     assert decide(f) == "ACCEPT"
 
 
+def test_us_numeric_iban_field_not_flagged():
+    # a purely numeric value in the iban field (US, no IBAN) is a plain account
+    # number, not a malformed IBAN — BNK-011 must NOT fire
+    f = run_rules(_bank("payment_instructions", account_holder="Jamcorder LLC",
+                        bank_name="Citizens", bank_country="US",
+                        account_number="591564501132927", iban="591564501132927",
+                        routing_aba="121145433", signed=False))
+    assert not any(x.rule_id == "BNK-011" for x in f)
+
+
 def test_payment_instructions_warn_not_reject():
     f = run_rules(_bank("payment_instructions", account_holder="CRH Management LLC",
                         bank_name="Intrust Bank", account_number="86601269",

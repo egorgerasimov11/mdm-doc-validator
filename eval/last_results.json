@@ -1,6 +1,6 @@
 {
- "ts": "2026-07-04T00:20:16Z",
- "tag": "audit-fixes-v2",
+ "ts": "2026-07-04T01:30:46Z",
+ "tag": "clean-model-audit-v3",
  "scenario": null,
  "rows": [
   {
@@ -342,11 +342,10 @@
  ],
  "diff": {
   "improved": [],
-  "regressed": [
-   "MTRC Company information for vendors and customers.pdf"
-  ],
+  "regressed": [],
   "unchanged_wrong": [
    "CERTIFICACION BANCARIA BANCOLOMBIA MARZO 2026.pdf",
+   "MTRC Company information for vendors and customers.pdf",
    "医师协会开户许可证（盖章）.pdf",
    "IMIMBH-Bankverbindungen 4er.pdf",
    "890480239 certitifación bancaria bancolombia.pdf",

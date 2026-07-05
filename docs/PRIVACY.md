@@ -41,8 +41,8 @@ There are two orthogonal levels, chosen deliberately after operator feedback:
 
 | kind | full (memory only) | persisted/displayed |
 |---|---|---|
-| SSN | 320-54-0693 | `XXX-XX-0693` (hyphen style preserved — an SAP entry rule) |
-| EIN | 12-3456789 | `XX-XXX6789` |
+| SSN | 900-XX-0693 (illustrative) | `XXX-XX-0693` (hyphen style preserved — an SAP entry rule) |
+| EIN | XX-XXX6789 (illustrative) | `XX-XXX6789` |
 | IBAN | DE44…4931 (22 ch) | `DE**…4931` + derived facts `{country, length, shape_ok}` |
 | account / routing | 1830042757 | `…2757` + `{length}` |
 

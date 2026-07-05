@@ -8,3 +8,7 @@ eval/report.md
 eval/history.jsonl
 models/
 .env
+.DS_Store
+**/.DS_Store
+eval/candidate_report.md
+eval/candidate_results.json

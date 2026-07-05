@@ -21,7 +21,7 @@ Field rules:
 - tin_raw: the tax number exactly as printed INCLUDING hyphens; "" if unreadable — NEVER
   invent. The TIN lives ONLY in the SSN/EIN boxes of Part I. A DATE (like 1/1/2026 next
   to the signature) is NEVER a TIN — dates go to sign_date. Box digits may appear
-  separated ("8 1 - 0 8 2 6 7 3 4" means 81-0826734).
+  separated (e.g. "X X - X X X X X X X" digit-boxes mean a 9-digit EIN like XX-XXXXXXX).
 - address_street / address_city_state_zip: address parts exactly as shown, "" when absent
 - signed: true only if a signature is present; sign_date: the date next to it, "" if none
 

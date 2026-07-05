@@ -42,7 +42,10 @@ Field rules:
   prefer the OCR-VERIFIED CANDIDATES when given; "" when absent — NEVER invent.
   IBAN "N/A" means "". When both a printed account number and an IBAN appear, use the
   PRINTED account number, not the zero-padded IBAN part. A postal code (〒NNN-NNNN or a
-  ZIP near an address) is NEVER the account number.
+  ZIP near an address) is NEVER the account number. Every real IBAN starts with a
+  2-letter country code (DE.., IT..); a purely numeric value (US and other non-IBAN
+  countries, even one labelled "IBAN account no.") is a plain account_number, NOT an
+  iban — leave iban "" for those.
 - routing_aba: 9-digit US ABA numbers ONLY. Italian ABI/CAB, Japanese bank/branch codes
   and other domestic codes do NOT go here — leave routing empty for non-US banks.
   US letters often list TWO: "Bank ABA (standard)", "ACH routing" -> routing_aba;

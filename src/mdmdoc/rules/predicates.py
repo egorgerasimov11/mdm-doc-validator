@@ -36,6 +36,12 @@ def iban_valid(value, flds, args, tables):
     if not iban:
         return False, ""
     if not re.match(r"^[A-Z]{2}\d{2}[A-Z0-9]+$", iban):
+        # A purely numeric value is a plain account number — the US and other
+        # non-IBAN countries have no IBAN, so a domestic/international account
+        # number in this field is a NORMAL format, not a malformed IBAN.
+        # (Stage B already relocates it to account_number; this is defence.)
+        if iban.isdigit():
+            return False, ""
         return True, "non-standard shape (may be a plain account number in the IBAN field)"
     cc = iban[:2]
     table = tables.get(args.get("table", "iban_length"), {})

@@ -49,6 +49,22 @@ def test_egress_allows_public_ids_blocks_sensitive():
         egress.assert_safe_outbound("the ssn is 320-54-0693", None)
 
 
+def test_egress_catches_secret_after_url_encoding():
+    """Backstop must survive wire encoding: a space-separated IBAN/account in the
+    vault must be blocked even though requests percent-encodes the query (the gate
+    scans the URL-decoded form). Regression for the egress encoding gap."""
+    from mdmdoc.web_enrichment import http
+    v = SecretVault()
+    v.register("iban", "DE44 5001 0517 5407 3249 31")   # spaced, as on a document
+    v.register("account_number", "1408137817")
+    # direct guard on an encoded URL (both %20 and + encodings)
+    assert not egress.is_safe_outbound("https://x/api?q=DE44%205001%200517%205407%203249%2031", v)
+    assert not egress.is_safe_outbound("https://x/api?q=DE44+5001+0517+5407+3249+31", v)
+    # and through the real http path (params get encoded by requests before the gate)
+    with pytest.raises(egress.EgressBlocked):
+        http.get_json("https://x.test/api", params={"q": "DE44 5001 0517 5407 3249 31"}, vault=v)
+
+
 def test_egress_routing_not_in_forbidden_set():
     assert "routing_aba" not in egress.FORBIDDEN_KINDS
     v = SecretVault()

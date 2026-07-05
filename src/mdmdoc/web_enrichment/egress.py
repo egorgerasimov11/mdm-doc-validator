@@ -22,6 +22,8 @@ caught bug (mask/omit at the source), never a reason to weaken this gate.
 """
 from __future__ import annotations
 
+from urllib.parse import unquote_plus
+
 from ..privacy import BANK_KINDS, TIN_KINDS, assert_no_leak
 
 # Kinds that must never leave the machine. Routing/ABA is a BANK_KIND but is an
@@ -46,9 +48,20 @@ def forbidden_secrets(vault) -> list[str]:
 def assert_safe_outbound(query: str, vault=None) -> None:
     """Raise EgressBlocked if `query` contains any forbidden sensitive value —
     either an exact known secret from the vault, or a generic account/IBAN/TIN
-    pattern. Allowed identifiers (routing/ABA, SWIFT/BIC, names) pass through."""
+    pattern. Allowed identifiers (routing/ABA, SWIFT/BIC, names) pass through.
+
+    The query is usually a fully-rendered URL whose params `requests` has already
+    percent-encoded (spaces -> %20/+, ':' -> %3A). That encoding would let a
+    space-separated secret (e.g. an IBAN written 'DE44 5001 …') slip past both
+    the known-secret match and the generic patterns, so we scan the URL-DECODED
+    form as well — the decode restores the separators that the leak gate's
+    normaliser strips, so a spaced/grouped secret is caught regardless of wire
+    encoding."""
+    q = query or ""
+    decoded = unquote_plus(q)
+    blob = q if decoded == q else q + "\n" + decoded
     try:
-        assert_no_leak(query or "", known_secrets=forbidden_secrets(vault),
+        assert_no_leak(blob, known_secrets=forbidden_secrets(vault),
                        raise_on_hit=True, policy="strict")
     except ValueError as e:
         raise EgressBlocked(f"outbound query blocked (would leak a sensitive value): {e}") from e

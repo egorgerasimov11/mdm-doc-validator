@@ -240,6 +240,28 @@ def _audit_bank_ids(ext: Extraction, raw: RawDoc) -> None:
     if ext.doc_class != "bank":
         return
     f = ext.fields
+    # A value in the IBAN field that is NOT IBAN-shaped (every real IBAN starts
+    # with a 2-letter country code) is a plain account number. The US and other
+    # non-IBAN countries print domestic/international account numbers, sometimes
+    # under an "IBAN account no." label — that is a NORMAL format, not a
+    # malformed IBAN, and must never fire BNK-011.
+    iban_field = re.sub(r"\s", "", str(f.get("iban") or "")).upper()
+    if iban_field and not re.match(r"^[A-Z]{2}\d{2}", iban_field):
+        digits = re.sub(r"\D", "", iban_field)
+        acct = re.sub(r"\D", "", str(f.get("account_number") or ""))
+        if digits and not acct:
+            f["account_number"] = digits
+            ext.provenance["account_number"] = {"source": "rule", "page": None}
+            _cross_note(ext, "the IBAN-field value is a plain account number "
+                             "(this country has no IBAN) — moved to account number")
+        elif digits and digits == acct:
+            _cross_note(ext, "the IBAN field duplicated the account number "
+                             "(no IBAN in this country) — cleared")
+        else:
+            _cross_note(ext, "the IBAN-field value is a plain account number "
+                             "(this country has no IBAN), not a malformed IBAN")
+        f["iban"] = ""
+        ext.provenance.pop("iban", None)
     iban = re.sub(r"\s", "", str(f.get("iban") or "")).upper()
     if iban and not iban_mod97_ok(iban):
         # the model dropped/garbled a character — the DOCUMENT is the authority:
