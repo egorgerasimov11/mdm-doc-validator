@@ -46,6 +46,7 @@ OpenAPI contract and CF/Kyma artifacts — see [`btp/`](btp/) and
 | [docs/BTP_INTEGRATION.md](docs/BTP_INTEGRATION.md) | Docker/CF/Kyma, model topologies, auth |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | masking model, leak gate, erasure |
 | [docs/OPERATOR_GUIDE_RU.md](docs/OPERATOR_GUIDE_RU.md) | руководство оператора (RU) |
+| [docs/SKILL_SYNC.md](docs/SKILL_SYNC.md) | sync checker skills (mdm-w9-checker …) into the validator |
 | [TRAINING.md](TRAINING.md) | label → few-shot → LoRA ladder |
 
 Exit codes: `0` ACCEPT · `1` REJECT · `2` WARNING/NEED_MANUAL_REVIEW · `3` Ollama not
