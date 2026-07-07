@@ -25,6 +25,7 @@ class ReviewSubmission(BaseModel):
 
 class FeedbackIn(BaseModel):
     feedback: str = ""       # operator's free-text "what's wrong with this analysis"
+    rule_id: str = ""        # optional: the specific fired rule the operator disputes
 
 
 class FewshotIn(BaseModel):

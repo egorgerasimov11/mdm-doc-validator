@@ -170,6 +170,8 @@
       <span class="chip chip--{{ f.severity }}">{{ f.severity }}</span>
       <code>{{ f.rule_id }}</code>
       <span class="grow" style="white-space:normal">{{ f.message }}</span>
+      <button type="button" class="fb-dispute" data-rule="{{ f.rule_id }}"
+              title="оспорить это правило — модель предложит правку">оспорить</button>
       {% if f.ev %}
       <a href="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" target="_blank" title="evidence: {{ f.ev }}">
         <img class="ev-thumb ev-thumb--sm" src="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" alt="{{ f.ev }} evidence"
@@ -187,6 +189,7 @@
     <span class="meta">опишите, что не так — модель предложит правку правила (менять решаете вы)</span></h2>
   <textarea id="fb-text" rows="2" style="width:100%"
             placeholder="например: правило BNK-011 сработало зря — у US-документа нет IBAN, это обычный номер счёта"></textarea>
+  <p id="fb-target" class="meta" hidden></p>
   <div class="actions">
     <button type="button" id="fb-go" data-run="{{ run_id }}" data-class="{{ doc_class }}">Предложить исправление</button>
     <span class="hint">модель только ПРЕДЛАГАЕТ — вердикт по-прежнему выносят явные правила</span>

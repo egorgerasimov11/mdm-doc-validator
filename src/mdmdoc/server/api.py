@@ -380,7 +380,7 @@ def propose_fix(run_id: str, body: FeedbackIn) -> dict:
         log("analysing your feedback against the rules that fired…")
         mc.reset_host()
         with jobs.PIPELINE_LOCK:   # the strong model must not race the pipeline
-            result = rule_propose.propose(run_id, fb)
+            result = rule_propose.propose(run_id, fb, (body.rule_id or "").strip())
         log(f"proposal ready — {result.get('kind')}")
         return result
 

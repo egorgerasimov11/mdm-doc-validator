@@ -126,6 +126,16 @@ def test_propose_flags_needs_code(tmp_path, monkeypatch):
     assert out["kind"] == "needs_code" and "numeric" in out["needs_code"]
 
 
+def test_prompt_targets_disputed_rule():
+    ctx = {"findings": [{"rule_id": "BNK-021", "severity": "WARNING", "message": "m"},
+                        {"rule_id": "BNK-006", "severity": "NOTE", "message": "n"}],
+           "pub": {"doc_type": "bank_letter", "fields": {}}, "report": {"verdict": "WARNING"}}
+    p = rule_propose._prompt("dispute", ctx, "rules: []", rule_id="BNK-006")
+    assert "DISPUTING RULE BNK-006" in p
+    # the disputed rule is put first in the fired list so the model focuses on it
+    assert p.index("rule_id: BNK-006") < p.index("rule_id: BNK-021")
+
+
 # --- HTTP endpoint (job lifecycle) -------------------------------------------
 def test_propose_fix_endpoint_runs_as_job(tmp_path, monkeypatch):
     import time
@@ -136,8 +146,8 @@ def test_propose_fix_endpoint_runs_as_job(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setenv("MDMDOC_MODE", "full")
     monkeypatch.setattr(runstore, "resolve_run", lambda r: r)             # skip the 404 check
-    monkeypatch.setattr(rp, "propose", lambda run_id, fb: {"kind": "rule", "applicable": True,
-                                                           "proposed_yaml": "rules: []", "diff": "d"})
+    monkeypatch.setattr(rp, "propose", lambda run_id, fb, rid="": {"kind": "rule", "applicable": True,
+                                                                   "proposed_yaml": "rules: []", "diff": "d"})
     from mdmdoc.server.app import create_app
     c = TestClient(create_app("full"))
     r = c.post("/api/v1/runs/cafe0123cafe0123/propose-fix", json={"feedback": "rule fired wrongly"})

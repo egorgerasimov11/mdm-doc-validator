@@ -264,6 +264,26 @@ window.mdmdoc = (() => {
     const route = document.getElementById("fb-route");
     const issues = document.getElementById("fb-issues");
     const apply = document.getElementById("fb-apply");
+    const targetEl = document.getElementById("fb-target");
+    let targetRule = "";
+
+    function setTarget(rid) {
+      targetRule = rid || "";
+      if (targetRule) {
+        targetEl.hidden = false;
+        targetEl.innerHTML = 'целитесь в правило: <code>' + targetRule +
+          '</code> — <a href="#" id="fb-untarget">на весь вердикт</a>';
+        document.getElementById("fb-untarget").onclick = (e) => { e.preventDefault(); setTarget(""); };
+      } else { targetEl.hidden = true; targetEl.textContent = ""; }
+    }
+    // per-finding "оспорить" buttons pre-target that rule and jump to the box
+    document.querySelectorAll(".fb-dispute").forEach((b) => {
+      b.onclick = () => {
+        setTarget(b.dataset.rule);
+        document.getElementById("propose-box").scrollIntoView({ behavior: "smooth", block: "center" });
+        document.getElementById("fb-text").focus();
+      };
+    });
 
     function render(res) {
       box.hidden = false;
@@ -301,7 +321,7 @@ window.mdmdoc = (() => {
       try {
         const { job_id } = await api(`/api/v1/runs/${go.dataset.run}/propose-fix`,
           { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ feedback: fb }) });
+            body: JSON.stringify({ feedback: fb, rule_id: targetRule }) });
         pollJob(job_id, say,
           (res) => { render(res); go.disabled = false; },
           (e) => { say("ERROR: " + e); go.disabled = false; });

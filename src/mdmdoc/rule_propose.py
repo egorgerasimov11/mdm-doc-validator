@@ -174,7 +174,7 @@ def validate_rule(rule: dict, doc_class: str) -> list[str]:
 
 
 # ------------------------------------------------------------- the proposer ---
-def _prompt(feedback: str, ctx: dict, cur_yaml: str) -> str:
+def _prompt(feedback: str, ctx: dict, cur_yaml: str, rule_id: str = "") -> str:
     fired = []
     cfg = yaml.safe_load(cur_yaml) or {}
     by_id = {r.get("id"): r for r in cfg.get("rules", []) if isinstance(r, dict)}
@@ -184,9 +184,15 @@ def _prompt(feedback: str, ctx: dict, cur_yaml: str) -> str:
         fired.append({"rule_id": rid, "severity": f.get("severity"),
                       "message": f.get("message"),
                       "rule_block": blk})
+    if rule_id:   # the operator clicked "dispute" on one finding — put it first
+        fired.sort(key=lambda x: x.get("rule_id") != rule_id)
     fields = {k: (v.get("masked") if isinstance(v, dict) else v)
               for k, v in (ctx["pub"].get("fields") or {}).items()}
+    target = (f"THE OPERATOR IS SPECIFICALLY DISPUTING RULE {rule_id} — focus on it "
+              "(it may still turn out to be an extraction/needs_code issue).\n\n"
+              if rule_id else "")
     return (
+        target +
         "OPERATOR FEEDBACK (free text — what they think is wrong):\n"
         f"{feedback}\n\n"
         f"DOCUMENT TYPE: {ctx['pub'].get('doc_type')}   VERDICT: {ctx['report'].get('verdict')}\n"
@@ -201,14 +207,15 @@ def _prompt(feedback: str, ctx: dict, cur_yaml: str) -> str:
     )
 
 
-def propose(run_id: str, feedback: str) -> dict:
+def propose(run_id: str, feedback: str, rule_id: str = "") -> dict:
     """Classify the feedback and, if it is a rule problem, return a proposed
-    rule-file edit + diff for the operator to review. Never writes."""
+    rule-file edit + diff for the operator to review. `rule_id` (optional) is the
+    specific fired rule the operator clicked 'dispute' on. Never writes."""
     from . import config, model_client as mc
     ctx = _load_ctx(run_id)
     cur_yaml = rules_io.rules_path(ctx["doc_class"]).read_text()
     system = (config.PROMPTS_DIR / "system_rule_propose.txt").read_text()
-    obj, _ok = mc.generate_json("TEXT_STRONG", _prompt(feedback, ctx, cur_yaml),
+    obj, _ok = mc.generate_json("TEXT_STRONG", _prompt(feedback, ctx, cur_yaml, rule_id),
                                 system=system,
                                 options={"temperature": 0, "seed": 7, "num_predict": 2048})
     mc.unload("TEXT_STRONG")
