@@ -124,3 +124,30 @@ def test_propose_flags_needs_code(tmp_path, monkeypatch):
                             "needs_code": "iban needs a numeric-value guard"})
     out = rule_propose.propose(rid, "iban rule needs a US guard")
     assert out["kind"] == "needs_code" and "numeric" in out["needs_code"]
+
+
+# --- HTTP endpoint (job lifecycle) -------------------------------------------
+def test_propose_fix_endpoint_runs_as_job(tmp_path, monkeypatch):
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from mdmdoc import rule_propose as rp, runstore
+    monkeypatch.setattr(config, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setenv("MDMDOC_MODE", "full")
+    monkeypatch.setattr(runstore, "resolve_run", lambda r: r)             # skip the 404 check
+    monkeypatch.setattr(rp, "propose", lambda run_id, fb: {"kind": "rule", "applicable": True,
+                                                           "proposed_yaml": "rules: []", "diff": "d"})
+    from mdmdoc.server.app import create_app
+    c = TestClient(create_app("full"))
+    r = c.post("/api/v1/runs/cafe0123cafe0123/propose-fix", json={"feedback": "rule fired wrongly"})
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    for _ in range(50):
+        j = c.get(f"/api/v1/jobs/{job_id}").json()
+        if j["status"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    assert j["status"] == "done" and j["result"]["kind"] == "rule"
+    # empty feedback is rejected
+    assert c.post("/api/v1/runs/cafe0123cafe0123/propose-fix", json={"feedback": " "}).status_code == 400
