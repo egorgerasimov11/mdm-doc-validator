@@ -118,6 +118,36 @@ def regenerate_rules() -> dict:
     return rules_io.regenerate_abap()
 
 
+@router_teach.post("/rules/{doc_class}/approve", tags=["rules"])
+def approve_rule(doc_class: str, body: dict) -> dict:
+    """HARD GATE: record the human's decision on a rule — decision ∈
+    approved|rejected|pending. `rule_id` for one, or `all_pending: true` to
+    approve every currently-pending rule at once. Only approved rules ever fire."""
+    import yaml
+
+    from .. import rule_approvals
+    if doc_class not in ("bank", "w9"):
+        raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
+    decision = body.get("decision", "approved")
+    if decision not in ("approved", "rejected", "pending"):
+        raise api_error(400, "bad_request", "decision must be approved/rejected/pending")
+    cfg = yaml.safe_load(_rules_path(doc_class).read_text() or "") or {}
+    by_id = {str(r.get("id")): r for r in cfg.get("rules", []) if isinstance(r, dict)}
+    if body.get("all_pending"):
+        store = rule_approvals.load()
+        ids = [rid for rid, r in by_id.items()
+               if rule_approvals.status(store, doc_class, r) == rule_approvals.PENDING]
+    else:
+        ids = body.get("rule_ids") or ([body["rule_id"]] if body.get("rule_id") else [])
+    n = 0
+    for rid in ids:
+        r = by_id.get(str(rid))
+        if r:
+            rule_approvals.set_decision(doc_class, r, decision, note=body.get("note", ""))
+            n += 1
+    return {"ok": True, "updated": n, "decision": decision}
+
+
 # ---------------------------------------------------------------- check -------
 def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                   sap_image: Path | None = None, quality: bool = False,

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — rule approvals{% endblock %}
+{% block content %}
+<p class="meta" style="margin-top:16px"><a href="/ui">← Dashboard</a> · <a href="/ui/rules">Rules editor →</a></p>
+<h1>Rule approvals</h1>
+<p class="meta">Every document rule must be approved by a human before it can decide a verdict.
+  A rule you have not approved does <strong>not</strong> fire; while an applicable rule is
+  un-approved the document is held as <code>NEED_MANUAL_REVIEW</code> (never silently accepted).
+  Editing a rule resets it to <em>pending</em> — re-approve it.</p>
+
+<div class="actions">
+  <span class="seg" id="class-seg">
+    <a class="btn {{ 'active' if doc_class == 'bank' }}" href="/ui/rules/approve?doc_class=bank">Bank</a>
+    <a class="btn {{ 'active' if doc_class == 'w9' }}" href="/ui/rules/approve?doc_class=w9">W-9 / W-8</a>
+  </span>
+  <span class="meta">approved <strong class="ok">{{ counts.approved }}</strong> ·
+    pending <strong class="bad">{{ counts.pending }}</strong> ·
+    rejected {{ counts.rejected }}</span>
+  <button type="button" id="approve-all" data-class="{{ doc_class }}">Approve all pending</button>
+</div>
+<pre id="job-log" hidden></pre>
+
+<table class="data-table" id="rules-table">
+  <tr><th>rule</th><th>what it does</th><th>effect</th><th>status</th><th>decision</th></tr>
+  {% for r in rows %}
+  <tr data-rule="{{ r.id }}">
+    <td class="meta" style="white-space:nowrap"><code>{{ r.id }}</code><br>{{ r.name }}</td>
+    <td>{{ r.message }}{% if r.applies_to %} <span class="hint">[{{ r.applies_to | join(', ') }}]</span>{% endif %}</td>
+    <td class="meta">{{ r.severity }}{% if r.verdict_effect %} → {{ r.verdict_effect }}{% endif %}</td>
+    <td class="status">
+      <span class="tag {{ 'ok' if r.status == 'approved' else 'bad' if r.status == 'pending' else '' }}">{{ r.status }}</span>
+    </td>
+    <td style="white-space:nowrap">
+      <button type="button" class="rule-approve" data-rule="{{ r.id }}" data-class="{{ doc_class }}">Approve ✓</button>
+      <button type="button" class="rule-reject" data-rule="{{ r.id }}" data-class="{{ doc_class }}">Reject ✗</button>
+      <a class="btn" href="/ui/rules?doc_class={{ doc_class }}" title="edit this rule">Correct ✎</a>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
+{% block script %}<script>
+(function () {
+  const api = mdmdoc.api, log = document.getElementById("job-log");
+  const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+  function paint(row, status) {
+    const s = row.querySelector(".status .tag");
+    s.textContent = status;
+    s.className = "tag " + (status === "approved" ? "ok" : status === "pending" ? "bad" : "");
+  }
+  async function decide(cls, ruleId, decision, row) {
+    try {
+      const r = await api(`/api/v1/rules/${cls}/approve`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_id: ruleId, decision }) });
+      if (row) paint(row, decision);
+      say(`${ruleId}: ${decision} (${r.updated} updated)`);
+    } catch (e) { say("ERROR: " + e.message); }
+  }
+  document.querySelectorAll(".rule-approve").forEach(b => b.onclick = () =>
+    decide(b.dataset.class, b.dataset.rule, "approved", b.closest("tr")));
+  document.querySelectorAll(".rule-reject").forEach(b => b.onclick = () =>
+    decide(b.dataset.class, b.dataset.rule, "rejected", b.closest("tr")));
+  const all = document.getElementById("approve-all");
+  all.onclick = async () => {
+    all.disabled = true; say("approving all pending rules…");
+    try {
+      const r = await api(`/api/v1/rules/${all.dataset.class}/approve`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all_pending: true, decision: "approved" }) });
+      say(`approved ${r.updated} rule(s) — reloading…`);
+      location.reload();
+    } catch (e) { say("ERROR: " + e.message); all.disabled = false; }
+  };
+})();
+</script>{% endblock %}

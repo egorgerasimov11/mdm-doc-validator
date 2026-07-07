@@ -28,11 +28,13 @@ class CheckResult:
 def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders: bool = False,
               lang: str = "en", sap_image: Path | None = None,
               apply_precedent: bool = True, quality: bool = False,
-              web_evidence: bool | None = None) -> CheckResult:
+              web_evidence: bool | None = None, enforce_approvals: bool = True) -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
     not the operator's stored answers. quality=True forces the strong tier.
     web_evidence: None -> honour the MDMDOC_WEB_EVIDENCE env flag; True/False
-    force it (eval passes False — network calls are non-deterministic)."""
+    force it (eval passes False — network calls are non-deterministic).
+    enforce_approvals=True is the live HARD GATE (only human-approved rules fire);
+    eval passes False to measure the raw rules."""
     t0 = time.time()
     config.ensure_dirs()
     path = path.expanduser().resolve()
@@ -71,7 +73,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
         ext.warnings.insert(0, container_note)
 
     # rules -> verdict (+ optional SAP comparison as extra findings)
-    findings = run_rules(ext, lang=lang, policy=policy)
+    findings = run_rules(ext, lang=lang, policy=policy, enforce_approvals=enforce_approvals)
     sap_rows: list = []
     if sap_image is not None and doc_class == "bank":
         from . import sap_compare

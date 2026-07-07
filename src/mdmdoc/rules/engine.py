@@ -94,16 +94,33 @@ def _eval_when(when: dict, ext: Extraction, tables: dict) -> tuple[bool, str, st
     raise KeyError(f"unrecognized when clause: {list(when.keys())}")
 
 
-def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked") -> list[Finding]:
+def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
+              enforce_approvals: bool = False) -> list[Finding]:
+    """enforce_approvals=True is the HARD GATE (live pipeline): a rule fires only
+    if a human Approved it in the panel. A rejected rule is skipped; a pending
+    (never-reviewed or changed-since-approval) rule that APPLIES to the document
+    does not fire but forces NEED_MANUAL_REVIEW so nothing silently ACCEPTs.
+    Default False so eval/tests measure the raw rules (the machine, not the gate)."""
     cfg = load_rules(ext.doc_class)
     tables = cfg.get("tables", {}) or {}
     findings: list[Finding] = []
+    approvals, pending_applicable = {}, []
+    if enforce_approvals:
+        from .. import rule_approvals
+        approvals = rule_approvals.load()
     for rule in cfg.get("rules", []) or []:
         rid = str(rule.get("id", "?"))
         try:
             applies = rule.get("applies_to")
             if applies and ext.doc_type not in applies:
                 continue
+            if enforce_approvals:
+                from .. import rule_approvals
+                st = rule_approvals.status(approvals, ext.doc_class, rule)
+                if st != rule_approvals.APPROVED:
+                    if st == rule_approvals.PENDING:
+                        pending_applicable.append(rid)
+                    continue   # rejected -> silent skip; pending -> NMR below
             fired, detail, fname = _eval_when(rule.get("when", {}) or {}, ext, tables)
             if not fired:
                 continue
@@ -122,4 +139,11 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked") -> list
         except Exception as e:
             findings.append(Finding(rid, "NOTE", None,
                                     f"engine_error: rule {rid} failed ({e.__class__.__name__}: {e})"))
+    if pending_applicable:
+        shown = ", ".join(pending_applicable[:8]) + ("…" if len(pending_applicable) > 8 else "")
+        findings.insert(0, Finding(
+            "RULE-GATE", "WARNING", "NEED_MANUAL_REVIEW",
+            f"{len(pending_applicable)} rule(s) that apply to this document await your "
+            f"approval ({shown}) — approve them under Rules → Approvals. The verdict is "
+            "not trusted until every applicable rule is approved."))
     return findings

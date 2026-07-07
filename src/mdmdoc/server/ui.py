@@ -299,3 +299,28 @@ def rules_page(request: Request, doc_class: str = "bank"):
         pass
     return templates.TemplateResponse(request, "rules.html", _ctx(
         page="rules", doc_class=doc_class, yaml_text=text, rule_count=n))
+
+
+@router_ui.get("/ui/rules/approve", response_class=HTMLResponse)
+def rules_approve_page(request: Request, doc_class: str = "bank"):
+    """Human sign-off on every rule (HARD GATE): only Approved rules fire; a
+    pending applicable rule holds the document at NEED_MANUAL_REVIEW."""
+    import yaml
+
+    from .. import rule_approvals
+    from .api import _rules_path
+    doc_class = "w9" if doc_class == "w9" else "bank"
+    cfg = yaml.safe_load(_rules_path(doc_class).read_text() or "") or {}
+    store = rule_approvals.load()
+    rows = []
+    for r in cfg.get("rules", []) or []:
+        if not isinstance(r, dict):
+            continue
+        rows.append({"id": r.get("id"), "name": r.get("name"), "message": r.get("message"),
+                     "severity": r.get("severity"), "verdict_effect": r.get("verdict_effect"),
+                     "applies_to": r.get("applies_to"),
+                     "status": rule_approvals.status(store, doc_class, r)})
+    counts = {s: sum(x["status"] == s for x in rows)
+              for s in ("approved", "pending", "rejected")}
+    return templates.TemplateResponse(request, "rules_approve.html", _ctx(
+        page="rules", doc_class=doc_class, rows=rows, counts=counts))

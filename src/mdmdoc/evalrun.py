@@ -121,7 +121,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             continue
         try:
             # precedents OFF: eval measures the machine, not stored operator answers
-            res = run_check(path, lab["doc_class"], apply_precedent=False, web_evidence=False)
+            res = run_check(path, lab["doc_class"], apply_precedent=False, web_evidence=False,
+                            enforce_approvals=False)
         except Exception as e:  # noqa: BLE001 — eval must survive any doc
             from .privacy import scrub_text
             rows.append({"file": path.name, "error": scrub_text(str(e))})
