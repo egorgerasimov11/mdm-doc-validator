@@ -84,8 +84,10 @@ def _rule_block_span(text: str, rule_id: str) -> tuple[int, int] | None:
 
 def _block_text(rule: dict) -> str:
     """Serialize ONE rule dict to the file's style: list item at 2 spaces, keys
-    at 4. Block-style (not flow) — valid for the engine; keeps message_ru."""
-    dumped = yaml.safe_dump([rule], sort_keys=False, default_flow_style=False,
+    at 4. default_flow_style=None keeps scalar-only maps/lists inline
+    (`when: {check: …}`, `applies_to: [bank_letter]`) so the diff of a small
+    change stays small instead of reflowing the whole block."""
+    dumped = yaml.safe_dump([rule], sort_keys=False, default_flow_style=None,
                             allow_unicode=True, width=4096)
     return "\n".join(("  " + ln).rstrip() for ln in dumped.splitlines())
 
