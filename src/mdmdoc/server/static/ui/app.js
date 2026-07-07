@@ -253,6 +253,89 @@ window.mdmdoc = (() => {
       (e) => say("ERROR: " + e));
   }
 
+  /* ---------- run page: feedback -> proposed rule fix --------------------- */
+  function initProposeFix() {
+    const go = document.getElementById("fb-go");
+    if (!go) return;
+    const log = document.getElementById("job-log");
+    const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+    const box = document.getElementById("fb-proposal");
+    const ruleBox = document.getElementById("fb-rule");
+    const route = document.getElementById("fb-route");
+    const issues = document.getElementById("fb-issues");
+    const apply = document.getElementById("fb-apply");
+
+    function render(res) {
+      box.hidden = false;
+      ruleBox.hidden = true; route.hidden = true; issues.hidden = true;
+      document.getElementById("fb-kind").textContent = res.kind || "?";
+      document.getElementById("fb-rationale").textContent = res.rationale || "";
+      if (res.kind === "rule") {
+        ruleBox.hidden = false;
+        document.getElementById("fb-diff").textContent = res.diff || "(no textual change)";
+        document.getElementById("fb-yaml").value = res.proposed_yaml || res.current_yaml || "";
+        if ((res.validation || []).length) {
+          issues.hidden = false;
+          issues.textContent = "не применять как есть: " + res.validation.join("; ");
+          apply.disabled = false;   // operator may still hand-fix the YAML, then apply
+        } else { apply.disabled = false; }
+      } else if (res.kind === "extraction") {
+        route.hidden = false;
+        route.innerHTML = (res.hint || "поле прочитано неверно — исправьте в teach-режиме") +
+          ' <a href="' + (res.route || ("/ui/runs/" + go.dataset.run + "/review")) + '">Correct — teach the model →</a>';
+      } else if (res.kind === "needs_code") {
+        route.hidden = false;
+        route.textContent = (res.hint || "нужна новая логика предиката") +
+          (res.needs_code ? (" — " + res.needs_code) : "");
+      } else {
+        route.hidden = false;
+        route.textContent = res.rationale || "не удалось разобрать фидбек — переформулируйте.";
+      }
+    }
+
+    go.onclick = async () => {
+      const fb = document.getElementById("fb-text").value.trim();
+      if (!fb) { say("напишите, что не так с анализом"); return; }
+      go.disabled = true; log.textContent = "";
+      say("отправляю фидбек модели (сильный ярус, ~15-40с)…");
+      try {
+        const { job_id } = await api(`/api/v1/runs/${go.dataset.run}/propose-fix`,
+          { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback: fb }) });
+        pollJob(job_id, say,
+          (res) => { render(res); go.disabled = false; },
+          (e) => { say("ERROR: " + e); go.disabled = false; });
+      } catch (e) { say("ERROR: " + e.message); go.disabled = false; }
+    };
+
+    document.getElementById("fb-discard").onclick = () => { box.hidden = true; };
+
+    apply.onclick = async () => {
+      const cls = apply.dataset.class, run = apply.dataset.run;
+      const yaml = document.getElementById("fb-yaml").value;
+      apply.disabled = true;
+      say("сохраняю правило…");
+      try {
+        const r = await api(`/api/v1/rules/${cls}/raw`,
+          { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ yaml }) });
+        say(`правило сохранено — ${r.rules} правил(а) в файле`);
+        if (document.getElementById("fb-regen").checked) {
+          say("обновляю ABAP-сторону (regenerate)…");
+          const g = await api("/api/v1/rules/regenerate", { method: "POST" });
+          say(g.ok ? "ABAP-правила обновлены" : "regenerate: " + (g.detail || g.stderr || "пропущено"));
+        }
+        say("перепрогоняю документ с новым правилом…");
+        const fd = new FormData();
+        fd.append("doc_class", cls); fd.append("wait", "false"); fd.append("rerun_run_id", run);
+        const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
+        pollJob(job_id, say,
+          (res) => location = `/ui/runs/${res.run_id}?flash=rule-applied`,
+          (e) => { say("ERROR: " + e); apply.disabled = false; });
+      } catch (e) { say("ERROR: " + e.message); apply.disabled = false; }
+    };
+  }
+
   /* ---------- training page ---------------------------------------------- */
   function initTraining() {
     const log = document.getElementById("train-log");
@@ -425,5 +508,5 @@ window.mdmdoc = (() => {
   initCopyReport();
 
   return { api, pollJob, initDropZone, initArtifacts, initReview, initTraining,
-           initSapCompare, initWebVerify, initRetrainWatch };
+           initSapCompare, initWebVerify, initProposeFix, initRetrainWatch };
 })();

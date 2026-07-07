@@ -182,6 +182,33 @@
 </section>
 {% endif %}
 
+<section id="propose-box">
+  <h2>Не согласны с вердиктом?
+    <span class="meta">опишите, что не так — модель предложит правку правила (менять решаете вы)</span></h2>
+  <textarea id="fb-text" rows="2" style="width:100%"
+            placeholder="например: правило BNK-011 сработало зря — у US-документа нет IBAN, это обычный номер счёта"></textarea>
+  <div class="actions">
+    <button type="button" id="fb-go" data-run="{{ run_id }}" data-class="{{ doc_class }}">Предложить исправление</button>
+    <span class="hint">модель только ПРЕДЛАГАЕТ — вердикт по-прежнему выносят явные правила</span>
+  </div>
+
+  <div id="fb-proposal" hidden>
+    <p><span class="tag" id="fb-kind"></span> <span id="fb-rationale" class="meta"></span></p>
+    <p id="fb-route" class="meta" hidden></p>
+    <div id="fb-rule" hidden>
+      <pre id="fb-diff" class="artifact-body"></pre>
+      <p class="meta">Итоговый YAML правил (можно поправить перед применением):</p>
+      <textarea id="fb-yaml" rows="12" spellcheck="false" style="width:100%;font-family:monospace"></textarea>
+      <p id="fb-issues" class="bad" hidden></p>
+      <div class="actions">
+        <button type="button" id="fb-apply" data-run="{{ run_id }}" data-class="{{ doc_class }}">Применить правило и перепрогнать</button>
+        <button type="button" id="fb-discard">Отменить</button>
+        <label class="meta"><input type="checkbox" id="fb-regen" checked> обновить и ABAP-сторону (regenerate)</label>
+      </div>
+    </div>
+  </div>
+</section>
+
 {% if pub.crosscheck %}
 <section>
   <h2>OCR cross-check</h2>
@@ -199,4 +226,4 @@
   {% endfor %}
 </section>
 {% endblock %}
-{% block script %}<script>mdmdoc.initArtifacts(); mdmdoc.initSapCompare(); mdmdoc.initWebVerify(); mdmdoc.initRetrainWatch();</script>{% endblock %}
+{% block script %}<script>mdmdoc.initArtifacts(); mdmdoc.initSapCompare(); mdmdoc.initWebVerify(); mdmdoc.initProposeFix(); mdmdoc.initRetrainWatch();</script>{% endblock %}

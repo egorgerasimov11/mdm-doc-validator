@@ -23,6 +23,10 @@ class ReviewSubmission(BaseModel):
     retrain: bool = True     # save-and-retrain is the default feedback flow
 
 
+class FeedbackIn(BaseModel):
+    feedback: str = ""       # operator's free-text "what's wrong with this analysis"
+
+
 class FewshotIn(BaseModel):
     k: int = 2
 

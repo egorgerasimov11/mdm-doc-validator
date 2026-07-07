@@ -20,7 +20,7 @@ from .. import config, dataset, model_client as mc, review_core, runstore
 from ..pipeline import UnreadableDocument, run_check
 from . import jobs
 from .deps import api_error, require_token, save_upload
-from .schemas import EvalIn, FewshotIn, LoraIn, ModelfileIn, ReviewSubmission
+from .schemas import EvalIn, FeedbackIn, FewshotIn, LoraIn, ModelfileIn, ReviewSubmission
 
 router_core = APIRouter(prefix="/api/v1", dependencies=[Depends(require_token)])
 router_teach = APIRouter(prefix="/api/v1", dependencies=[Depends(require_token)],
@@ -361,6 +361,30 @@ def submit_label(run_id: str, sub: ReviewSubmission) -> dict:
 
     job = jobs.REGISTRY.submit("retrain", work, capture_stdout=True)
     return {**result, "retrain_job_id": job.id}
+
+
+@router_teach.post("/runs/{run_id}/propose-fix", tags=["teach"])
+def propose_fix(run_id: str, body: FeedbackIn) -> dict:
+    """Free-text operator feedback ('this rule fired wrongly…') -> the strong
+    model classifies it and, if it is a rule problem, PROPOSES a rule-file edit
+    (diff) for review. Proposal only; applying goes through the rules editor's
+    save (rules_io.save_rules). Runs as a job — the strong model is slow."""
+    if not runstore.resolve_run(run_id):
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    fb = (body.feedback or "").strip()
+    if not fb:
+        raise api_error(400, "bad_request", "feedback is empty")
+
+    def work(log):
+        from .. import rule_propose
+        log("analysing your feedback against the rules that fired…")
+        mc.reset_host()
+        with jobs.PIPELINE_LOCK:   # the strong model must not race the pipeline
+            result = rule_propose.propose(run_id, fb)
+        log(f"proposal ready — {result.get('kind')}")
+        return result
+
+    return {"job_id": jobs.REGISTRY.submit("propose", work).id}
 
 
 @router_teach.get("/labels")
