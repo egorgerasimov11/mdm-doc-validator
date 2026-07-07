@@ -66,11 +66,12 @@ def build_prompt(raw: RawDoc, role: str = "TEXT") -> str:
     elif raw.invoice_pages:
         packet_note = ("\nPACKET SIGNALS: page(s) "
                        + ", ".join(str(p + 1) for p in raw.invoice_pages)
-                       + " look like an invoice. Careful: remittance/payment instructions "
-                         "mention invoices being PAID ('invoice number(s) being paid', "
-                         "'must include', example amounts) but have no invoice "
-                         "number/date/amount-due of their own — that is doc_type "
-                         "payment_instructions, not invoice.")
+                       + " carry their OWN invoice number/date/amount-due — that makes "
+                         "the packet an invoice (doc_type invoice; never acceptable as "
+                         "bank proof), even if other pages are payment instructions. "
+                         "Only a page that merely MENTIONS someone else's invoices being "
+                         "paid (remittance) without its own invoice number/date/amount is "
+                         "doc_type payment_instructions.")
     cand = {k: v for k, v in raw.regex_candidates.items()}
     parts.append(
         "DOCUMENT FILENAME: " + raw.path.rsplit("/", 1)[-1]
@@ -575,6 +576,20 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
         ext_res.doc_type = "bank_letter"
         ext_res.provenance["doc_type"] = {"source": "rule",
                                           "page": raw.bank_letter_pages[0] + 1}
+    # a genuine invoice page ANYWHERE in a packet with NO bank confirmation letter
+    # is disqualifying — an invoice is never acceptable as banking support (BNK-001,
+    # REJECT), even when the deep-read pages are payment instructions. The survey
+    # flags invoice_pages from every page's light text, so this catches an invoice
+    # page even when the model only saw the bank-detail pages.
+    elif (doc_class == "bank" and raw.invoice_pages and not raw.bank_letter_pages
+          and ext_res.doc_type not in ("invoice",)):
+        pages = ", ".join(str(p + 1) for p in raw.invoice_pages)
+        ext_res.warnings.append(
+            f"packet contains a genuine invoice page ({pages}) with its own invoice "
+            f"number/date/amount — an invoice is never bank proof; the "
+            f"payment-instructions/bank pages do not rescue it")
+        ext_res.doc_type = "invoice"
+        ext_res.provenance["doc_type"] = {"source": "rule", "page": raw.invoice_pages[0] + 1}
     # deterministic type hints beat a hesitant model on hard-reject types
     elif raw.type_hint == "invoice" and ext_res.doc_type not in ("invoice",):
         ext_res.warnings.append(f"type hint 'invoice' overrides model '{ext_res.doc_type}'")
@@ -617,6 +632,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
                     and raw.ext not in config.EMAIL_EXTS
                     and not (doc_class == "bank" and raw.bank_letter_pages
                              and strong_type == "invoice")
+                    and not (doc_class == "bank" and raw.invoice_pages
+                             and not raw.bank_letter_pages)
                     and raw.type_hint != "invoice"):
                 ext_res.doc_type = strong_type
             _normalize_tin(ext_res)

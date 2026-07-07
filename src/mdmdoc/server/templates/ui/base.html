@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {% if token %}<meta name="mdmdoc-token" content="{{ token }}">{% endif %}
 <title>{% block title %}mdmdoc{% endblock %}</title>
-<link rel="stylesheet" href="/static/ui/app.css">
+<link rel="stylesheet" href="/static/ui/app.css?v={{ asset_v }}">
 </head>
 <body>
 <header>
@@ -23,7 +23,7 @@
 <main class="wrap">
 {% block content %}{% endblock %}
 </main>
-<script src="/static/ui/app.js"></script>
+<script src="/static/ui/app.js?v={{ asset_v }}"></script>
 {% block script %}{% endblock %}
 </body>
 </html>

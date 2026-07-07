@@ -271,12 +271,12 @@ window.mdmdoc = (() => {
       targetRule = rid || "";
       if (targetRule) {
         targetEl.hidden = false;
-        targetEl.innerHTML = 'целитесь в правило: <code>' + targetRule +
-          '</code> — <a href="#" id="fb-untarget">на весь вердикт</a>';
+        targetEl.innerHTML = 'targeting rule: <code>' + targetRule +
+          '</code> — <a href="#" id="fb-untarget">whole verdict instead</a>';
         document.getElementById("fb-untarget").onclick = (e) => { e.preventDefault(); setTarget(""); };
       } else { targetEl.hidden = true; targetEl.textContent = ""; }
     }
-    // per-finding "оспорить" buttons pre-target that rule and jump to the box
+    // per-finding "dispute" buttons pre-target that rule and jump to the box
     document.querySelectorAll(".fb-dispute").forEach((b) => {
       b.onclick = () => {
         setTarget(b.dataset.rule);
@@ -296,28 +296,28 @@ window.mdmdoc = (() => {
         document.getElementById("fb-yaml").value = res.proposed_yaml || res.current_yaml || "";
         if ((res.validation || []).length) {
           issues.hidden = false;
-          issues.textContent = "не применять как есть: " + res.validation.join("; ");
+          issues.textContent = "do not apply as-is: " + res.validation.join("; ");
           apply.disabled = false;   // operator may still hand-fix the YAML, then apply
         } else { apply.disabled = false; }
       } else if (res.kind === "extraction") {
         route.hidden = false;
-        route.innerHTML = (res.hint || "поле прочитано неверно — исправьте в teach-режиме") +
+        route.innerHTML = (res.hint || "a field was read wrong — fix it in the teach flow") +
           ' <a href="' + (res.route || ("/ui/runs/" + go.dataset.run + "/review")) + '">Correct — teach the model →</a>';
       } else if (res.kind === "needs_code") {
         route.hidden = false;
-        route.textContent = (res.hint || "нужна новая логика предиката") +
+        route.textContent = (res.hint || "new predicate logic is required") +
           (res.needs_code ? (" — " + res.needs_code) : "");
       } else {
         route.hidden = false;
-        route.textContent = res.rationale || "не удалось разобрать фидбек — переформулируйте.";
+        route.textContent = res.rationale || "couldn't parse the feedback — please rephrase.";
       }
     }
 
     go.onclick = async () => {
       const fb = document.getElementById("fb-text").value.trim();
-      if (!fb) { say("напишите, что не так с анализом"); return; }
+      if (!fb) { say("write what's wrong with the analysis"); return; }
       go.disabled = true; log.textContent = "";
-      say("отправляю фидбек модели (сильный ярус, ~15-40с)…");
+      say("sending feedback to the model (strong tier, ~15-40s)…");
       try {
         const { job_id } = await api(`/api/v1/runs/${go.dataset.run}/propose-fix`,
           { method: "POST", headers: { "Content-Type": "application/json" },
@@ -334,18 +334,18 @@ window.mdmdoc = (() => {
       const cls = apply.dataset.class, run = apply.dataset.run;
       const yaml = document.getElementById("fb-yaml").value;
       apply.disabled = true;
-      say("сохраняю правило…");
+      say("saving the rule…");
       try {
         const r = await api(`/api/v1/rules/${cls}/raw`,
           { method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ yaml }) });
-        say(`правило сохранено — ${r.rules} правил(а) в файле`);
+        say(`rule saved — ${r.rules} rule(s) in the file`);
         if (document.getElementById("fb-regen").checked) {
-          say("обновляю ABAP-сторону (regenerate)…");
+          say("updating the ABAP side (regenerate)…");
           const g = await api("/api/v1/rules/regenerate", { method: "POST" });
-          say(g.ok ? "ABAP-правила обновлены" : "regenerate: " + (g.detail || g.stderr || "пропущено"));
+          say(g.ok ? "ABAP rules updated" : "regenerate: " + (g.detail || g.stderr || "skipped"));
         }
-        say("перепрогоняю документ с новым правилом…");
+        say("re-running the document with the new rule…");
         const fd = new FormData();
         fd.append("doc_class", cls); fd.append("wait", "false"); fd.append("rerun_run_id", run);
         const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });

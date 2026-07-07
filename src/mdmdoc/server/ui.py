@@ -19,11 +19,25 @@ from .api import _labeled_ids, doctor as api_doctor, eval_history
 
 router_ui = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates" / "ui"))
+_STATIC_DIR = Path(__file__).resolve().parent / "static" / "ui"
+
+
+def _asset_version() -> str:
+    """Cache-bust key for app.js/app.css: newest file mtime. Without it a deploy
+    leaves operators on a stale app.js and a newly-added init function (called
+    inline on the run page) throws, breaking the page. Cheap stat, computed per
+    render so a live edit is reflected immediately."""
+    try:
+        return str(int(max(os.path.getmtime(_STATIC_DIR / "app.js"),
+                           os.path.getmtime(_STATIC_DIR / "app.css"))))
+    except OSError:
+        return "0"
 
 
 def _ctx(**kw) -> dict:
     return {"token": os.environ.get("MDMDOC_API_TOKEN", ""),
             "labels_count": dataset.count_labels(),
+            "asset_v": _asset_version(),
             **kw}
 
 

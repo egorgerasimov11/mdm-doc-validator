@@ -171,7 +171,7 @@
       <code>{{ f.rule_id }}</code>
       <span class="grow" style="white-space:normal">{{ f.message }}</span>
       <button type="button" class="fb-dispute" data-rule="{{ f.rule_id }}"
-              title="оспорить это правило — модель предложит правку">оспорить</button>
+              title="dispute this rule — the model will propose a fix">dispute</button>
       {% if f.ev %}
       <a href="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" target="_blank" title="evidence: {{ f.ev }}">
         <img class="ev-thumb ev-thumb--sm" src="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" alt="{{ f.ev }} evidence"
@@ -185,14 +185,14 @@
 {% endif %}
 
 <section id="propose-box">
-  <h2>Не согласны с вердиктом?
-    <span class="meta">опишите, что не так — модель предложит правку правила (менять решаете вы)</span></h2>
+  <h2>Disagree with the verdict?
+    <span class="meta">describe what's wrong — the model proposes a rule change (you decide whether to apply)</span></h2>
   <textarea id="fb-text" rows="2" style="width:100%"
-            placeholder="например: правило BNK-011 сработало зря — у US-документа нет IBAN, это обычный номер счёта"></textarea>
+            placeholder="e.g. rule BNK-011 fired by mistake — this US document has no IBAN, that's a plain account number"></textarea>
   <p id="fb-target" class="meta" hidden></p>
   <div class="actions">
-    <button type="button" id="fb-go" data-run="{{ run_id }}" data-class="{{ doc_class }}">Предложить исправление</button>
-    <span class="hint">модель только ПРЕДЛАГАЕТ — вердикт по-прежнему выносят явные правила</span>
+    <button type="button" id="fb-go" data-run="{{ run_id }}" data-class="{{ doc_class }}">Propose a fix</button>
+    <span class="hint">the model only PROPOSES — the verdict still comes from the explicit rules</span>
   </div>
 
   <div id="fb-proposal" hidden>
@@ -200,13 +200,13 @@
     <p id="fb-route" class="meta" hidden></p>
     <div id="fb-rule" hidden>
       <pre id="fb-diff" class="artifact-body"></pre>
-      <p class="meta">Итоговый YAML правил (можно поправить перед применением):</p>
+      <p class="meta">Resulting rules YAML (edit before applying if needed):</p>
       <textarea id="fb-yaml" rows="12" spellcheck="false" style="width:100%;font-family:monospace"></textarea>
       <p id="fb-issues" class="bad" hidden></p>
       <div class="actions">
-        <button type="button" id="fb-apply" data-run="{{ run_id }}" data-class="{{ doc_class }}">Применить правило и перепрогнать</button>
-        <button type="button" id="fb-discard">Отменить</button>
-        <label class="meta"><input type="checkbox" id="fb-regen" checked> обновить и ABAP-сторону (regenerate)</label>
+        <button type="button" id="fb-apply" data-run="{{ run_id }}" data-class="{{ doc_class }}">Apply rule and re-run</button>
+        <button type="button" id="fb-discard">Discard</button>
+        <label class="meta"><input type="checkbox" id="fb-regen" checked> also update the ABAP side (regenerate)</label>
       </div>
     </div>
   </div>
@@ -229,4 +229,8 @@
   {% endfor %}
 </section>
 {% endblock %}
-{% block script %}<script>mdmdoc.initArtifacts(); mdmdoc.initSapCompare(); mdmdoc.initWebVerify(); mdmdoc.initProposeFix(); mdmdoc.initRetrainWatch();</script>{% endblock %}
+{% block script %}<script>
+  /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest */
+  ["initArtifacts","initSapCompare","initWebVerify","initProposeFix","initRetrainWatch"]
+    .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
+</script>{% endblock %}
