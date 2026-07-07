@@ -82,4 +82,16 @@ def create_app(mode: str | None = None) -> FastAPI:
         def index():
             return RedirectResponse("/ui")
 
+        @app.middleware("http")
+        async def _ui_token_cookie(request: Request, call_next):
+            # Browser <img>/download requests can't send the Bearer header, so a
+            # UI page load drops a same-origin cookie the token-guard also accepts
+            # (deps.require_token). Set before sub-resources load → no broken images.
+            resp = await call_next(request)
+            tok = os.environ.get("MDMDOC_API_TOKEN", "")
+            if tok and request.url.path.startswith("/ui"):
+                resp.set_cookie("mdmdoc_token", tok, httponly=True,
+                                samesite="strict", path="/")
+            return resp
+
     return app

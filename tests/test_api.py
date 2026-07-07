@@ -59,6 +59,25 @@ def test_token_auth(isolated, monkeypatch):
                  headers={"Authorization": "Bearer sekret"}).status_code == 200
 
 
+def test_token_via_cookie_and_query(isolated, monkeypatch):
+    # <img>/download requests can't send the Bearer header — cookie + ?token= work
+    monkeypatch.setenv("MDMDOC_API_TOKEN", "sekret")
+    c = _client("full", monkeypatch)
+    h = {"Host": "127.0.0.1"}
+    assert c.get("/api/v1/doctor", headers=h).status_code == 401
+    assert c.get("/api/v1/doctor", headers=h, cookies={"mdmdoc_token": "sekret"}).status_code == 200
+    assert c.get("/api/v1/doctor?token=sekret", headers=h).status_code == 200
+    assert c.get("/api/v1/doctor?token=nope", headers=h).status_code == 401
+
+
+def test_ui_page_sets_token_cookie(isolated, monkeypatch):
+    monkeypatch.setenv("MDMDOC_API_TOKEN", "sekret")
+    c = _client("full", monkeypatch)
+    r = c.get("/ui", headers={"Host": "127.0.0.1"})
+    assert r.status_code == 200
+    assert r.cookies.get("mdmdoc_token") == "sekret"
+
+
 def test_host_header_hardening_full_mode(isolated, monkeypatch):
     c = _client("full", monkeypatch)
     r = c.get("/api/v1/runs", headers={"Host": "evil.example.com"})

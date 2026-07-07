@@ -37,6 +37,11 @@ async def require_token(request: Request) -> None:
         return
     auth = request.headers.get("authorization", "")
     given = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
+    # <img>/download sub-resources and direct navigation can't set the Bearer
+    # header — the UI page drops a same-origin cookie (see app.py) so those
+    # authenticate too; ?token= is a last-resort fallback.
+    if not given:
+        given = request.cookies.get("mdmdoc_token", "") or request.query_params.get("token", "")
     if not hmac.compare_digest(given, token):
         raise api_error(401, "unauthorized", "missing or invalid bearer token")
 
