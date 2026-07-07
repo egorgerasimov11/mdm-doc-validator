@@ -153,10 +153,14 @@ def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                   sap_image: Path | None = None, quality: bool = False,
                   web: bool = False) -> dict:
     mc.reset_host()
+    # HARD GATE default ON (Egor's choice); MDMDOC_RULE_GATE=0 is the instant
+    # off-switch (no redeploy) if the "everything held for approval" phase is
+    # disruptive — set it in the plist env and unload/load.
+    gate = os.environ.get("MDMDOC_RULE_GATE", "1").strip().lower() in ("1", "true", "on", "yes")
     with jobs.PIPELINE_LOCK:
         res = run_check(path, doc_class, use_vision=use_vision, lang=lang,
                         sap_image=sap_image, quality=quality,
-                        web_evidence=True if web else None)
+                        web_evidence=True if web else None, enforce_approvals=gate)
     report = json.loads(res.report_json)
     return {"run_id": res.run_id, "verdict": res.verdict, "report": report,
             "report_md": res.report_md}
