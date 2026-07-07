@@ -65,6 +65,15 @@ def test_host_header_hardening_full_mode(isolated, monkeypatch):
     assert r.status_code == 403
 
 
+def test_allowed_hosts_env_permits_tailnet(isolated, monkeypatch):
+    # MDMDOC_ALLOWED_HOSTS lets the operator expose the console on a tailnet name
+    monkeypatch.setenv("MDMDOC_ALLOWED_HOSTS", "omen.tail461272.ts.net, mini.example")
+    c = _client("full", monkeypatch)
+    assert c.get("/api/v1/runs", headers={"Host": "omen.tail461272.ts.net:8766"}).status_code == 200
+    assert c.get("/api/v1/runs", headers={"Host": "mini.example"}).status_code == 200
+    assert c.get("/api/v1/runs", headers={"Host": "evil.example.com"}).status_code == 403
+
+
 def test_check_async_job_lifecycle(isolated, monkeypatch):
     from mdmdoc.server import api as api_mod
 

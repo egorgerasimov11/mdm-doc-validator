@@ -22,8 +22,15 @@ async def require_token(request: Request) -> None:
     """Bearer auth when MDMDOC_API_TOKEN is set (mandatory in BTP); no-op otherwise.
     Also rejects non-local Host headers in full mode (DNS-rebinding hardening)."""
     if os.environ.get("MDMDOC_MODE", "full") != "api-only":
-        host = (request.headers.get("host") or "").split(":")[0]
-        if host not in ("127.0.0.1", "localhost", "testserver", ""):
+        host = (request.headers.get("host") or "").split(":")[0].lower()
+        # DNS-rebinding hardening: only localhost + explicitly allowed hosts.
+        # MDMDOC_ALLOWED_HOSTS (comma-separated) lets the operator expose the
+        # console on a trusted name (e.g. the tailnet host behind `tailscale serve`).
+        allowed = {"127.0.0.1", "localhost", "testserver", ""}
+        allowed |= {h.strip().lower()
+                    for h in os.environ.get("MDMDOC_ALLOWED_HOSTS", "").split(",")
+                    if h.strip()}
+        if host not in allowed:
             raise api_error(403, "forbidden_host", f"unexpected Host header {host!r}")
     token = os.environ.get("MDMDOC_API_TOKEN", "")
     if not token:
