@@ -83,7 +83,10 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
             sap_findings, sap_rows = sap_compare.compare(ext, sap_fields, policy=policy)
             findings += sap_findings
         else:
-            ext.warnings.append("SAP screenshot could not be read — comparison skipped")
+            from . import model_client as _mc
+            _verr = getattr(_mc, "LAST_VISION_ERROR", "")
+            ext.warnings.append("SAP screenshot could not be read — comparison skipped"
+                                + (f" (vision: {_verr[:160]})" if _verr else ""))
     verdict = decide(findings)
     # AFTER sap compare — its values are secrets too. Under the tin-only gate the
     # run artifacts legitimately carry full banking values, so only TIN secrets

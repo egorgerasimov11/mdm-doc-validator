@@ -132,13 +132,14 @@
 
 {% if data_rows %}
 <section>
-  <h2>Extracted data <span class="meta">(source per field; click a crop to zoom)</span></h2>
+  <h2>Extracted data <span class="meta">(source per field; click a crop to zoom)</span>
+    <button type="button" id="btn-copy-fields" title="copy all fields as field&#9;value lines">Copy all</button></h2>
   <table class="data-table">
     <tr><th>field</th><th>value</th><th>source</th><th>evidence</th></tr>
     {% for r in data_rows %}
     <tr>
       <td class="meta" style="white-space:nowrap">{{ r.label }}</td>
-      <td>{{ r.value }}{% if r.hint and r.value != '—' %} <span class="hint">→ {{ r.hint }}</span>{% endif %}</td>
+      <td>{{ r.value }}{% if r.hint and r.value != '—' %} <span class="hint">→ {{ r.hint }}</span>{% endif %}{% if r.copy_value %} <button type="button" class="copy-field" data-field="{{ r.fkey }}" data-copy="{{ r.copy_value }}" title="copy {{ r.fkey }}">⧉</button>{% endif %}</td>
       <td>
         {% if r.prov %}
         <span class="tag src-tag src-tag--{{ r.prov.source }}"
@@ -231,6 +232,6 @@
 {% endblock %}
 {% block script %}<script>
   /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest */
-  ["initArtifacts","initSapCompare","initWebVerify","initProposeFix","initRetrainWatch"]
+  ["initArtifacts","initSapCompare","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch"]
     .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
 </script>{% endblock %}

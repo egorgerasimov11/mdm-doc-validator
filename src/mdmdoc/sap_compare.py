@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import model_client as mc
+from . import config, model_client as mc
 from .fields import Extraction, _norm_id, _norm_name, to_iso2
 from .privacy import FIELD_KIND, mask
 from .rules.engine import Finding
@@ -32,10 +32,35 @@ SAP_PROMPT = (
 _SENSITIVE_SAP = {"bank_account": "account_number", "iban": "iban"}
 
 
+def _downscaled(image_path: Path):
+    """The SAP screenshot is user-supplied and often a 2x Retina capture. Image
+    tokens count against the vision context window — a raw 3420px capture is
+    ~4k tokens and overflowed Ollama's context, silently killing the compare.
+    Downscale to VISION_MAX_SIDE like every other vision path; returns a PIL
+    image, or None when the original is already small enough. The inbox
+    original is never modified."""
+    from PIL import Image
+    im = Image.open(image_path)
+    if max(im.size) <= config.VISION_MAX_SIDE:
+        return None
+    f = config.VISION_MAX_SIDE / max(im.size)
+    return im.convert("RGB").resize((int(im.width * f), int(im.height * f)),
+                                    Image.LANCZOS)
+
+
 def read_sap_screen(image_path: Path, vault) -> dict:
     """Vision-read the SAP screenshot -> {field: value}. Full values in memory;
     sensitive ones registered in the run's vault so scrub/leak-gate cover them."""
-    obj, _ = mc.generate_json_vision(SAP_PROMPT, [str(image_path)])
+    import tempfile
+    im = _downscaled(image_path)
+    if im is None:
+        obj, _ = mc.generate_json_vision(SAP_PROMPT, [str(image_path)])
+    else:
+        # temp file lives only for the duration of the call (pixels are sensitive)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "sap_screen.png"
+            im.save(p)
+            obj, _ = mc.generate_json_vision(SAP_PROMPT, [str(p)])
     if not isinstance(obj, dict):
         return {}
     sap = {k: str(obj.get(k, "") or "").strip() for k in SAP_KEYS}

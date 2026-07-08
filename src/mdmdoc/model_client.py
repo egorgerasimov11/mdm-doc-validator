@@ -237,9 +237,16 @@ def generate_json(role_or_model: str, prompt: str, system: str | None = None,
     return None, False
 
 
+# last vision failure detail (reset on success) — callers that swallow a None
+# JSON result can still surface WHY the read failed (runs are serialized under
+# PIPELINE_LOCK, so a module-level slot is safe enough for the operator console)
+LAST_VISION_ERROR = ""
+
+
 def vision(role_or_model: str, prompt: str, images: list[str], system: str | None = None,
            options: dict | None = None, keep_alive=0, timeout: int = 420, retries: int = 2,
            fmt: str | None = None) -> str:
+    global LAST_VISION_ERROR
     model = resolve(role_or_model) if role_or_model in ROLES else role_or_model
     b64 = []
     for p in images:
@@ -251,7 +258,11 @@ def vision(role_or_model: str, prompt: str, images: list[str], system: str | Non
         return "[vision: no readable images]"
     body = {"model": model, "prompt": prompt, "images": b64, "stream": False,
             "keep_alive": keep_alive,
-            "options": {"temperature": 0.1, "num_predict": 2048, **(options or {})}}
+            # num_ctx: image tokens count against the context window; a large
+            # screenshot alone can exceed Ollama's 4096 default (real case: a 2x
+            # SAP capture = ~4k image tokens -> HTTP 400 exceed_context_size)
+            "options": {"temperature": 0.1, "num_ctx": 16384, "num_predict": 2048,
+                        **(options or {})}}
     if system:
         body["system"] = system
     if fmt:
@@ -263,11 +274,18 @@ def vision(role_or_model: str, prompt: str, images: list[str], system: str | Non
             r.raise_for_status()
             resp = r.json().get("response", "")
             if resp.strip():
+                LAST_VISION_ERROR = ""
                 return resp
             last = "empty response"
         except Exception as e:
             last = str(e)
+            # the Ollama error BODY names the real cause (e.g. "request (4124
+            # tokens) exceeds the available context size") — don't hide it
+            body_txt = getattr(getattr(e, "response", None), "text", "") or ""
+            if body_txt:
+                last += f" — {body_txt[:200]}"
         time.sleep(2 * (attempt + 1))
+    LAST_VISION_ERROR = last
     return f"[vision error: {last}]"
 
 

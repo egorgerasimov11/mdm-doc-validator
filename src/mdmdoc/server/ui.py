@@ -91,7 +91,12 @@ def run_page(request: Request, run_id: str, flash: str = ""):
                 ev = ev if ev in evidence and ev not in seen_ev else None
                 if ev:
                     seen_ev.add(ev)
+                # copy_value: the RAW field value for the clipboard — no display
+                # suffixes like "(country IT, len 27)". Copy policy == display
+                # policy: TIN kinds come back masked (there is no unmask path).
                 data_rows.append({"label": row_label, "value": value, "hint": hint,
+                                  "fkey": fkey,
+                                  "copy_value": _display_field(pub.get("fields") or {}, fkey),
                                   "prov": prov.get(fkey), "ev": ev})
         except Exception:
             data_rows = []

@@ -51,7 +51,9 @@ window.mdmdoc = (() => {
     const sapInput = document.getElementById("sap-file");
     const sapName = document.getElementById("sap-name");
     const sapRow = document.getElementById("sap-row");
-    const syncSapRow = () => { if (sapRow) sapRow.style.display = docClass() === "bank" ? "" : "none"; };
+    // SAP compare applies to anything that may be a bank doc — Auto included
+    // (the API only rejects sap_file for explicit w9)
+    const syncSapRow = () => { if (sapRow) sapRow.style.display = docClass() !== "w9" ? "" : "none"; };
     if (sapBtn) {
       sapBtn.onclick = () => sapInput.click();
       sapInput.onchange = () => {
@@ -72,7 +74,7 @@ window.mdmdoc = (() => {
       fd.append("wait", "false");
       const q = document.getElementById("quality");
       if (q && q.checked) fd.append("quality", "true");
-      if (sapFile && docClass() === "bank") fd.append("sap_file", sapFile);
+      if (sapFile && docClass() !== "w9") fd.append("sap_file", sapFile);
       try {
         const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
         pollJob(job_id, say,
@@ -156,6 +158,28 @@ window.mdmdoc = (() => {
           (res) => location = `/ui/runs/${res.run_id}`,
           (err) => { say("ERROR: " + err); btn.disabled = false; });
       } catch (e) { say("ERROR: " + e.message); btn.disabled = false; }
+    };
+  }
+
+  /* ---------- run page: per-field copy ------------------------------------ */
+  function initFieldCopy() {
+    const tbl = document.querySelector(".data-table");
+    if (!tbl) return;
+    const flash = (b) => {
+      const t = b.textContent;
+      b.textContent = "✓"; b.classList.add("copied");
+      setTimeout(() => { b.textContent = t; b.classList.remove("copied"); }, 900);
+    };
+    tbl.addEventListener("click", (e) => {
+      const b = e.target.closest(".copy-field");
+      if (!b) return;
+      navigator.clipboard.writeText(b.dataset.copy).then(() => flash(b));
+    });
+    const all = document.getElementById("btn-copy-fields");
+    if (all) all.onclick = () => {
+      const rows = [...tbl.querySelectorAll(".copy-field")]
+        .map(b => `${b.dataset.field}\t${b.dataset.copy}`);
+      if (rows.length) navigator.clipboard.writeText(rows.join("\n")).then(() => flash(all));
     };
   }
 
@@ -528,5 +552,6 @@ window.mdmdoc = (() => {
   initCopyReport();
 
   return { api, pollJob, initDropZone, initArtifacts, initReview, initTraining,
-           initSapCompare, initWebVerify, initProposeFix, initRetrainWatch };
+           initSapCompare, initWebVerify, initProposeFix, initFieldCopy,
+           initRetrainWatch };
 })();

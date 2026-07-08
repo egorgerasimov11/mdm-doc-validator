@@ -153,3 +153,11 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 .src-tag { white-space: nowrap; }
 .src-tag--ocr-regex, .src-tag--zone-probe, .src-tag--vision-crop { color: var(--review); border-color: var(--review); }
 .src-tag--precedent { color: var(--accept); border-color: var(--accept); }
+
+/* per-field copy (run page, Extracted data) */
+.copy-field { border: 1px solid var(--divider); background: none; color: var(--secondary);
+              border-radius: 4px; padding: 0 6px; font-size: 12px; line-height: 18px;
+              cursor: pointer; vertical-align: middle; }
+.copy-field:hover { border-color: var(--secondary); }
+.copy-field.copied, #btn-copy-fields.copied { color: var(--accept); border-color: var(--accept); }
+#btn-copy-fields { font-size: 12px; padding: 1px 8px; vertical-align: middle; }
