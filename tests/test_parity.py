@@ -24,8 +24,25 @@ def test_python_predicates_match_registry():
 
 
 def test_manifest_lists_exactly_the_predicates():
-    listed, _pending = cp.parity_manifest(PY_ROOT)
+    listed, _pending, _guards = cp.parity_manifest(PY_ROOT)
     assert listed == PREDICATES, "PARITY.md predicate list drifted from REGISTRY"
+
+
+def test_guard_manifest_covers_all_stage_b_guards():
+    # every deterministic stage_b guard needs a conscious PARITY.md status
+    _listed, _pending, guards = cp.parity_manifest(PY_ROOT)
+    assert cp.python_guards(PY_ROOT) == set(guards), \
+        "stage_b guards vs PARITY.md '## Guards' drifted"
+    assert set(guards.values()) <= {"ported", "n/a", "pending"}
+
+
+@pytest.mark.skipif(not cp.ABAP_ROOT.exists(), reason="ABAP repo not checked out")
+def test_ported_guards_have_abap_markers():
+    _listed, _pending, guards = cp.parity_manifest(PY_ROOT)
+    markers = cp.abap_guard_markers()
+    ported = {g for g, s in guards.items() if s == "ported"}
+    assert ported <= markers, f"missing ABAP [GUARD:x] markers: {ported - markers}"
+    assert markers <= set(guards), f"ABAP markers without manifest entry: {markers - set(guards)}"
 
 
 def test_yaml_rules_and_checks_parse():

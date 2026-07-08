@@ -17,6 +17,11 @@ What it checks (read-only against the ABAP repo — never edits it):
   4. MANIFEST freshness — PARITY.md lists exactly the current predicates (a new
      predicate forces a conscious manifest entry), and its "Pending ABAP logic ports"
      section is empty (a listed pending port = known, tracked drift → non-zero exit).
+  5. GUARD parity — every deterministic stage_b guard (module-level `def _x(ext, raw)`)
+     has a PARITY.md "## Guards" entry with a conscious status: `ported` requires a
+     `[GUARD:x]` marker in zcl_mdmdoc_extract, `n/a` documents a Python-only guard
+     (vision/few-shot/provenance), `pending` = tracked drift → non-zero exit. A new
+     guard without a manifest entry, or an ABAP marker without a Python guard, fails.
 
 Exit 0 = in sync (or ABAP repo absent → skipped). Exit 1 = drift. Run it manually,
 in a git pre-commit hook, or in CI:  `python3 tools/check_parity.py`
@@ -81,26 +86,52 @@ def yaml_checks_used(path: Path) -> set[str]:
             if isinstance(r.get("when"), dict) and "check" in r["when"]}
 
 
-def parity_manifest(py_root: Path = PY_ROOT) -> tuple[set[str], list[str]]:
-    """(listed predicates, pending-ABAP-port lines) from PARITY.md."""
+def python_guards(py_root: Path = PY_ROOT) -> set[str]:
+    """Deterministic stage_b guard functions: module-level `def _name(ext)` /
+    `def _name(ext, raw)`. Helpers with other signatures (e.g. _cross_note) are
+    excluded by the signature shape itself."""
+    text = (py_root / "src" / "mdmdoc" / "stage_b.py").read_text()
+    return set(re.findall(
+        r"^def _([a-z0-9_]+)\(ext: Extraction(?:, raw: RawDoc)?\) -> None:",
+        text, re.M))
+
+
+def abap_guard_markers(abap_root: Path = ABAP_ROOT) -> set[str]:
+    """`[GUARD:name]` markers in the ABAP extract class — the hand-port receipts."""
+    text = (abap_root / "src" / "zcl_mdmdoc_extract.clas.abap").read_text()
+    return set(re.findall(r"\[GUARD:([a-z0-9_]+)\]", text))
+
+
+def parity_manifest(py_root: Path = PY_ROOT) -> tuple[set[str], list[str], dict[str, str]]:
+    """(listed predicates, pending-ABAP-port lines, guard->status) from PARITY.md."""
     p = py_root / "PARITY.md"
     if not p.exists():
-        return set(), []
+        return set(), [], {}
     text = p.read_text()
-    listed, pending, section = set(), [], None
+    listed: set[str] = set()
+    pending: list[str] = []
+    guards: dict[str, str] = {}
+    section = None
     for line in text.splitlines():
         h = line.strip().lower()
         if h.startswith("## predicates"):
             section = "pred"
         elif h.startswith("## pending abap"):
             section = "pending"
+        elif h.startswith("## guards"):
+            section = "guards"
         elif h.startswith("## "):
             section = None
         elif section == "pred" and line.strip().startswith("- "):
             listed.add(line.strip()[2:].split()[0])
         elif section == "pending" and line.strip().startswith("- "):
             pending.append(line.strip()[2:])
-    return listed, pending
+        elif section == "guards" and line.strip().startswith("- "):
+            body = line.strip()[2:]
+            name = body.split()[0]
+            m = re.search(r"—\s*(ported|n/a|pending)", body)
+            guards[name] = m.group(1) if m else "?"
+    return listed, pending, guards
 
 
 # --- the check --------------------------------------------------------------
@@ -145,7 +176,7 @@ def run() -> int:
             problems.append(f"coverage: rules use check(s) {sorted(miss)} not implemented in {side}")
 
     # 4. manifest freshness + pending logic ports
-    listed, pending = parity_manifest()
+    listed, pending, guard_manifest = parity_manifest()
     if not listed and not (PY_ROOT / "PARITY.md").exists():
         notes.append("PARITY.md absent — create it to track predicate logic parity")
     else:
@@ -153,7 +184,30 @@ def run() -> int:
             problems.append(f"PARITY.md predicate list is stale vs REGISTRY: "
                             f"add {sorted(py_p - listed)}, remove {sorted(listed - py_p)}")
         for line in pending:
+            if line.strip().startswith("(none"):
+                continue
             problems.append(f"pending ABAP logic port (tracked drift): {line}")
+
+    # 5. guard parity — stage_b guards vs PARITY.md statuses vs ABAP markers
+    py_g = python_guards()
+    abap_g = abap_guard_markers()
+    for g in sorted(py_g - set(guard_manifest)):
+        problems.append(f"guards: stage_b guard '_{g}' has no PARITY.md entry — "
+                        "decide ported / n/a / pending consciously")
+    for g in sorted(set(guard_manifest) - py_g):
+        problems.append(f"guards: PARITY.md lists '{g}' but stage_b has no such guard "
+                        "(stale manifest entry)")
+    for g, status in sorted(guard_manifest.items()):
+        if status == "ported" and g not in abap_g:
+            problems.append(f"guards: '{g}' is marked ported but zcl_mdmdoc_extract "
+                            f"has no [GUARD:{g}] marker")
+        elif status == "pending":
+            problems.append(f"guards: pending ABAP guard port (tracked drift): {g}")
+        elif status == "?":
+            problems.append(f"guards: '{g}' has an unparseable status in PARITY.md")
+    for g in sorted(abap_g - py_g):
+        problems.append(f"guards: ABAP carries [GUARD:{g}] but Python has no such "
+                        "stage_b guard — renamed or removed? update both sides")
 
     # report
     if notes:
@@ -167,8 +221,10 @@ def run() -> int:
         print("Predicate/logic drift → hand-port to ABAP (gen_rules_abap.py carries "
               "DATA only, never predicate logic) and update PARITY.md.")
         return 1
+    ported = sum(1 for s in guard_manifest.values() if s == "ported")
     print(f"✓ Python↔ABAP in sync — {len(py_p)} predicates, "
           f"{sum(len(yaml_rules(PY_ROOT / 'rules' / f'{c}.yaml')) for c in DOC_CLASSES)} rule entries, "
+          f"{ported}/{len(guard_manifest)} guards ported (rest n/a by design), "
           "rule data identical, no pending logic ports.")
     return 0
 

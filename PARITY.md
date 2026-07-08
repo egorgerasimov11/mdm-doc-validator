@@ -29,16 +29,28 @@ is listed under "Pending ABAP logic ports".
 - line_swap_suspect
 - date_older_than
 
+## Guards (stage_b deterministic guards ↔ `zcl_mdmdoc_extract` `[GUARD:x]` markers)
+Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`),
+`n/a` (Python-only by design — say why), `pending` (tracked drift → checker fails).
+- audit_bank_ids — ported
+- fix_jp_form — ported
+- fix_statement_period — ported
+- esignature_guard — ported
+- drop_regulator_noise — ported
+- drop_filename_echo — ported
+- normalize_tin — ported
+- drop_exemplar_echo — n/a (few-shot exemplar echo is a Python-LLM artifact; ABAP has no few-shot dataset)
+- apply_w9_zone_probe — n/a (vision zone-crop probe; the ABAP path is deterministic/text-only)
+- apply_signature_probe — n/a (vision signature probe; same reason)
+- finalize_provenance — n/a (Python report provenance structure; the ABAP result has no provenance field)
+
 ## Pending ABAP logic ports (Python has it, ABAP not yet — remove the line once applied)
-- iban_valid: US numeric-IBAN guard — a purely numeric value in the iban field (US and
-  other non-IBAN countries) is a plain account number, not a malformed IBAN, so it must
-  not fire BNK-011. Hand-off snippet (p_iban_valid `CO '0123456789'` guard + unit test
-  pred_iban_numeric_us_ok) is in ~/.claude/plans/cli-tidy-globe.md (git history if
-  overwritten — or ask the audit session). Owned by the ABAP session.
+(none — the US numeric-IBAN guard was applied to `p_iban_valid` + test
+`pred_iban_numeric_us_ok` on 2026-07-09, together with the wave-5 extract-guard pack.)
 
 ## Coordination requests → rules-editor/ABAP session (2026-07-07, audit milestone)
-1. **US-IBAN port reminder** — the pending item above is now the ONLY parity gap and it
-   will show up as false NEED_MANUAL_REVIEW on every US doc once ZMDMDOC pilots. Please apply.
+1. ~~US-IBAN port reminder~~ — **closed 2026-07-09**: applied by the audit session
+   (ABAP tree was clean and the session inactive for 3 days, per the agreed rule).
 2. **`rules_io.save_rules` must preserve UNKNOWN yaml keys per rule on any round-trip**
    (incl. the Approvals panel "Correct" path). The audit milestone adds per-rule
    provenance metadata `tier: corp|experimental|learned` and `source: skill|policy|operator`
