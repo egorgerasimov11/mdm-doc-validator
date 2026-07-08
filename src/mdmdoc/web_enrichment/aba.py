@@ -21,9 +21,9 @@ from __future__ import annotations
 import os
 import re
 
-from ..fields import _norm_name
 from . import http
 from .evidence import CONFLICT, FOUND, NOT_FOUND, UNAVAILABLE, Evidence
+from .match import best_match, name_matches as _name_matches
 
 FDIC_URL = "https://banks.data.fdic.gov/api/institutions"
 
@@ -62,18 +62,6 @@ def _fdic_lookup(bank_name: str, vault) -> tuple[list[dict], bool]:
     return out, True
 
 
-def _name_matches(a: str, b: str) -> bool:
-    na, nb = _norm_name(a), _norm_name(b)
-    if not na or not nb:
-        return False
-    if na in nb or nb in na:
-        return True
-    ta, tb = set(na.split()), set(nb.split())
-    stop = {"bank", "na", "n", "a", "the", "of", "trust", "company", "co", "usa"}
-    core = (ta & tb) - stop
-    return bool(core)
-
-
 def _fdic_evidence(bank_name: str, vault) -> Evidence:
     matches, reachable = _fdic_lookup(bank_name, vault)
     src = "FDIC BankFind"
@@ -92,7 +80,9 @@ def _fdic_evidence(bank_name: str, vault) -> Evidence:
                                 if matches else "no results"),
                         query=f"NAME:{bank_name}")
     active = [m for m in named if m["active"]]
-    best = (active or named)[0]
+    # the registry row sharing the MOST meaningful tokens — not the first row
+    best = best_match(bank_name, active or named, key=lambda m: m["name"]) \
+        or (active or named)[0]
     where = ", ".join(x for x in (best["city"], best["state"]) if x)
     if active:
         return Evidence("fdic_bank", FOUND,

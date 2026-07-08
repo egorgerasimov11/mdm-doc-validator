@@ -16,6 +16,7 @@ Properties:
 from __future__ import annotations
 
 import os
+import time
 
 import requests
 
@@ -38,6 +39,20 @@ def timeout_s() -> float:
         return 6.0
 
 
+def cache_ttl_s() -> float:
+    """In-memory TTL cache for registry answers (default 24h; 0 disables).
+    Registries change slowly; re-querying FDIC/GLEIF/SEC for the same bank on
+    every run wastes their rate limits and our latency. Per-process only —
+    nothing is persisted to disk."""
+    try:
+        return max(0.0, float(os.environ.get("MDMDOC_WEB_CACHE_TTL", "86400")))
+    except ValueError:
+        return 86400.0
+
+
+_CACHE: dict[str, tuple[float, object]] = {}
+
+
 def get_json(url: str, params: dict | None = None, vault=None,
              headers: dict | None = None) -> object | None:
     """GET url with params and return parsed JSON, or None on ANY failure.
@@ -50,15 +65,34 @@ def get_json(url: str, params: dict | None = None, vault=None,
                                     **(headers or {})})
     prepared = _SESSION.prepare_request(req)
     egress.assert_safe_outbound(prepared.url or url, vault)   # may raise EgressBlocked
-    try:
-        r = _SESSION.send(prepared, timeout=timeout_s(), allow_redirects=True)
-        if not r.ok:
-            return None
-        return r.json()
-    except egress.EgressBlocked:
-        raise
-    except Exception:
-        return None   # offline / DNS / timeout / TLS / non-JSON — degrade gracefully
+    key = prepared.url or url
+    ttl = cache_ttl_s()
+    if ttl:
+        hit = _CACHE.get(key)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+    for attempt in (0, 1):   # one polite retry on 429/5xx — then degrade
+        try:
+            r = _SESSION.send(prepared, timeout=timeout_s(), allow_redirects=True)
+            if r.status_code == 429 or 500 <= r.status_code < 600:
+                if attempt == 0:
+                    time.sleep(1.5)
+                    continue
+                return None
+            if not r.ok:
+                return None
+            data = r.json()
+            if ttl:
+                _CACHE[key] = (time.time(), data)
+            return data
+        except egress.EgressBlocked:
+            raise
+        except Exception:
+            if attempt == 0:
+                time.sleep(1.5)
+                continue
+            return None   # offline / DNS / timeout / TLS / non-JSON — degrade gracefully
+    return None
 
 
 def get_text(url: str, params: dict | None = None, vault=None,

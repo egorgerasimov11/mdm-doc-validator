@@ -19,6 +19,7 @@ import re
 from ..fields import _norm_name, looks_like_business, norm_classification
 from . import http
 from .evidence import CONFLICT, FOUND, NOT_FOUND, UNAVAILABLE, Evidence
+from .match import best_match, name_matches
 
 GLEIF_URL = "https://api.gleif.org/api/v1/lei-records"
 EDGAR_FTS_URL = "https://efts.sec.gov/LATEST/search-index"
@@ -65,14 +66,16 @@ def _gleif(name: str, vault) -> Evidence:
         lei = attr.get("lei") or (r or {}).get("id") or ""
         if legal:
             hits.append({"name": legal, "status": status, "country": country, "lei": lei})
-    named = [h for h in hits if _name_matches(name, h["name"])]
+    named = [h for h in hits if name_matches(name, h["name"])]
     if not named:
         return Evidence("gleif_entity", NOT_FOUND, f"no GLEIF legal entity matching '{name}'",
                         src, 1, "WEB-GLEIF-1", url,
                         detail=("nearest: " + "; ".join(h["name"] for h in hits[:3])
                                 if hits else "no results"), query=q)
     active = [h for h in named if h["status"] in ("", "ACTIVE")]
-    best = (active or named)[0]
+    # the registry row sharing the MOST meaningful tokens — not the first row
+    best = best_match(name, active or named, key=lambda h: h["name"]) \
+        or (active or named)[0]
     link = f"https://search.gleif.org/#/record/{best['lei']}" if best["lei"] else url
     where = f", {best['country']}" if best["country"] else ""
     if not active:
@@ -113,15 +116,8 @@ def _edgar(name: str, vault) -> Evidence:
                     query=f"q:{q}")
 
 
-def _name_matches(a: str, b: str) -> bool:
-    na, nb = _norm_name(a), _norm_name(b)
-    if not na or not nb:
-        return False
-    if na in nb or nb in na:
-        return True
-    stop = {"the", "of", "and", "co", "company", "inc", "llc", "ltd", "corp", "corporation"}
-    core = (set(na.split()) & set(nb.split())) - stop
-    return len(core) >= 2
+# the shared strict matcher lives in match.py — one matcher for every registry
+_name_matches = name_matches
 
 
 def _candidate_names(ext) -> list[tuple[str, str]]:

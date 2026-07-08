@@ -77,9 +77,11 @@ def _syntax_evidence(bic_raw: str, doc_country: str, vault) -> list[Evidence]:
     tail = " (head-office XXX)" if parsed["head_office"] else \
            (f" (branch {parsed['branch']})" if parsed["branch"] else "")
     out.append(Evidence("swift_syntax", FOUND,
-                        f"BIC {parsed['bic']} is well-formed — country {country}{tail}",
+                        f"BIC {parsed['bic']} format valid (syntax only, not "
+                        f"directory-verified) — country {country}{tail}",
                         src, 1, "WEB-SWIFT-1",
-                        detail="structure/country valid; not proof the institution routes here",
+                        detail="structure/country valid; NOT a directory lookup — no proof "
+                               "the institution exists or routes here",
                         query=f"bic:{parsed['bic']}"))
     # cross-check the BIC country against the document's stated bank country
     doc_iso = to_iso2(doc_country or "")
