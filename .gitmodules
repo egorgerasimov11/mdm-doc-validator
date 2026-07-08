@@ -1,0 +1,4 @@
+[submodule "abap"]
+	path = abap
+	url = https://github.com/mortis946/mdm-doc-validator-abap.git
+	branch = main

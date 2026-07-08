@@ -22,6 +22,8 @@ What it checks (read-only against the ABAP repo — never edits it):
      `[GUARD:x]` marker in zcl_mdmdoc_extract, `n/a` documents a Python-only guard
      (vision/few-shot/provenance), `pending` = tracked drift → non-zero exit. A new
      guard without a manifest entry, or an ABAP marker without a Python guard, fails.
+  6. ONE VERSION — the abap/ submodule pin equals the live ABAP checkout's HEAD
+     (docs/SYNC.md). A stale pin = the Python repo ships an outdated ABAP twin.
 
 Exit 0 = in sync (or ABAP repo absent → skipped). Exit 1 = drift. Run it manually,
 in a git pre-commit hook, or in CI:  `python3 tools/check_parity.py`
@@ -37,8 +39,26 @@ from pathlib import Path
 import yaml
 
 PY_ROOT = Path(__file__).resolve().parents[1]
-ABAP_ROOT = Path(os.environ.get("MDMDOC_ABAP_HOME",
-                                str(Path.home() / "Projects" / "mdm-doc-validator-abap")))
+
+
+def _resolve_abap_root() -> Path:
+    """MDMDOC_ABAP_HOME > live sibling checkout > the abap/ submodule.
+    The sibling wins over the submodule on dev machines: it is the LIVE working
+    copy; the submodule is the pinned 'one version' snapshot (freshness check
+    below keeps the two honest)."""
+    env = os.environ.get("MDMDOC_ABAP_HOME")
+    if env:
+        return Path(env)
+    sibling = Path.home() / "Projects" / "mdm-doc-validator-abap"
+    if sibling.exists():
+        return sibling
+    sub = PY_ROOT / "abap"
+    if (sub / "src").exists():
+        return sub
+    return sibling
+
+
+ABAP_ROOT = _resolve_abap_root()
 DOC_CLASSES = ("banking", "w9")
 
 # ABAP `when:` OPERATORS (not `check:` predicates) — the rule engine handles these
@@ -100,6 +120,31 @@ def abap_guard_markers(abap_root: Path = ABAP_ROOT) -> set[str]:
     """`[GUARD:name]` markers in the ABAP extract class — the hand-port receipts."""
     text = (abap_root / "src" / "zcl_mdmdoc_extract.clas.abap").read_text()
     return set(re.findall(r"\[GUARD:([a-z0-9_]+)\]", text))
+
+
+def submodule_staleness(py_root: Path = PY_ROOT,
+                        abap_root: Path = ABAP_ROOT) -> str | None:
+    """The abap/ submodule pin must equal the live ABAP checkout's HEAD —
+    that pin IS the 'one version' guarantee (a Python-repo checkout carries
+    the exact ABAP twin it was verified against). Offline check: compares the
+    two local SHAs; skipped when either side is absent or they are the same
+    working tree."""
+    import subprocess
+    sub = py_root / "abap"
+    if not (sub / ".git").exists() or not (abap_root / ".git").exists():
+        return None
+    if sub.resolve() == abap_root.resolve():
+        return None
+
+    def head(cwd: Path) -> str:
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd,
+                              capture_output=True, text=True).stdout.strip()
+
+    pin, live = head(sub), head(abap_root)
+    if pin and live and pin != live:
+        return (f"abap/ submodule pin {pin[:9]} != live ABAP HEAD {live[:9]} — "
+                "bump it: (cd abap && git pull origin main) && git add abap && commit")
+    return None
 
 
 def parity_manifest(py_root: Path = PY_ROOT) -> tuple[set[str], list[str], dict[str, str]]:
@@ -208,6 +253,11 @@ def run() -> int:
     for g in sorted(abap_g - py_g):
         problems.append(f"guards: ABAP carries [GUARD:{g}] but Python has no such "
                         "stage_b guard — renamed or removed? update both sides")
+
+    # 6. 'one version' — the abap/ submodule pin tracks the live ABAP HEAD
+    stale = submodule_staleness()
+    if stale:
+        problems.append(stale)
 
     # report
     if notes:
