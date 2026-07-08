@@ -7,9 +7,32 @@ the leak gate runs on every appended line.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from . import config
 from .privacy import assert_no_leak
+
+
+def resolve_doc_path(doc_path: str) -> Path:
+    """Label doc_path -> a Path to try. Relative paths live under CORPUS_DIR
+    (the portable corpus); an absolute path is honored while it exists (legacy
+    labels) and falls back to CORPUS_DIR/<basename>, so a corpus rsynced to
+    another machine keeps working without editing labels.jsonl."""
+    raw = Path(str(doc_path or ""))
+    if not raw.is_absolute():
+        return config.CORPUS_DIR / raw
+    if raw.exists():
+        return raw
+    return config.CORPUS_DIR / raw.name
+
+
+def portable_doc_path(path: str) -> str:
+    """Store-form of a document path: relative POSIX when under CORPUS_DIR
+    (portable), the original string otherwise."""
+    try:
+        return Path(str(path)).resolve().relative_to(config.CORPUS_DIR.resolve()).as_posix()
+    except (ValueError, OSError):
+        return str(path or "")
 
 
 def load_labels() -> list[dict]:

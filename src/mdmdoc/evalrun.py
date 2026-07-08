@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from . import config, runstore
-from .dataset import load_labels
+from .dataset import load_labels, resolve_doc_path
 from .pipeline import run_check
 from .privacy import assert_no_leak
 
@@ -115,7 +115,7 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
     field_stats: dict = {}
     confusion: dict = {}
     for lab in labels:
-        path = Path(lab["doc_path"])
+        path = resolve_doc_path(lab["doc_path"])
         if not path.exists():
             rows.append({"file": lab["doc_path"], "error": "missing file"})
             continue

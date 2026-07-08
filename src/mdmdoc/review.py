@@ -28,7 +28,8 @@ def review_run(spec: str, open_doc: bool = False) -> int:
     run_id = form["run_id"]
     print(f"\nReviewing run {run_id} — {form['file_name']} ({form['doc_class']})")
     if open_doc and form.get("doc_path"):
-        subprocess.run(["open", form["doc_path"]], check=False)
+        from .dataset import resolve_doc_path
+        subprocess.run(["open", str(resolve_doc_path(form["doc_path"]))], check=False)
 
     print("For each field: Enter = keep the model's value, or type the correction "
           "('-' clears the field).")

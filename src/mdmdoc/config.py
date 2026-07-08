@@ -15,6 +15,10 @@ MODELS_DIR = PROJECT_ROOT / "models"
 RUNS_DIR = PROJECT_ROOT / "runs"
 DATASET_DIR = PROJECT_ROOT / "dataset"
 LABELS_PATH = DATASET_DIR / "labels.jsonl"
+# Labeled ORIGINAL documents live here (gitignored — they carry real PII).
+# labels.jsonl stores doc_path RELATIVE to this dir, so the corpus + labels
+# pair rsyncs to any machine (tools/migrate_corpus.py converts legacy rows).
+CORPUS_DIR = Path(os.environ.get("MDMDOC_CORPUS_DIR", str(DATASET_DIR / "corpus")))
 LORA_DIR = DATASET_DIR / "mlx-lora"
 EVAL_DIR = PROJECT_ROOT / "eval"
 INBOX_DIR = PROJECT_ROOT / "inbox"      # uploaded documents (raw, gitignored)

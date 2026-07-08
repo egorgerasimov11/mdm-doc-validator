@@ -211,11 +211,12 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
     excerpt = scrub_text((stage_a_pub.get("raw_text_excerpt") or "")[:config.EXCERPT_LIMIT],
                          run_vault, policy="strict")
 
+    from .dataset import portable_doc_path
     label = {
         "label_id": f"lbl-{runstore.now_iso().replace(':', '').replace('-', '')}",
         "ts": runstore.now_iso(),
         "doc_sha256": run_id,
-        "doc_path": meta.get("path"),
+        "doc_path": portable_doc_path(meta.get("path")),
         "doc_class": doc_class,
         "doc_type_gold": str(sub.get("doc_type_gold") or pub.get("doc_type", "")),
         "fields_gold": gold_fields,
