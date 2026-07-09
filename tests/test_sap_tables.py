@@ -67,6 +67,58 @@ def test_iban_decomposition_confirms_through_compare(tmp_path):
     assert any(r["field"] == "IBAN" and r["status"] == "match" for r in crows)
 
 
+def _cmp(doc_fields: dict, sap_fields: dict):
+    ext = Extraction(doc_class="bank", doc_type="bank_letter")
+    ext.fields = doc_fields
+    return sap_compare.compare(ext, sap_fields)
+
+
+def test_account_midstring_containment_is_mismatch():
+    """audit-wave C9: an unanchored substring hit inside the SAP IBAN used to
+    declare 'match' and silence SAP-003 even though SAP's account differed."""
+    findings, crows = _cmp(
+        {"account_number": "123456"},
+        {"bank_account": "999999", "iban": "DE44500105123456777918"})  # mid-string
+    assert any(f.rule_id == "SAP-003" for f in findings)
+    assert any(r["field"] == "Bank Account" and r["status"] == "MISMATCH" for r in crows)
+
+
+def test_account_iban_tail_consistent_decomposition_matches():
+    # doc account and SAP BANKN both anchor the same IBAN tail (branch-code
+    # prefix differs) — the normal decomposed-IBAN shape: match, no finding
+    findings, crows = _cmp(
+        {"account_number": "40378412"},
+        {"bank_account": "000040378412", "iban": "IT39T0200801671000040378412"})
+    # zero-strip equality already matches this; force the tail path with a
+    # branch-prefixed BANKN instead
+    findings, crows = _cmp(
+        {"account_number": "40378412"},
+        {"bank_account": "01671000040378412", "iban": "IT39T0200801671000040378412"})
+    ids = {f.rule_id for f in findings}
+    assert "SAP-003" not in ids and "SAP-009" not in ids
+    assert any(r["field"] == "Bank Account" and r["status"] == "match"
+               and "decomposition" in r.get("note", "") for r in crows)
+
+
+def test_account_iban_tail_but_bankn_inconsistent_warns_sap009():
+    # doc matches the IBAN tail, but SAP's stored BANKN is NOT consistent with
+    # SAP's own IBAN — not a silent match (old bug), not a hard SAP-003 either
+    findings, crows = _cmp(
+        {"account_number": "40378412"},
+        {"bank_account": "555555", "iban": "IT39T0200801671000040378412"})
+    ids = {f.rule_id for f in findings}
+    assert "SAP-009" in ids and "SAP-003" not in ids
+    assert any(r["field"] == "Bank Account" and r["status"] == "MISMATCH" for r in crows)
+
+
+def test_account_short_tail_falls_to_mismatch():
+    # <6 significant digits must not anchor (check digits/branch codes collide)
+    findings, _ = _cmp(
+        {"account_number": "78412"},
+        {"bank_account": "999999", "iban": "IT39T0200801671000040378412"})
+    assert any(f.rule_id == "SAP-003" for f in findings)
+
+
 def test_row_selection_and_multi(tmp_path):
     p = _xlsx(tmp_path, "b.xlsx", BUT0BK_TECH, [
         ["50000111", "0001", "IT", "0542811101", "000000123456", "", "", "ACME", ""],

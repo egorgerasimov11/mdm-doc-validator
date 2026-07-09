@@ -139,16 +139,34 @@ def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Fi
     # Account number — SAP pads with leading zeros
     d_acc, s_acc = _norm_id(f.get("account_number")), _norm_id(sap.get("bank_account"))
     if d_acc and s_acc:
+        d_strip, s_strip = d_acc.lstrip("0"), s_acc.lstrip("0")
         if d_acc == s_acc:
             rows.append(_row_p("Bank Account", d_acc, s_acc, "match", kind="account_number"))
-        elif d_acc.lstrip("0") == s_acc.lstrip("0"):
+        elif d_strip == s_strip:
             rows.append(_row_p("Bank Account", d_acc, s_acc, "match",
                              "leading zeros differ (SAP padding)", kind="account_number"))
-        elif s_iban and d_acc and d_acc in s_iban:
-            rows.append(_row_p("Bank Account", d_acc, s_acc, "match",
-                             "document account contained in SAP IBAN", kind="account_number"))
+        elif s_iban and len(d_strip) >= 6 and s_iban.endswith(d_strip):
+            # Anchored to the IBAN's ACCOUNT TAIL (>=6 significant digits: check
+            # digits/branch codes make short tails collide). An unanchored
+            # substring used to declare "match" here even though SAP's own
+            # bank_account was a DIFFERENT number — silencing SAP-003 (C9).
+            if s_strip and s_iban.endswith(s_strip):
+                # SAP's BANKN is consistent with its own IBAN — both renderings
+                # anchor the same tail (they differ by a branch-code/control
+                # prefix, the normal decomposed-IBAN reality: IT CIN, DE BLZ…)
+                rows.append(_row_p("Bank Account", d_acc, s_acc, "match",
+                                 "document account matches the SAP IBAN account tail "
+                                 "(SAP stores a different decomposition of the same account)",
+                                 kind="account_number"))
+            else:
+                rows.append(_row_p("Bank Account", d_acc, s_acc, "MISMATCH",
+                                 "document matches the SAP IBAN tail but SAP's stored "
+                                 "account number differs", kind="account_number"))
+                warn("SAP-009", "Document account matches the SAP IBAN account tail, "
+                                "but SAP's stored bank account (BANKN) differs — verify "
+                                "the decomposition before processing.")
         else:
-            pos = _first_diff(d_acc.lstrip("0"), s_acc.lstrip("0"))
+            pos = _first_diff(d_strip, s_strip)
             rows.append(_row_p("Bank Account", d_acc, s_acc, "MISMATCH",
                              f"differs from position {pos}", kind="account_number"))
             crit("SAP-003", f"Account number mismatch: document {_dv('account_number', d_acc)} "
