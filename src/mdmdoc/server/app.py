@@ -78,6 +78,13 @@ def create_app(mode: str | None = None) -> FastAPI:
         from .ui import router_ui
         app.include_router(router_ui)
 
+        # optional address-validator tab (separate project; same URL when installed)
+        try:
+            from addrval.server import create_address_app
+            app.mount("/address", create_address_app())
+        except ImportError:
+            logging.getLogger("mdmdoc").info("addrval not installed — /address tab disabled")
+
         @app.get("/", include_in_schema=False)
         def index():
             return RedirectResponse("/ui")
