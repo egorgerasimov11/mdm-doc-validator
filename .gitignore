@@ -14,3 +14,4 @@ eval/candidate_report.md
 eval/candidate_results.json
 dataset/corpus/
 dataset/labels.jsonl.bak-*
+settings.json

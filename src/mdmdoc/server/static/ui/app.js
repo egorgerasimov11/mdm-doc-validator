@@ -74,6 +74,8 @@ window.mdmdoc = (() => {
       fd.append("wait", "false");
       const q = document.getElementById("quality");
       if (q && q.checked) fd.append("quality", "true");
+      const eng = document.getElementById("engine");
+      if (eng && eng.value) fd.append("engine", eng.value);
       if (sapFile && docClass() !== "w9") fd.append("sap_file", sapFile);
       try {
         const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
@@ -91,6 +93,21 @@ window.mdmdoc = (() => {
       const f = e.dataTransfer.files[0];
       if (f) send(f);
     };
+
+    // default-engine setting (persists on the server; env pin disables it)
+    const defSel = document.getElementById("engine-default");
+    const defState = document.getElementById("engine-default-state");
+    if (defSel && !defSel.disabled) {
+      defSel.addEventListener("change", async () => {
+        try {
+          await api("/api/v1/settings", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ engine: defSel.value }),
+          });
+          if (defState) { defState.textContent = "✓ saved"; setTimeout(() => defState.textContent = "", 1500); }
+        } catch (e) { if (defState) defState.textContent = "ERROR: " + e.message; }
+      });
+    }
   }
 
   /* ---------- run page: lazy artifacts ----------------------------------- */

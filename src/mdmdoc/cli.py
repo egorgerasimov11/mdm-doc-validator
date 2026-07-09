@@ -31,11 +31,15 @@ def _clean_path(parts) -> str:
 def _cmd_check(args, doc_class: str) -> int:
     from .pipeline import UnreadableDocument, run_check
     from .verdict import exit_code
-    try:
-        mc.preflight()
-    except mc.OllamaUnavailable as e:
-        print(str(e), file=sys.stderr)
-        return config.EXIT_OLLAMA_DOWN
+    engine = (getattr(args, "engine", "") or "").strip().lower()
+    if engine != "deterministic":   # deterministic runs need no model host at all
+        try:
+            mc.preflight()
+        except mc.OllamaUnavailable as e:
+            print(str(e), file=sys.stderr)
+            print("hint: `--engine deterministic` analyses without the LLM "
+                  "(OCR + patterns + rules only).", file=sys.stderr)
+            return config.EXIT_OLLAMA_DOWN
     path = _clean_path(args.path)
     if not Path(path).expanduser().exists():
         print(f"file not found: {path}\n"
@@ -59,7 +63,7 @@ def _cmd_check(args, doc_class: str) -> int:
         res = run_check(Path(path), doc_class, use_vision=not args.no_vision,
                         keep_renders=args.keep_renders, lang=args.lang,
                         sap_image=sap_image, quality=args.quality,
-                        web_evidence=web_evidence)
+                        web_evidence=web_evidence, engine=engine or None)
     except FileNotFoundError as e:
         print(f"file not found: {e}", file=sys.stderr)
         return config.EXIT_UNREADABLE
@@ -251,6 +255,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="keep page renders (SENSITIVE: pixels contain full account data)")
         p.add_argument("--quality", action="store_true",
                        help="force the strong model tier (slower, thorough)")
+        p.add_argument("--engine", choices=config.ENGINE_MODES, default="",
+                       help="analysis engine: auto (default), deterministic (no LLM), "
+                            "llm-first (strong tier), dual (compare both engines)")
         p.add_argument("--web-evidence", action="store_true",
                        help="corroborate PUBLIC ids (routing/SWIFT/bank & company names) "
                             "against external registries — advisory NOTE hints, never a "

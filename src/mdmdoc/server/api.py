@@ -148,10 +148,33 @@ def approve_rule(doc_class: str, body: dict) -> dict:
     return {"ok": True, "updated": n, "decision": decision}
 
 
+# ---------------------------------------------------------------- settings ----
+@router_teach.get("/settings", tags=["system"])
+def get_settings() -> dict:
+    """Operator runtime settings. `engine` is the default analysis engine for
+    checks that do not pass one; MDMDOC_ENGINE env (ops) overrides the panel."""
+    env = os.environ.get("MDMDOC_ENGINE", "").strip().lower()
+    return {"engine": config.engine_mode(),
+            "engine_saved": str(config.load_settings().get("engine", "")) or "auto",
+            "engine_env_override": env if env in config.ENGINE_MODES else "",
+            "engine_modes": list(config.ENGINE_MODES)}
+
+
+@router_teach.post("/settings", tags=["system"])
+def set_settings(body: dict) -> dict:
+    eng = str(body.get("engine", "")).strip().lower()
+    if eng not in config.ENGINE_MODES:
+        raise api_error(400, "bad_request",
+                        f"engine must be one of {', '.join(config.ENGINE_MODES)}")
+    config.save_setting("engine", eng)
+    return {"ok": True, "engine": config.engine_mode(),
+            "engine_env_override": os.environ.get("MDMDOC_ENGINE", "").strip().lower()}
+
+
 # ---------------------------------------------------------------- check -------
 def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                   sap_image: Path | None = None, quality: bool = False,
-                  web: bool = False) -> dict:
+                  web: bool = False, engine: str = "") -> dict:
     mc.reset_host()
     # HARD GATE default ON (Egor's choice); MDMDOC_RULE_GATE=0 is the instant
     # off-switch (no redeploy) if the "everything held for approval" phase is
@@ -160,7 +183,8 @@ def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
     with jobs.PIPELINE_LOCK:
         res = run_check(path, doc_class, use_vision=use_vision, lang=lang,
                         sap_image=sap_image, quality=quality,
-                        web_evidence=True if web else None, enforce_approvals=gate)
+                        web_evidence=True if web else None, enforce_approvals=gate,
+                        engine=engine or None)
     report = json.loads(res.report_json)
     return {"run_id": res.run_id, "verdict": res.verdict, "report": report,
             "report_md": res.report_md}
@@ -171,9 +195,13 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
           lang: str = Form("en"), use_vision: bool = Form(True),
           wait: bool = Form(True), sap_file: UploadFile | None = File(None),
           rerun_run_id: str = Form(""), quality: bool = Form(False),
-          web: bool = Form(False)):
+          web: bool = Form(False), engine: str = Form("")):
     if doc_class not in ("bank", "w9", "auto"):
         raise api_error(400, "bad_request", "doc_class must be 'bank', 'w9' or 'auto'")
+    engine = engine.strip().lower()
+    if engine and engine not in config.ENGINE_MODES:
+        raise api_error(400, "bad_request",
+                        f"engine must be one of {', '.join(config.ENGINE_MODES)} (or empty for the default)")
     if web and os.environ.get("MDMDOC_MODE", "").strip() == "api-only":
         # the sealed BTP image promises NO outbound calls — the operator-console
         # click-opt-in does not exist there, so web=true must not slip through
@@ -205,7 +233,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
                            sap=sap_path is not None, quality=quality)
     if wait:
         try:
-            out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web)
+            out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web, engine)
             out["estimate_s"] = est
             return out
         except UnreadableDocument as e:
@@ -220,7 +248,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
             log(f"SAP screenshot: {sap_path.name}")
         log(f"running {doc_class} pipeline{' (thorough tier)' if quality else ''}"
             f"{' + external web evidence' if web else ''}…")
-        out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web)
+        out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web, engine)
         out["estimate_s"] = est
         log(f"verdict: {out['verdict']} (run {out['run_id']})")
         return out

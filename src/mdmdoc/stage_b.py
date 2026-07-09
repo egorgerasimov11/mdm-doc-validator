@@ -532,11 +532,48 @@ def _finalize_provenance(ext: Extraction, raw: RawDoc) -> None:
     ext.provenance.setdefault("doc_type", {"source": "model", "page": None})
 
 
-def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extraction:
+def _engine_compare(llm_fields: dict, raw: RawDoc, doc_class: str) -> list[dict]:
+    """Dual-engine audit artifact: for every ID field, what did the DETERMINISTIC
+    engine (OCR patterns) see vs the LLM read, and do they agree? Values are
+    masked (this ships in run artifacts). agree=None when only one engine saw a
+    value — informational, not a disagreement."""
+    from .fields import _norm_id
+    from .privacy import FIELD_KIND, mask
+    pairs = (("iban", "iban"), ("swift_bic", "swift_bic"),
+             ("account_number", "account_number"),
+             ("routing_aba", "routing_aba"), ("routing_aba_wires", "routing_aba_wires")) \
+        if doc_class == "bank" else \
+        (("ein", "tin_raw"), ("tin_boxed", "tin_raw"), ("ssn", "tin_raw"))
+    out: list[dict] = []
+    for cand_key, field_key in pairs:
+        det = str(raw.regex_candidates.get(cand_key) or "").strip()
+        llm = str(llm_fields.get(field_key) or "").strip()
+        if not det and not llm:
+            continue
+        kind = FIELD_KIND.get(field_key, "account_number")
+        agree = None
+        if det and llm:
+            dn, ln = _norm_id(det), _norm_id(llm)
+            agree = dn == ln or (field_key == "account_number"
+                                 and dn.lstrip("0") == ln.lstrip("0") != "")
+        out.append({"field": field_key, "candidate": cand_key,
+                    "deterministic": mask(kind, det) if det else "",
+                    "llm": mask(kind, llm) if llm else "",
+                    "agree": agree,
+                    "only": ("deterministic" if det and not llm
+                             else "llm" if llm and not det else "")})
+    return out
+
+
+def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
+            engine: str = "auto") -> Extraction:
     doc_class = raw.doc_class
     keys = BANK_KEYS if doc_class == "bank" else W9_KEYS
     types = BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES
-    ext_res = Extraction(doc_class=doc_class, model_id=mc.resolve("TEXT"))
+    no_llm = engine == "deterministic"
+    ext_res = Extraction(doc_class=doc_class,
+                         model_id="(deterministic — no LLM)" if no_llm else mc.resolve("TEXT"))
+    ext_res.engine = engine
     ext_res.warnings = list(raw.warnings)
 
     # deterministic overrides that need no model
@@ -547,7 +584,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
         ext_res.doc_type = "email"
         ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
 
-    if raw.raw_text.strip():
+    if raw.raw_text.strip() and not no_llm:
         obj, first_try, model_id = _run_model(raw, "TEXT")
         ext_res.model_id = model_id
         ext_res.json_valid_first_try = first_try and obj is not None
@@ -563,7 +600,11 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     else:
         ext_res.doc_type = ext_res.doc_type or raw.type_hint or ("other" if doc_class == "bank" else "unknown")
         ext_res.fields = {k: "" for k in keys}
-        if not raw.locked and not raw.editable:
+        if no_llm:
+            ext_res.warnings.append(
+                "deterministic engine: LLM extraction skipped — fields come from "
+                "OCR patterns only; narrative fields may be empty")
+        elif not raw.locked and not raw.editable:
             ext_res.warnings.append("no text available for extraction")
 
     # packet-aware classification: a bank confirmation letter inside the packet
@@ -602,6 +643,9 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     _drop_filename_echo(ext_res, raw)
     _drop_regulator_noise(ext_res)
     _normalize_tin(ext_res)
+    # dual engine: remember what the LLM said BEFORE the deterministic layer
+    # overwrites it (the crosscheck makes regex the authority)
+    llm_snapshot = dict(ext_res.fields)
     ext_res.crosscheck = crosscheck_ids(ext_res.fields, raw.regex_candidates,
                                         doc_class, policy=policy,
                                         prov=ext_res.provenance)
@@ -614,7 +658,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     _esignature_guard(ext_res, raw)
 
     # --- escalation to the strong tier (quality first) -------------------------
-    reasons = escalation_reasons(ext_res, raw, quality)
+    reasons = [] if no_llm else escalation_reasons(ext_res, raw, quality)
     if reasons and raw.raw_text.strip() and mc.strong_distinct():
         strong_obj, strong_ok, strong_model = _run_model(raw, "TEXT_STRONG")
         ext_res.strong_json_valid = strong_ok and strong_obj is not None
@@ -637,6 +681,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
                     and raw.type_hint != "invoice"):
                 ext_res.doc_type = strong_type
             _normalize_tin(ext_res)
+            llm_snapshot = dict(ext_res.fields)   # merged fast+strong LLM view
             # regex stays the highest authority — re-run the crosscheck on the merge
             ext_res.crosscheck = crosscheck_ids(ext_res.fields, raw.regex_candidates,
                                                 doc_class, policy=policy,
@@ -658,6 +703,9 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked") -> Extra
     # (DocuSign box reads as 'typed name') — the e-signature fact wins back here
     _esignature_guard(ext_res, raw)
     _finalize_provenance(ext_res, raw)
+
+    if engine == "dual":
+        ext_res.engine_compare = _engine_compare(llm_snapshot, raw, doc_class)
 
     ext_res.register_secrets()
     # regex candidates hold full values too — register so the leak gate knows them

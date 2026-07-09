@@ -366,6 +366,9 @@ class Extraction:
     model_strong: str = ""
     strong_json_valid: bool = True
     signature_probe: dict = field(default_factory=dict)   # vision verdict on signature
+    engine: str = "auto"                # effective analysis engine for this run
+    # dual mode: [{field, deterministic(masked), llm(masked), agree, only}]
+    engine_compare: list = field(default_factory=list)
     vault: SecretVault = field(default_factory=SecretVault)
 
     def register_secrets(self) -> None:
@@ -422,6 +425,9 @@ class Extraction:
             "escalated_because": self.escalated_because,
             "model_strong": self.model_strong,
             "signature_probe": self.signature_probe,
+            "engine": self.engine,
             "sensitive_present": {it["kind"]: True for it in self.vault.items()},
         }
+        if self.engine_compare:
+            pub_wrap["engine_compare"] = self.engine_compare
         return pub_wrap

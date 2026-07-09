@@ -21,6 +21,20 @@
       <option value="en">en</option><option value="ru">ru</option>
     </select>
     <label class="meta"><input type="checkbox" id="quality"> thorough (strong model, slower)</label>
+    <select id="engine" style="width:auto"
+            title="analysis engine: auto = deterministic + LLM with escalation; deterministic = OCR/patterns only (no LLM); llm-first = strong model from the start; dual = auto + side-by-side engine comparison">
+      <option value="">engine: default ({{ engine_default }})</option>
+      <option value="auto">auto</option>
+      <option value="deterministic">deterministic (no LLM)</option>
+      <option value="llm-first">llm-first (thorough)</option>
+      <option value="dual">dual (compare engines)</option>
+    </select>
+    <span class="meta">default engine:
+      <select id="engine-default" style="width:auto" {% if engine_env_override %}disabled title="pinned by MDMDOC_ENGINE={{ engine_env_override }} in the service env"{% endif %}>
+        {% for m in engine_modes %}<option value="{{ m }}" {% if m == engine_default %}selected{% endif %}>{{ m }}</option>{% endfor %}
+      </select>
+      <span id="engine-default-state"></span>
+    </span>
   </div>
   <div class="drop" id="drop">Drop a PDF, image, .eml or .zip here — or click to choose a file</div>
   <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.eml,.zip" hidden>

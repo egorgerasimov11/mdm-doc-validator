@@ -67,6 +67,44 @@ EDITABLE_EXTS = {".docx", ".doc", ".xlsx", ".xlsm", ".xls", ".txt", ".rtf", ".cs
 EMAIL_EXTS = {".eml", ".msg"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
 
+# --- analysis engine -----------------------------------------------------------
+# Runtime operator settings (like rules/approvals.json: live state on the host,
+# gitignored, never rsynced over). Today it holds one key: {"engine": "..."}.
+SETTINGS_PATH = PROJECT_ROOT / "settings.json"
+
+# auto          — deterministic + fast LLM, strong tier on weakness (default)
+# deterministic — OCR + patterns + rules ONLY (no LLM, no vision)
+# llm-first     — strong LLM tier from the start (== quality)
+# dual          — auto + a per-field deterministic-vs-LLM comparison artifact
+ENGINE_MODES = ("auto", "deterministic", "llm-first", "dual")
+
+
+def load_settings() -> dict:
+    import json
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_setting(key: str, value) -> None:
+    import json
+    s = load_settings()
+    s[key] = value
+    SETTINGS_PATH.write_text(json.dumps(s, ensure_ascii=False, indent=1) + "\n",
+                             encoding="utf-8")
+
+
+def engine_mode() -> str:
+    """Which analysis engine drives a check when the request does not say:
+    MDMDOC_ENGINE env (ops override) > settings.json (operator panel) > auto."""
+    v = os.environ.get("MDMDOC_ENGINE", "").strip().lower()
+    if v in ENGINE_MODES:
+        return v
+    v = str(load_settings().get("engine", "")).strip().lower()
+    return v if v in ENGINE_MODES else "auto"
+
 
 def ensure_dirs() -> None:
     for d in (RUNS_DIR, DATASET_DIR, LORA_DIR, EVAL_DIR, FEWSHOT_DIR, MODELS_DIR, INBOX_DIR):

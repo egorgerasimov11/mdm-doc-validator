@@ -17,7 +17,8 @@
   {% endif %}
 </div>
 <p style="margin:0 0 4px">{{ report.next_step }}</p>
-<p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }}{% if pub.tier == 'strong' %} · <span class="tag" title="escalated: {{ pub.escalated_because | join(', ') }}">strong tier</span>{% endif %} ·
+<p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }}{% if pub.tier == 'strong' %} · <span class="tag" title="escalated: {{ pub.escalated_because | join(', ') }}">strong tier</span>{% endif %}{% if meta.engine_effective %} ·
+  <span class="tag" title="analysis engine{% if meta.engine_requested and meta.engine_requested != meta.engine_effective %} — requested {{ meta.engine_requested }}, degraded (LLM host unreachable){% endif %}">engine: {{ meta.engine_effective }}{% if meta.engine_requested and meta.engine_requested != meta.engine_effective %} ⚠{% endif %}</span>{% endif %} ·
   {{ meta.duration_s }}s · {{ meta.ts }}{% if labeled %} · <span class="tag">labeled ✓</span>{% endif %}</p>
 
 <div class="actions">
@@ -124,6 +125,23 @@
       </td>
       <td class="meta">{{ r.detail }}</td>
       <td class="meta"><time>{{ r.ts }}</time></td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+{% if pub.engine_compare %}
+<section>
+  <h2>Engine comparison <span class="meta">(dual mode — deterministic OCR patterns vs LLM read, masked)</span></h2>
+  <table>
+    <tr><th>field</th><th>deterministic</th><th>LLM</th><th>verdict</th></tr>
+    {% for r in pub.engine_compare %}
+    <tr>
+      <td class="meta">{{ r.field }}</td>
+      <td>{{ r.deterministic or '—' }}</td>
+      <td>{{ r.llm or '—' }}</td>
+      <td>{% if r.agree %}<span class="tag">agree ✓</span>{% elif r.agree is false %}<span class="tag" style="color:var(--danger,#c00)">DISAGREE</span>{% else %}<span class="meta">only {{ r.only }}</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </table>

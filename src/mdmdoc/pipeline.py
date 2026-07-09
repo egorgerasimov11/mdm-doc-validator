@@ -28,18 +28,40 @@ class CheckResult:
 def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders: bool = False,
               lang: str = "en", sap_image: Path | None = None,
               apply_precedent: bool = True, quality: bool = False,
-              web_evidence: bool | None = None, enforce_approvals: bool = True) -> CheckResult:
+              web_evidence: bool | None = None, enforce_approvals: bool = True,
+              engine: str | None = None) -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
     not the operator's stored answers. quality=True forces the strong tier.
     web_evidence: None -> honour the MDMDOC_WEB_EVIDENCE env flag; True/False
     force it (eval passes False — network calls are non-deterministic).
     enforce_approvals=True is the live HARD GATE (only human-approved rules fire);
-    eval passes False to measure the raw rules."""
+    eval passes False to measure the raw rules.
+    engine: None/'' -> the configured default (config.engine_mode()); otherwise
+    one of config.ENGINE_MODES. A mode that needs the LLM auto-degrades to
+    'deterministic' (with a WARNING finding) when the model host is down —
+    a check NEVER fails because Ollama is unreachable."""
     t0 = time.time()
     config.ensure_dirs()
     path = path.expanduser().resolve()
     if not path.exists():
         raise FileNotFoundError(str(path))
+
+    # --- analysis engine resolution + LLM health -------------------------------
+    engine_req = (engine or "").strip().lower() or config.engine_mode()
+    if engine_req not in config.ENGINE_MODES:
+        engine_req = "auto"
+    engine_eff, llm_ok = engine_req, True
+    if engine_req != "deterministic":
+        from . import model_client as mc
+        try:
+            mc.preflight()
+        except Exception:
+            llm_ok = False
+            engine_eff = "deterministic"
+    if engine_eff == "deterministic":
+        use_vision = False   # the vision reader is an LLM too
+    elif engine_eff == "llm-first":
+        quality = True       # strong tier from the start
 
     # run id = content hash (artifacts of a re-run overwrite the same dir)
     import hashlib
@@ -68,12 +90,31 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     gate = config.gate_policy()
 
     # Stage B (trainable extraction, two tiers)
-    ext = stage_b.extract(raw, quality=quality, policy=policy)
+    ext = stage_b.extract(raw, quality=quality, policy=policy, engine=engine_eff)
     if container_note:
         ext.warnings.insert(0, container_note)
 
     # rules -> verdict (+ optional SAP comparison as extra findings)
     findings = run_rules(ext, lang=lang, policy=policy, enforce_approvals=enforce_approvals)
+    from .rules.engine import Finding as _Finding
+    if engine_req != "deterministic" and not llm_ok:
+        findings.insert(0, _Finding(
+            "ENGINE-001", "WARNING", None,
+            f"LLM host unreachable — automatic fallback to the deterministic engine "
+            f"(OCR + patterns only; narrative fields may be empty). "
+            f"Requested engine: {engine_req}."))
+    if ext.engine_compare:
+        _dis = [r["field"] for r in ext.engine_compare if r["agree"] is False]
+        if _dis:
+            findings.insert(0, _Finding(
+                "ENGINE-002", "WARNING", None,
+                f"dual-engine comparison: the deterministic and LLM engines disagree "
+                f"on {len(_dis)} field(s): {', '.join(_dis)} — see the engine table"))
+        else:
+            findings.insert(0, _Finding(
+                "ENGINE-003", "NOTE", None,
+                f"dual-engine comparison: {len(ext.engine_compare)} ID field(s) "
+                f"checked, the two engines agree"))
     sap_rows: list = []
     if sap_image is not None and doc_class == "bank":
         from . import sap_compare
@@ -142,6 +183,8 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
             "run_id": run_id, "ts": runstore.now_iso(), "model": ext.model_id,
             "use_vision": use_vision, "duration_s": round(time.time() - t0, 1),
             "tier": ext.tier, "escalated_because": ext.escalated_because,
+            "engine_requested": engine_req, "engine_effective": engine_eff,
+            "llm_ok": llm_ok,
             "has_text_layer": raw.has_text_layer, "quality": quality,
             "signature_pass": bool(raw.signature_probe), "web_evidence": bool(do_web),
             "shape_key": shape_key(doc_class, raw.has_text_layer, use_vision,
