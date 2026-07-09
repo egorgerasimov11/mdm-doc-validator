@@ -335,8 +335,13 @@ def _audit_bank_ids(ext: Extraction, raw: RawDoc) -> None:
             and acct.lstrip("0") in (raw.raw_text or ""):
         printed = acct.lstrip("0")
         f["account_number"] = printed
-        _cross_note(ext, f"account number: printed form {printed} "
-                         f"(IBAN account part is the zero-padded {acct})")
+        # values through the run's display policy — this note used to embed the
+        # raw digits, which breached masking and aborted api-only runs (C6)
+        from .privacy import display_value
+        _cross_note(ext, "account number: printed form "
+                         f"{display_value('account_number', printed, ext.policy)} "
+                         "(IBAN account part is the zero-padded "
+                         f"{display_value('account_number', acct, ext.policy)})")
 
 
 def _fix_jp_form(ext: Extraction, raw: RawDoc) -> None:
@@ -700,6 +705,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     ext_res = Extraction(doc_class=doc_class,
                          model_id="(deterministic — no LLM)" if no_llm else mc.resolve("TEXT"))
     ext_res.engine = engine
+    ext_res.policy = policy
     ext_res.warnings = list(raw.warnings)
 
     # deterministic overrides that need no model

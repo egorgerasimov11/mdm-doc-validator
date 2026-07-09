@@ -447,6 +447,10 @@ class Extraction:
     # dual mode: [{field, deterministic(masked), llm(masked), agree, only}]
     engine_compare: list = field(default_factory=list)
     vault: SecretVault = field(default_factory=SecretVault)
+    # display policy of the RUN ('full' operator console | 'masked' api-only).
+    # Guards that print banking values into notes must respect it (C6);
+    # fail-safe default is masked. Not serialized (to_public builds its own).
+    policy: str = "masked"
 
     def register_secrets(self) -> None:
         keys = _SENSITIVE_BANK if self.doc_class == "bank" else _SENSITIVE_W9

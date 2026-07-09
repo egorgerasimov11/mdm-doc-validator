@@ -36,6 +36,31 @@ def test_audit_bank_ids_unmaps_abi_cab():
     assert ext.crosscheck == before
 
 
+def test_audit_bank_ids_masks_printed_account_note():
+    """audit-wave C6: the printed-form note used to embed the raw account
+    digits, bypassing the display policy (and aborting api-only runs)."""
+    from mdmdoc.privacy import assert_no_leak
+
+    def _ext():
+        return Extraction(doc_class="bank", fields={
+            "iban": "IT39T0200801671000040378412",
+            "account_number": "000040378412"})
+
+    e = _ext()                                      # default policy: masked
+    _audit_bank_ids(e, _raw("Conto corrente n. 40378412 ..."))
+    notes = " | ".join(e.crosscheck)
+    assert "printed form" in notes
+    assert "40378412" not in notes                  # masked under masked policy
+    assert "000040378412" not in notes
+    # the strict gate (api-only) accepts the masked note
+    assert_no_leak(notes, ["000040378412", "40378412"], policy="strict")
+
+    e = _ext()
+    e.policy = "full"                               # operator console
+    _audit_bank_ids(e, _raw("Conto corrente n. 40378412 ..."))
+    assert "40378412" in " | ".join(e.crosscheck)   # full display preserved
+
+
 def test_jp_postal_code_is_not_an_account():
     ext = Extraction(doc_class="bank", fields={
         "account_number": "8130044", "account_type": "", "bank_country": "",
