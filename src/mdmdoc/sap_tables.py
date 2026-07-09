@@ -217,9 +217,16 @@ def select_row(rows: list[dict], ext: Extraction, sap_bp: str = "") \
         findings.append(Finding("SAP-013", "WARNING", "WARNING",
             f"These bank details already exist under {len(partners)} different "
             f"partners ({', '.join(partners[:6])}) — possible duplicate/shared account."))
-    else:
+    elif partners:
         findings.append(Finding("SAP-012", "NOTE", None,
             f"These bank details already exist under partner {partners[0]}."))
+    else:
+        # rows matched but every PARTNER cell is blank (malformed/trimmed
+        # export) — still compare against the best row, never crash (C10)
+        findings.append(Finding("SAP-012", "NOTE", None,
+            "The document's bank details match row(s) in the export, but the "
+            "export carries no Partner values — compared against the "
+            "best-scoring row; identify the partner manually."))
     hits.sort(key=lambda r: _row_score(r, ext), reverse=True)
     return hits[0], findings, partners
 

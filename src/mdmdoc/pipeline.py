@@ -120,6 +120,18 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     if sap_image is not None:
         sap_image = sap_image.expanduser().resolve()
         suffix = sap_image.suffix.lower()
+        def _sap_internal_error(e: Exception) -> None:
+            # Fail closed: the operator explicitly attached SAP data; a compare
+            # that crashed must neither abort the whole run (old behavior) nor
+            # let an un-compared ACCEPT stand (C10). Distinct from the visible
+            # bad-INPUT SapTableError path, which stays warning-only.
+            ext.warnings.append(f"SAP comparison failed internally ({e.__class__.__name__}) "
+                                "— the document was NOT verified against SAP")
+            findings.append(_Finding(
+                "SAP-014", "WARNING", "NEED_MANUAL_REVIEW",
+                "SAP comparison was requested but aborted with an internal error — "
+                "the document was not verified against SAP; review manually."))
+
         if suffix in (".xlsx", ".xlsm"):
             # SAP TABLE EXPORT (BUT0BK bank details / BUT000 BP general data) —
             # local, deterministic, no vision. BUT0BK↔bank docs, BUT000↔w9 docs.
@@ -130,39 +142,45 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
             except sap_tables.SapTableError as e:
                 ext.warnings.append(f"SAP table export not usable — comparison skipped ({e})")
                 kind, trows = None, []
-            if kind == "BUT0BK" and doc_class == "bank":
-                row, sel_findings, _others = sap_tables.select_row(trows, ext, sap_bp)
-                findings += sel_findings
-                if row is not None:
-                    sfields = sap_tables.to_sap_fields(row)
-                    sap_tables.register_secrets(ext, sfields)
-                    sap_findings, sap_rows = sap_compare.compare(ext, sfields, policy=policy)
-                    findings += sap_findings
-            elif kind == "BUT000" and doc_class == "w9":
-                row = sap_tables.select_bp(trows, sap_bp)
-                if row is not None:
-                    sap_findings, sap_rows = sap_tables.compare_bp(ext, row, policy=policy)
-                    findings += sap_findings
-                else:
-                    ext.warnings.append("SAP BUT000 export: no matching partner "
-                                        "(pass the partner number) — comparison skipped")
-            elif kind:
-                ext.warnings.append(
-                    f"SAP export kind {kind} does not match the {doc_class} document "
-                    "— comparison skipped")
+            try:
+                if kind == "BUT0BK" and doc_class == "bank":
+                    row, sel_findings, _others = sap_tables.select_row(trows, ext, sap_bp)
+                    findings += sel_findings
+                    if row is not None:
+                        sfields = sap_tables.to_sap_fields(row)
+                        sap_tables.register_secrets(ext, sfields)
+                        sap_findings, sap_rows = sap_compare.compare(ext, sfields, policy=policy)
+                        findings += sap_findings
+                elif kind == "BUT000" and doc_class == "w9":
+                    row = sap_tables.select_bp(trows, sap_bp)
+                    if row is not None:
+                        sap_findings, sap_rows = sap_tables.compare_bp(ext, row, policy=policy)
+                        findings += sap_findings
+                    else:
+                        ext.warnings.append("SAP BUT000 export: no matching partner "
+                                            "(pass the partner number) — comparison skipped")
+                elif kind:
+                    ext.warnings.append(
+                        f"SAP export kind {kind} does not match the {doc_class} document "
+                        "— comparison skipped")
+            except Exception as e:  # noqa: BLE001 — any compare bug fails closed
+                _sap_internal_error(e)
         elif doc_class == "bank":
             # SAP SCREENSHOT (bank only) — vision read
             from . import sap_compare
             sap_kind = "image"
-            sap_fields = sap_compare.read_sap_screen(sap_image, ext.vault)
-            if sap_fields:
-                sap_findings, sap_rows = sap_compare.compare(ext, sap_fields, policy=policy)
-                findings += sap_findings
-            else:
-                from . import model_client as _mc
-                _verr = getattr(_mc, "LAST_VISION_ERROR", "")
-                ext.warnings.append("SAP screenshot could not be read — comparison skipped"
-                                    + (f" (vision: {_verr[:160]})" if _verr else ""))
+            try:
+                sap_fields = sap_compare.read_sap_screen(sap_image, ext.vault)
+                if sap_fields:
+                    sap_findings, sap_rows = sap_compare.compare(ext, sap_fields, policy=policy)
+                    findings += sap_findings
+                else:
+                    from . import model_client as _mc
+                    _verr = getattr(_mc, "LAST_VISION_ERROR", "")
+                    ext.warnings.append("SAP screenshot could not be read — comparison skipped"
+                                        + (f" (vision: {_verr[:160]})" if _verr else ""))
+            except Exception as e:  # noqa: BLE001 — any compare bug fails closed
+                _sap_internal_error(e)
         else:
             ext.warnings.append("SAP screenshot comparison applies to bank documents; "
                                 "for W-9 attach a BUT000 table export instead")
@@ -185,20 +203,39 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     secrets = ext.vault.tin_secrets() if gate == "tin-only" else ext.vault.secrets()
 
     # operator precedent: a confirmed label for THIS document (by content hash)
-    # overrides the machine verdict/doc_type — feedback must stick immediately
+    # overrides the machine verdict/doc_type — feedback must stick immediately.
+    # Guardrail (C11): a precedent may TIGHTEN freely, but RELAXING the machine
+    # verdict (e.g. rule REJECT -> stored ACCEPT) applies only when the label
+    # carries an explicit verdict confirmation — a single mislabel must not
+    # silently disarm the rules forever.
     model_verdict, model_doc_type = verdict, ext.doc_type
     precedent = _find_precedent(run_id) if apply_precedent else None
+    precedent_relax_blocked = False
     if precedent:
         from .rules.engine import Finding
+        from .verdict import RANK
         gold_v = precedent.get("verdict_gold") or verdict
         gold_t = precedent.get("doc_type_gold") or ext.doc_type
-        if gold_v != verdict or gold_t != ext.doc_type:
-            note = f" Operator note: {precedent['notes']}" if precedent.get("notes") else ""
+        relaxing = RANK.get(gold_v, 99) < RANK.get(verdict, -1)
+        note = f" Operator note: {precedent['notes']}" if precedent.get("notes") else ""
+        if relaxing and not precedent.get("verdict_confirmed"):
+            precedent_relax_blocked = True
+            if gold_t != ext.doc_type:   # doc_type memory still applies (not verdict-relaxing)
+                ext.doc_type = gold_t
+                ext.provenance["doc_type"] = {"source": "precedent", "page": None}
             findings.insert(0, Finding(
-                "OPERATOR-1", "NOTE", None,
+                "OPERATOR-2", "WARNING", None,
+                f"Stored operator precedent wants to RELAX the machine verdict "
+                f"{verdict} → {gold_v} but was saved without explicit verdict "
+                f"confirmation — machine verdict kept. Re-review the document "
+                f"with 'confirm verdict' checked to apply it.{note}"))
+        elif gold_v != verdict or gold_t != ext.doc_type:
+            relax_tag = " — RELAXED the machine verdict (explicitly confirmed)" if relaxing else ""
+            findings.insert(0, Finding(
+                "OPERATOR-1", "WARNING" if relaxing else "NOTE", None,
                 f"Operator precedent ({precedent.get('ts', '')}): doc_type={gold_t}, "
                 f"verdict={gold_v} — overrides the machine result "
-                f"({model_doc_type}/{model_verdict}).{note}"))
+                f"({model_doc_type}/{model_verdict}){relax_tag}.{note}"))
             verdict, ext.doc_type = gold_v, gold_t
             ext.provenance["doc_type"] = {"source": "precedent", "page": None}
 
@@ -223,7 +260,8 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                                      "model_verdict": model_verdict,
                                      "model_doc_type": model_doc_type,
                                      "ts": precedent.get("ts", ""),
-                                     "notes": precedent.get("notes", "")}
+                                     "notes": precedent.get("notes", ""),
+                                     "relax_blocked": precedent_relax_blocked}
     if sap_rows:
         pub["sap_compare"] = sap_rows
 
