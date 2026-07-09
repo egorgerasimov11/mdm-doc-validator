@@ -563,6 +563,19 @@ def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
     if not probe:
         return
     from .privacy import scrub_text
+    if probe.get("no_visual_verdict"):
+        # Vision was attempted but said NOTHING (model error / unusable reply).
+        # It must not overwrite the text-tier's `signed` with False — keep the
+        # field, surface the uncertainty so the confidence gate can hold back
+        # a blind ACCEPT (CONF-001 weak signal via `uncertain`).
+        ext.signature_probe = {"handwritten_signature": False, "stamp": False,
+                               "evidence": "", "page": None,
+                               "votes": probe.get("votes") or {},
+                               "uncertain": True,
+                               "no_visual_verdict": True}
+        ext.warnings.append("signature vision produced no usable read — signature "
+                            "state unverified (text-tier value kept); verify by eye")
+        return
     probe_page = probe.get("page", 0) + 1 if isinstance(probe.get("page"), int) else None
     # a stamp whose evidence is a REGULATOR watermark (VIGILADO / Superintendencia
     # margin plate on Colombian letters) is compliance noise, not a signature —

@@ -68,3 +68,61 @@ def test_confidence_two_weak_is_low():
     e.provenance["swift_bic"] = {"source": "model"}
     e.signature_probe = {"uncertain": True}
     assert confidence.assess(e)["level"] == "low"
+
+
+# --- audit-wave C4: the W-9 signals must actually be reachable ---------------
+def _w9_ext():
+    e = Extraction(doc_class="w9", doc_type="w9_form")
+    e.fields = {"tin_raw": "12-3456789", "line1_name": "Acme LLC"}
+    return e
+
+
+def test_w9_model_only_tin_is_weak_signal():
+    e = _w9_ext()
+    # provenance is keyed by the INTERNAL name tin_raw (the bug keyed on "tin")
+    e.provenance = {"tin_raw": {"source": "model"}}
+    a = confidence.assess(e)
+    assert a["level"] == "medium"
+    assert any("model-only read" in r for r in a["reasons"])
+
+
+def test_w9_confirmed_tin_stays_high():
+    e = _w9_ext()
+    e.provenance = {"tin_raw": {"source": "model", "confirmed": True}}
+    assert confidence.assess(e)["level"] == "high"
+
+
+def test_w9_tin_mismatch_note_is_hard_signal():
+    e = _w9_ext()
+    e.provenance = {"tin_raw": {"source": "model", "confirmed": True}}
+    e.crosscheck = ["tin_raw=MISMATCH(model=XX-XXX6789 vs ocr=XX-XXX4321)"]
+    a = confidence.assess(e)
+    assert a["level"] == "low"
+    assert any("disagree on tin_raw" in r for r in a["reasons"])
+
+
+def test_signature_no_visual_verdict_keeps_signed_and_flags_uncertain(monkeypatch, tmp_path):
+    """Vision attempted but unusable (both calls -> None): the text-tier's
+    signed=True must survive and the probe must surface as uncertain."""
+    from pathlib import Path
+
+    from mdmdoc import model_client, stage_a, stage_b
+    from mdmdoc.stage_a import RawDoc
+
+    monkeypatch.setattr(model_client, "generate_json_vision",
+                        lambda *a, **k: (None, False))
+    img = tmp_path / "page.png"
+    img.write_bytes(b"not really a png")   # never opened — vision is mocked
+    raw = RawDoc(path=str(img), sha256="0" * 16, ext=".png", doc_class="bank",
+                 images=[str(img)])
+    stage_a.signature_probe(Path(img), raw, tmp_path)
+    assert raw.signature_probe.get("no_visual_verdict") is True
+    assert raw.signature_probe.get("uncertain") is True
+
+    e = _bank_ext()
+    e.fields["signed"] = True
+    stage_b._apply_signature_probe(e, raw)
+    assert e.fields["signed"] is True                  # vision said nothing
+    assert e.signature_probe.get("uncertain") is True  # confidence sees it
+    a = confidence.assess(e)
+    assert any("signature read uncertain" in r for r in a["reasons"])

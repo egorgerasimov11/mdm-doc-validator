@@ -469,8 +469,26 @@ def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
                 "evidence": str(obj.get("evidence") or "")[:200],
                 "page": idx, "votes": votes, "uncertain": bool(uncertain),
             }
+        elif band_png or png:
+            # Vision was attempted but produced nothing usable (model error /
+            # non-dict). That is NOT a negative read — mark the signature state
+            # unverified so the confidence gate can hold back a blind ACCEPT.
+            raw.signature_probe = {
+                "handwritten_signature": False, "stamp": False,
+                "date_near_signature": "", "evidence": "",
+                "page": idx, "votes": votes, "uncertain": True,
+                "no_visual_verdict": True,
+                "reason": "vision-unavailable-or-unusable",
+            }
     except Exception as e:  # noqa: BLE001 — probe is best-effort
         raw.warnings.append(f"signature probe failed ({e.__class__.__name__})")
+        raw.signature_probe = {
+            "handwritten_signature": False, "stamp": False,
+            "date_near_signature": "", "evidence": "", "page": 0,
+            "votes": {"band": "not-run", "page": "not-run", "text": "none"},
+            "uncertain": True, "no_visual_verdict": True,
+            "reason": f"probe-exception:{e.__class__.__name__}",
+        }
 
 
 _ESIGN_TOKENS = ("docusign envelope", "docusigned by", "adobe sign",

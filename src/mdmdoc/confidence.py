@@ -53,7 +53,9 @@ def assess(ext: Extraction, raw=None) -> dict:
     # WEAK: a critical ID that only the model produced, never confirmed by OCR
     for k in crit:
         if str(ext.fields.get(k) or "").strip():
-            prov = (ext.provenance or {}).get("tin" if k == "tin_raw" else k) or {}
+            # provenance is keyed by the INTERNAL field name ("tin_raw" included);
+            # the "tin" re-key exists only in the public to_public() view.
+            prov = (ext.provenance or {}).get(k) or {}
             if prov.get("source") == "model" and not prov.get("confirmed"):
                 weak += 1
                 reasons.append(f"{k}: model-only read, not confirmed by OCR")
