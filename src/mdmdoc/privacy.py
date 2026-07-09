@@ -134,8 +134,10 @@ _ACCT_NEAR_RE = re.compile(
     r"сч[её]т|계좌|口座|账[户戶号號]|帐[户戶号號])[^0-9]{0,14})([0-9][0-9 \-]{5,20}[0-9])")
 _LONG_DIGITS_RE = re.compile(r"\b\d[\d \-]{9,20}\d\b")
 # spaced TIN variants — W-9 boxes flatten to separated digits ("8 1 – 0 8 2 6 7 3 4")
-SSN_SPACED_RE = re.compile(r"\b\d{3}[ ]\d{2}[ ]\d{4}\b")
-EIN_SPACED_RE = re.compile(r"\b(?:\d[ ]?){2}[\-–—][ ]?(?:\d[ ]?){6}\d\b|\b\d{2}[ ]\d{7}\b")
+# same digit/hyphen adjacency guards as ocr.EIN_RE/SSN_RE (phantom-TIN class)
+SSN_SPACED_RE = re.compile(r"(?<![\d-])\d{3}[ ]\d{2}[ ]\d{4}(?![\d-])")
+EIN_SPACED_RE = re.compile(
+    r"(?<![\d-])(?:(?:\d[ ]?){2}[\-–—][ ]?(?:\d[ ]?){6}\d|\d{2}[ ]\d{7})(?![\d-])")
 
 
 def scrub_text(text: str, vault: SecretVault | None = None,
@@ -200,13 +202,18 @@ def assert_no_leak(blob: str, known_secrets: list[str] | None = None,
     Real values are still caught by the known-secret pass, which runs first."""
     leaks: list[str] = []
     b = blob or ""
-    b_norm = re.sub(r"[\s\-–]", "", b)
     fake_norms = {re.sub(r"[\s\-]", "", f) for f in (allowed_fakes or [])}
     for s in known_secrets or []:
-        s_norm = re.sub(r"[\s\-–]", "", s)
-        if len(_digits(s_norm)) < 6:
+        if len(_digits(s)) < 6:
             continue
-        if s in b or (s_norm and s_norm in b_norm):
+        # Variant detection uses the SAME digit-run pattern scrub_text replaces
+        # with — by construction, anything the gate can find here, the scrubber
+        # could have masked. (The old whole-blob normalization glued digits from
+        # UNRELATED tokens across the text and flagged phantom 'leaks' no scrub
+        # pass could ever remove — a run-killing false positive.)
+        dv = _digits(s)
+        pat = re.compile(r"[\s\-–]*".join(re.escape(c) for c in dv))
+        if s in b or pat.search(b):
             leaks.append(f"known-secret:{mask('tin', s)}")
     patterns = _TIN_LEAK_RES if policy == "tin-only" else (_TIN_LEAK_RES + _BANK_LEAK_RES)
     for rx in patterns:
