@@ -85,12 +85,38 @@ def test_host_header_hardening_full_mode(isolated, monkeypatch):
 
 
 def test_allowed_hosts_env_permits_tailnet(isolated, monkeypatch):
-    # MDMDOC_ALLOWED_HOSTS lets the operator expose the console on a tailnet name
+    # MDMDOC_ALLOWED_HOSTS lets the operator expose the console on a tailnet
+    # name — but only WITH a token (C12): exposure without auth is refused
     monkeypatch.setenv("MDMDOC_ALLOWED_HOSTS", "omen.tail461272.ts.net, mini.example")
+    monkeypatch.setenv("MDMDOC_API_TOKEN", "s3cret")
     c = _client("full", monkeypatch)
-    assert c.get("/api/v1/runs", headers={"Host": "omen.tail461272.ts.net:8766"}).status_code == 200
-    assert c.get("/api/v1/runs", headers={"Host": "mini.example"}).status_code == 200
-    assert c.get("/api/v1/runs", headers={"Host": "evil.example.com"}).status_code == 403
+    auth = {"Authorization": "Bearer s3cret"}
+    assert c.get("/api/v1/runs", headers={"Host": "omen.tail461272.ts.net:8766",
+                                          **auth}).status_code == 200
+    assert c.get("/api/v1/runs", headers={"Host": "mini.example", **auth}).status_code == 200
+    assert c.get("/api/v1/runs", headers={"Host": "evil.example.com", **auth}).status_code == 403
+    # allowed host but missing/wrong bearer -> 401
+    assert c.get("/api/v1/runs", headers={"Host": "mini.example"}).status_code == 401
+    assert c.get("/api/v1/runs", headers={"Host": "mini.example",
+                                          "Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_allowed_hosts_without_token_refused(isolated, monkeypatch):
+    # exposing the console without a token would leave the approval hard-gate
+    # unauthenticated — every gated endpoint refuses, incl. Host: localhost
+    # (the Host header is client-controlled, so no carve-out)
+    monkeypatch.setenv("MDMDOC_ALLOWED_HOSTS", "mini.example")
+    monkeypatch.delenv("MDMDOC_API_TOKEN", raising=False)
+    c = _client("full", monkeypatch)
+    assert c.get("/api/v1/runs", headers={"Host": "mini.example"}).status_code == 503
+    assert c.get("/api/v1/runs", headers={"Host": "localhost"}).status_code == 503
+
+
+def test_no_allowed_hosts_no_token_local_default_works(isolated, monkeypatch):
+    monkeypatch.delenv("MDMDOC_ALLOWED_HOSTS", raising=False)
+    monkeypatch.delenv("MDMDOC_API_TOKEN", raising=False)
+    c = _client("full", monkeypatch)
+    assert c.get("/api/v1/runs").status_code == 200          # localhost default
 
 
 def test_check_async_job_lifecycle(isolated, monkeypatch):

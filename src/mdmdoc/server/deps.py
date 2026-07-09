@@ -26,10 +26,18 @@ async def require_token(request: Request) -> None:
         # DNS-rebinding hardening: only localhost + explicitly allowed hosts.
         # MDMDOC_ALLOWED_HOSTS (comma-separated) lets the operator expose the
         # console on a trusted name (e.g. the tailnet host behind `tailscale serve`).
-        allowed = {"127.0.0.1", "localhost", "testserver", ""}
-        allowed |= {h.strip().lower()
-                    for h in os.environ.get("MDMDOC_ALLOWED_HOSTS", "").split(",")
-                    if h.strip()}
+        extra = {h.strip().lower()
+                 for h in os.environ.get("MDMDOC_ALLOWED_HOSTS", "").split(",")
+                 if h.strip()}
+        if extra and not os.environ.get("MDMDOC_API_TOKEN", ""):
+            # An exposed console with no token would leave the approval
+            # hard-gate unauthenticated. The Host header is client-controlled,
+            # so no localhost carve-out — refuse every gated endpoint (C12).
+            raise api_error(503, "misconfigured",
+                            "MDMDOC_ALLOWED_HOSTS exposes the console but "
+                            "MDMDOC_API_TOKEN is not set — all gated endpoints "
+                            "refused; set a token or unset MDMDOC_ALLOWED_HOSTS")
+        allowed = {"127.0.0.1", "localhost", "testserver", ""} | extra
         if host not in allowed:
             raise api_error(403, "forbidden_host", f"unexpected Host header {host!r}")
     token = os.environ.get("MDMDOC_API_TOKEN", "")
