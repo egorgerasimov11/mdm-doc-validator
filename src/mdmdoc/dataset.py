@@ -7,10 +7,14 @@ the leak gate runs on every appended line.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from . import config
 from .privacy import assert_no_leak
+
+# serializes the read-rewrite of labels.jsonl across the server threadpool
+_LOCK = threading.Lock()
 
 
 def resolve_doc_path(doc_path: str) -> Path:
@@ -69,7 +73,8 @@ def append_label(label: dict, secrets: list[str] | None = None) -> None:
     config.ensure_dirs()
     blob = json.dumps(label, ensure_ascii=False)
     assert_no_leak(blob, secrets or [], allowed_fakes=label_fakes(label))
-    # replace an earlier label for the same document (latest correction wins)
-    existing = [l for l in load_labels() if l.get("doc_sha256") != label.get("doc_sha256")]
-    lines = [json.dumps(l, ensure_ascii=False) for l in existing] + [blob]
-    config.LABELS_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with _LOCK:
+        # replace an earlier label for the same document (latest correction wins)
+        existing = [l for l in load_labels() if l.get("doc_sha256") != label.get("doc_sha256")]
+        lines = [json.dumps(l, ensure_ascii=False) for l in existing] + [blob]
+        config.atomic_write_text(config.LABELS_PATH, "\n".join(lines) + "\n")

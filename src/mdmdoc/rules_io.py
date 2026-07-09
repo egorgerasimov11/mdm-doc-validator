@@ -11,11 +11,15 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 import yaml
 
 from . import config
+
+# serializes rule-file writes across the server threadpool
+_LOCK = threading.Lock()
 
 
 def rules_path(doc_class: str) -> Path:
@@ -34,7 +38,8 @@ def save_rules(doc_class: str, text: str) -> int:
     ids = [r.get("id") for r in parsed["rules"] if isinstance(r, dict)]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate rule id in the file")
-    rules_path(doc_class).write_text(text)
+    with _LOCK:
+        config.atomic_write_text(rules_path(doc_class), text)
     return len(parsed["rules"])
 
 

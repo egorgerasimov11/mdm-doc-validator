@@ -79,6 +79,15 @@ SETTINGS_PATH = PROJECT_ROOT / "settings.json"
 ENGINE_MODES = ("auto", "deterministic", "llm-first", "dual")
 
 
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+    """Crash-safe replace: write a sibling tmp file, then os.replace(). A reader
+    sees the old bytes or the new bytes — never a torn/truncated file. Used by
+    every operator-state writer (approvals ledger, labels, rules, settings)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding=encoding)
+    os.replace(tmp, path)
+
+
 def load_settings() -> dict:
     import json
     try:
@@ -92,8 +101,8 @@ def save_setting(key: str, value) -> None:
     import json
     s = load_settings()
     s[key] = value
-    SETTINGS_PATH.write_text(json.dumps(s, ensure_ascii=False, indent=1) + "\n",
-                             encoding="utf-8")
+    atomic_write_text(SETTINGS_PATH,
+                      json.dumps(s, ensure_ascii=False, indent=1) + "\n")
 
 
 def engine_mode() -> str:
