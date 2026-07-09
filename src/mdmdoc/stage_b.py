@@ -396,6 +396,28 @@ def _esignature_guard(ext: Extraction, raw: RawDoc) -> None:
                 ext.provenance["doc_date"] = {"source": "ocr-regex", "page": None}
 
 
+def _ground_payment_instructions(ext: Extraction, raw: RawDoc) -> None:
+    """A payment_instructions classification must be GROUNDED: the document has
+    to carry at least one deterministic payment-instruction marker (see
+    fields._PAYMENT_INSTRUCTION_MARKS). An ungrounded model guess falls back to
+    the deterministic type hint (or 'other'). Real case: a Chinese conference
+    exhibition notice (招商通知) with the organiser's remittance details was
+    guessed as payment_instructions — it is not the vendor's banking document."""
+    if ext.doc_class != "bank" or ext.doc_type != "payment_instructions":
+        return
+    from .fields import payment_instruction_marks
+    if payment_instruction_marks(raw.raw_text):
+        return
+    new_type = raw.type_hint or "other"
+    if new_type == "payment_instructions":
+        return
+    ext.warnings.append(
+        "model classified payment_instructions but the document carries no "
+        f"payment-instruction markers — classified as {new_type}")
+    ext.doc_type = new_type
+    ext.provenance["doc_type"] = {"source": "rule", "page": None}
+
+
 _BANKNAME_NOISE = ("vigilado", "superintendencia", "supervised by", "regulated by")
 
 
@@ -637,6 +659,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
         ext_res.doc_type = "invoice"
         ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
 
+    _ground_payment_instructions(ext_res, raw)
+
     # echo guards run BEFORE escalation: a dropped echo leaves a gap the strong
     # tier must be given the chance to fill
     _drop_exemplar_echo(ext_res, raw)
@@ -680,6 +704,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
                              and not raw.bank_letter_pages)
                     and raw.type_hint != "invoice"):
                 ext_res.doc_type = strong_type
+            _ground_payment_instructions(ext_res, raw)
             _normalize_tin(ext_res)
             llm_snapshot = dict(ext_res.fields)   # merged fast+strong LLM view
             # regex stays the highest authority — re-run the crosscheck on the merge

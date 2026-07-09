@@ -39,6 +39,7 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 - drop_regulator_noise — ported
 - drop_filename_echo — ported
 - normalize_tin — ported
+- ground_payment_instructions — ported
 - drop_exemplar_echo — n/a (few-shot exemplar echo is a Python-LLM artifact; ABAP has no few-shot dataset)
 - apply_w9_zone_probe — n/a (vision zone-crop probe; the ABAP path is deterministic/text-only)
 - apply_signature_probe — n/a (vision signature probe; same reason)

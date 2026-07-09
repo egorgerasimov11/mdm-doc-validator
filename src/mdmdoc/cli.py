@@ -87,6 +87,10 @@ def _cmd_review(args) -> int:
 
 
 def _cmd_eval(args) -> int:
+    if getattr(args, "rescore", False):
+        # re-scores stored predictions — no model host needed at all
+        from .evalrun import run_rescore
+        return run_rescore(tag=args.tag, record=bool(args.tag))
     try:
         mc.preflight()
     except mc.OllamaUnavailable as e:
@@ -278,6 +282,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tag", default="")
     p.add_argument("--scenario", default=None,
                    help="only labels carrying this scenario tag (e.g. w9_boxed_tin)")
+    p.add_argument("--rescore", action="store_true",
+                   help="re-score the LAST eval's stored predictions under the current "
+                        "scorers (strict fidelity + lenient column) — no model calls; "
+                        "--tag records the anchor in history")
     p.set_defaults(func=_cmd_eval)
 
     p = sub.add_parser("train", help="build few-shot prompts and/or a custom Ollama model from labels")

@@ -40,6 +40,27 @@ def _field_match(key: str, pred_fields: dict, gold_fields: dict) -> bool:
     return _norm(pv) == _norm(gv)
 
 
+# Free-text NAME fields get a second, LENIENT scoring column: a read that drops
+# a legal suffix (LTD/GmbH/EOOD) or an honorific is materially correct even
+# though the strict scorer counts it as a miss. IDs stay strict-only — there is
+# no "materially correct" account number. The strict metric is never redefined
+# (history.jsonl entries stay comparable forever).
+_LENIENT_NAME_FIELDS = frozenset(
+    {"account_holder", "bank_name", "line1_name", "line2_business_name"})
+
+
+def _field_match_lenient(key: str, pred_fields: dict, gold_fields: dict) -> bool:
+    if _field_match(key, pred_fields, gold_fields):
+        return True
+    if key not in _LENIENT_NAME_FIELDS:
+        return False
+    from .fields import names_materially_equal
+    pv, gv = pred_fields.get(key, ""), gold_fields.get(key, "")
+    if isinstance(pv, dict) or isinstance(gv, dict):
+        return False
+    return names_materially_equal(str(pv or ""), str(gv or ""))
+
+
 def _leak_sweep() -> int:
     """dataset/prompts/eval are ALWAYS strict; runs/ follows the operator's
     display policy (full banking values there are legitimate, TIN never is)."""
@@ -139,12 +160,17 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             invoice_false_accept += int(res.verdict != "REJECT")
         scored = BANK_SCORED if lab["doc_class"] == "bank" else W9_SCORED
         row_fields = {}
+        row_fields_lenient = {}
         for k in scored:
             ok = _field_match(k, res.pub.get("fields", {}), lab.get("fields_gold", {}))
-            st = field_stats.setdefault(f"{lab['doc_class']}.{k}", [0, 0])
+            ok_len = ok or _field_match_lenient(k, res.pub.get("fields", {}),
+                                                lab.get("fields_gold", {}))
+            st = field_stats.setdefault(f"{lab['doc_class']}.{k}", [0, 0, 0])
             st[0] += int(ok)
             st[1] += 1
+            st[2] += int(ok_len)
             row_fields[k] = ok
+            row_fields_lenient[k] = ok_len
         rows.append({"file": path.name, "run_id": res.run_id,
                      "doc_class": lab["doc_class"],
                      "doc_type": f"{pred_type}/{gold_type}",
@@ -155,7 +181,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
                      "scenarios": lab.get("scenarios") or [],
                      "ok": (pred_type == gold_type and res.verdict == lab.get("verdict_gold")
                             and all(row_fields.values())),
-                     "fields": row_fields})
+                     "fields": row_fields,
+                     "fields_lenient": row_fields_lenient})
         _p(f"[{len(rows)}/{len(labels)}] {path.name}: {res.verdict}/{lab.get('verdict_gold')}"
            + (f", misses: {', '.join(k for k, ok in row_fields.items() if not ok)}"
               if any(not ok for ok in row_fields.values()) else ""))
@@ -170,6 +197,9 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         "invoice_false_accept_rate": (round(invoice_false_accept / invoice_total, 3)
                                       if invoice_total else None),
         "fields": {k: round(v[0] / v[1], 3) for k, v in sorted(field_stats.items())},
+        "fields_lenient": {k: round(v[2] / v[1], 3)
+                           for k, v in sorted(field_stats.items())
+                           if k.split(".", 1)[1] in _LENIENT_NAME_FIELDS},
         "scenarios": scenario_slices(rows),
         "leakage_count": leaks,
     }
@@ -228,12 +258,14 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         pv = f" {prev['metrics'].get(k)} |" if prev else ""
         lines.append(f"| {k} | {metrics.get(k)} |{pv}")
     lines.append("")
-    lines.append("## Per-field exact match")
+    lines.append("## Per-field match (strict / lenient for name fields)")
     for k, v in metrics["fields"].items():
         pv = ""
         if prev:
             pv = f" (prev {prev['metrics'].get('fields', {}).get(k, '—')})"
-        lines.append(f"- {k}: {v}{pv}")
+        len_v = metrics["fields_lenient"].get(k)
+        len_s = f" · lenient {len_v}" if len_v is not None else ""
+        lines.append(f"- {k}: {v}{len_s}{pv}")
     if metrics["scenarios"]:
         lines.append("")
         lines.append("## Scenario slices")
@@ -264,3 +296,66 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         _p(f"FAIL: sensitive-leakage count = {leaks} (must be 0)")
         return 1
     return 0
+
+
+def run_rescore(tag: str = "", record: bool = False) -> int:
+    """Re-score the LAST eval's stored predictions (runs/<run_id>/extraction.json)
+    under the current scorers — zero model calls, seconds not minutes.
+
+    Two jobs: (1) FIDELITY — the strict re-score must reproduce the recorded
+    per-field booleans bit-for-bit (proves the scorer refactor changed nothing
+    strict); (2) ANCHOR — the lenient column on the SAME predictions quantifies
+    how much of a low name-field score is scoring artifact vs real misses.
+    record=True appends a history entry marked "rescore": true."""
+    main = config.EVAL_DIR / "last_results.json"
+    if not main.exists():
+        print("no eval/last_results.json — run a full eval first")
+        return 1
+    data = json.loads(main.read_text())
+    labels = {l.get("doc_sha256"): l for l in load_labels()}
+    field_stats: dict = {}
+    fidelity_bad: list[str] = []
+    scored_rows = 0
+    for r in data.get("rows", []):
+        if not isinstance(r, dict) or "error" in r or not r.get("run_id"):
+            continue
+        lab = labels.get(r["run_id"])
+        pub = runstore.load(r["run_id"], "extraction.json")
+        if not lab or not pub:
+            print(f"  ! skipped (no label/artifact): {r.get('file', '?')}")
+            continue
+        pred = pub.get("fields", {})
+        scored = BANK_SCORED if lab["doc_class"] == "bank" else W9_SCORED
+        row_s = {}
+        for k in scored:
+            ok = _field_match(k, pred, lab.get("fields_gold", {}))
+            ok_len = ok or _field_match_lenient(k, pred, lab.get("fields_gold", {}))
+            st = field_stats.setdefault(f"{lab['doc_class']}.{k}", [0, 0, 0])
+            st[0] += int(ok)
+            st[1] += 1
+            st[2] += int(ok_len)
+            row_s[k] = ok
+        if r.get("fields") is not None and row_s != r["fields"]:
+            fidelity_bad.append(r.get("file", "?"))
+        scored_rows += 1
+
+    fields = {k: round(v[0] / v[1], 3) for k, v in sorted(field_stats.items())}
+    fields_len = {k: round(v[2] / v[1], 3) for k, v in sorted(field_stats.items())
+                  if k.split(".", 1)[1] in _LENIENT_NAME_FIELDS}
+    print(f"rescored {scored_rows} stored prediction(s) from "
+          f"{data.get('tag') or data.get('ts', 'last eval')}")
+    print("fidelity (strict == recorded): "
+          + ("OK" if not fidelity_bad else f"MISMATCH on {fidelity_bad}"))
+    print("\n| field | strict | lenient |")
+    print("|---|---|---|")
+    for k, v in fields.items():
+        print(f"| {k} | {v} | {fields_len.get(k, '—')} |")
+    if record:
+        entry = {"ts": runstore.now_iso(), "tag": tag, "rescore": True,
+                 "metrics": {"n": scored_rows, "fields": fields,
+                             "fields_lenient": fields_len,
+                             "rescored_from": data.get("tag") or data.get("ts")}}
+        with open(config.EVAL_DIR / "history.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        print(f"\nanchor recorded in history ({tag or 'no tag'})")
+    return 1 if fidelity_bad else 0

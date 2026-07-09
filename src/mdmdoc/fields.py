@@ -61,6 +61,39 @@ def _norm_name(s) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+# Legal-form / honorific TOKENS (matched as whole tokens, never substrings) that
+# do not change WHO a name refers to. Used only by the LENIENT eval scorer —
+# display, extraction and SAP-compare always keep the full name.
+_LEGAL_TOKENS = frozenset("""
+ltd limited llc inc incorporated corp corporation co company gmbh ag kg ug ohg
+eood ood sas sa srl sarl sl spa bv nv plc pty oy ab as aps kft zrt sro doo
+dr md m d prof jr sr
+""".split())
+
+
+def _norm_name_lenient(s) -> str:
+    """_norm_name minus legal-form/honorific tokens. 'Acme GmbH' -> 'acme'."""
+    toks = [t for t in _norm_name(s).split() if t not in _LEGAL_TOKENS]
+    return " ".join(toks)
+
+
+def names_materially_equal(a, b) -> bool:
+    """LENIENT name comparison for eval scoring: equal after legal-token strip,
+    OR one token set contains the other (with a non-trivial shared core —
+    at least one common token of length >= 3, and neither side empty). Catches
+    'reads that dropped LTD/EOOD/a middle initial' without letting '' or a bare
+    initial count as a match."""
+    na, nb = _norm_name_lenient(a), _norm_name_lenient(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    ta, tb = set(na.split()), set(nb.split())
+    if not (ta <= tb or tb <= ta):
+        return False
+    return any(len(t) >= 3 for t in ta & tb)
+
+
 def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
                    policy: str = "masked", prov: dict | None = None) -> list[str]:
     """Deterministically verify model-read banking IDs against regex-extracted IDs.
@@ -209,10 +242,13 @@ _BANK_LETTER_PHRASES = ("please accept this letter", "account confirmation",
                         "certificacion bancaria", "certificado bancario",
                         "bankbestätigung", "kontobestätigung")
 _INVOICE_HEADER_RE = re.compile(r"(?im)^\s*(invoice|rechnung|fattura|factura)\s*$")
+# CJK entries are FIELD LABELS (invoice number/date), not the bare word 发票 —
+# a solicitation saying "申请开具发票" (we will issue an invoice) must not count
+# as invoice evidence (real case: a Chinese conference-exhibition notice).
 _INVOICE_MARKS = ("invoice number", "invoice no", "invoice date", "amount due",
                   "subtotal", "payment terms", "purchase order number", "pro forma",
                   "rechnungsnummer", "rechnungsdatum", "numero fattura",
-                  "número de factura")
+                  "número de factura", "发票号码", "發票號碼", "发票日期", "發票日期")
 # "invoice ..." inside remittance/payment instructions describes the payer's
 # FUTURE invoices, not this document — such lines are not invoice evidence
 _REMIT_CONTEXT = ("remit", "being paid", "must include", "must be accompanied",
@@ -251,6 +287,24 @@ def looks_like_printed_email(text: str) -> bool:
     hits = sum(bool(re.search(rf"(?m)^\s*{h}:\s?\S", head))
                for h in ("from", "sent", "to", "subject"))
     return hits >= 3
+
+
+# Deterministic payment-instructions evidence. Includes bank-issued settlement
+# variants (JPMorgan-style "Standard Settlement Instructions", "For ACH
+# Delivery") so a model classification of payment_instructions is GROUNDED in
+# at least one of these — an ungrounded model guess gets downgraded (guard in
+# stage_b), because BNK-004's WARNING must rest on evidence, not a hunch.
+_PAYMENT_INSTRUCTION_MARKS = (
+    "payment instruction", "ach payments only", "for ach payments",
+    "remittance advice", "remittance sent", "email remittance",
+    "banking details are confidential", "ach payment type",
+    "standard settlement instructions", "settlement instructions",
+    "for ach delivery", "for wire transfers", "wire instructions")
+
+
+def payment_instruction_marks(text: str) -> bool:
+    t = (text or "").lower()
+    return any(m in t for m in _PAYMENT_INSTRUCTION_MARKS)
 
 
 def invoice_marks(text: str) -> int:
@@ -339,11 +393,17 @@ def type_hint(filename: str, text: str, ext: str, doc_class: str) -> str:
     if has("certificación bancaria", "certificacion bancaria", "bankbestätigung",
            "bank confirmation", "bank letter", "开户许可证", "开户银行"):
         return "bank_letter"
-    if has("bank account information") and has("docusign", "for sap", "s/4hana"):
+    # a supplier introducing ITSELF (letterhead info sheet addressed to its
+    # vendors/customers, carrying its own bank block) is supplier_letterhead —
+    # checked BEFORE ap_document (real case: an info sheet mentioning DocuSign
+    # got misfiled as an AP form)
+    if has("dear vendor", "dear customer") and "bank" in blob:
+        return "supplier_letterhead"
+    # AP-form needs the SAP-registration marker; a DocuSign mention alone is a
+    # signature vehicle, not AP-form evidence
+    if has("bank account information") and has("for sap", "s/4hana", "sap registration"):
         return "ap_document"
-    if has("payment instruction", "ach payments only", "for ach payments",
-           "remittance advice", "remittance sent", "email remittance",
-           "banking details are confidential", "ach payment type"):
+    if payment_instruction_marks(blob):
         return "payment_instructions"
     return ""
 
