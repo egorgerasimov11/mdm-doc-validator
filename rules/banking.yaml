@@ -6,8 +6,9 @@
 #   source: skill | policy | operator        (where the rule came from)
 version: 1
 
-doc_types: [bank_letter, supplier_letterhead, bank_screenshot, voided_check,
-            ap_document, invoice, email, editable_source, other]
+doc_types: [bank_letter, bank_statement, supplier_letterhead, bank_screenshot,
+            voided_check, ap_document, payment_instructions, invoice, email,
+            editable_source, other]
 
 tables:
   iban_length: {AD: 24, AE: 23, AT: 20, BE: 16, BG: 22, BH: 22, BR: 29, CH: 21,
@@ -148,7 +149,9 @@ rules:
     name: missing_account_holder
     tier: corp
     source: skill
-    applies_to: [bank_letter, supplier_letterhead, bank_screenshot, voided_check, ap_document, other]
+    # bank_statement/payment_instructions included since the 2026-07 audit:
+    # a holder-less statement could ACCEPT in the degraded (no-LLM) mode
+    applies_to: [bank_letter, bank_statement, supplier_letterhead, bank_screenshot, voided_check, ap_document, payment_instructions, other]
     when: {field_missing: account_holder}
     severity: WARNING
     verdict_effect: NEED_MANUAL_REVIEW
@@ -158,7 +161,7 @@ rules:
     name: no_banking_identity
     tier: corp
     source: skill
-    applies_to: [bank_letter, supplier_letterhead, bank_screenshot, voided_check, ap_document, other]
+    applies_to: [bank_letter, bank_statement, supplier_letterhead, bank_screenshot, voided_check, ap_document, payment_instructions, other]
     when: {check: no_bank_ids}
     severity: WARNING
     verdict_effect: NEED_MANUAL_REVIEW
@@ -168,7 +171,9 @@ rules:
     name: missing_bank_name
     tier: corp
     source: skill
-    applies_to: [bank_letter, bank_screenshot, voided_check]
+    # statements are bank-issued — a real one always prints the bank name
+    # (supplier-issued types stay excluded, as before)
+    applies_to: [bank_letter, bank_statement, bank_screenshot, voided_check]
     when: {field_missing: bank_name}
     severity: WARNING
     verdict_effect: WARNING

@@ -91,6 +91,37 @@ def test_bank_statement_no_unsigned_noise_and_swift_gap_note():
     assert not any(x.rule_id in ("BNK-021", "BNK-026") for x in f)
 
 
+def test_bank_statement_missing_holder_is_nmr():
+    """audit-wave C7: bank_statement was excluded from BNK-023/024/025, so a
+    holder-less statement could ACCEPT (worst in degraded no-LLM mode)."""
+    f = run_rules(_bank("bank_statement", bank_name="DBS Bank Ltd",
+                        account_number="072-154506-3", signed=False))
+    assert any(x.rule_id == "BNK-023" for x in f)
+    assert decide(f) == "NEED_MANUAL_REVIEW"
+
+
+def test_bank_statement_no_ids_is_nmr():
+    f = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
+                        bank_name="DBS Bank Ltd", signed=False))
+    assert any(x.rule_id == "BNK-024" for x in f)
+    assert decide(f) == "NEED_MANUAL_REVIEW"
+
+
+def test_bank_statement_missing_bank_name_warns():
+    f = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
+                        account_number="072-154506-3", signed=False))
+    assert any(x.rule_id == "BNK-025" for x in f)
+    assert decide(f) == "WARNING"
+
+
+def test_payment_instructions_missing_holder_is_nmr():
+    f = run_rules(_bank("payment_instructions", bank_name="Chase",
+                        account_number="12345678"))
+    assert any(x.rule_id == "BNK-023" for x in f)
+    assert any(x.rule_id == "BNK-004" for x in f)   # context warning still there
+    assert decide(f) == "NEED_MANUAL_REVIEW"
+
+
 def test_ap_document_self_certified_note():
     f = run_rules(_bank("ap_document", account_holder="タカキ ユウスケ",
                         bank_name="福岡銀行", account_number="1442667", signed=True))
