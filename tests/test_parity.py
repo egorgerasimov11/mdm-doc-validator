@@ -79,6 +79,37 @@ def test_rule_data_identical_between_repos():
         assert py == abap, f"{cls}.yaml differs between Python and ABAP repos"
 
 
+def test_golden_regen_diff_flags_hand_edit(tmp_path, monkeypatch):
+    """§7 M4: a hand-edit of the generated ABAP golden class must fail parity
+    even when both hash headers are intact."""
+    _need_abap()
+    import shutil
+    fake_abap = tmp_path / "abap"
+    (fake_abap / "src").mkdir(parents=True)
+    src = cp.ABAP_ROOT / "src" / "zcl_mdmdoc_golden_data.clas.abap"
+    tampered = src.read_text().replace("`bank`", "`bank`", 1)  # start byte-equal
+    (fake_abap / "src" / "zcl_mdmdoc_golden_data.clas.abap").write_text(tampered)
+    # byte-equal copy -> fresh (headers + regen diff all pass)
+    assert cp.golden_freshness(abap_root=fake_abap) == []
+    # now tamper one emitted value below the headers
+    (fake_abap / "src" / "zcl_mdmdoc_golden_data.clas.abap").write_text(
+        tampered.replace("doc_class = `bank`", "doc_class = `w9`", 1))
+    problems = cp.golden_freshness(abap_root=fake_abap)
+    assert any("hand-edit or stale" in p for p in problems)
+
+
+def test_golden_gen_hash_mismatch_flagged(tmp_path):
+    _need_abap()
+    fake_abap = tmp_path / "abap"
+    (fake_abap / "src").mkdir(parents=True)
+    src = cp.ABAP_ROOT / "src" / "zcl_mdmdoc_golden_data.clas.abap"
+    stale = __import__("re").sub(r"GEN-HASH [0-9a-f]{16}", "GEN-HASH " + "0" * 16,
+                                 src.read_text())
+    (fake_abap / "src" / "zcl_mdmdoc_golden_data.clas.abap").write_text(stale)
+    problems = cp.golden_freshness(abap_root=fake_abap, regen_diff=False)
+    assert any("GEN-HASH" in p for p in problems)
+
+
 def test_absent_abap_exits_nonzero_without_optin(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "ABAP_ROOT", tmp_path / "nope")
     monkeypatch.delenv("MDMDOC_PARITY_OPTIONAL", raising=False)

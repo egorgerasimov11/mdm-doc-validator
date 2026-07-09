@@ -43,6 +43,10 @@ def _lit(s: str) -> str:
     return " &&\n          ".join(f"`{p}`" for p in parts)
 
 
+def _kv(v) -> str:
+    return "true" if v is True else "false" if v is False else str(v)
+
+
 def _case_abap(c: dict, doc_type: str) -> str:
     exp = c.get("expect", {})
     lines = [
@@ -53,12 +57,17 @@ def _case_abap(c: dict, doc_type: str) -> str:
         f"      filename = `{c.get('filename', c['id'] + '.pdf')}`",
         f"      raw_text = {_lit(c['raw_text'])}",
     ]
+    llm = c.get("llm_fields") or {}
+    if llm:
+        lines.append("      llm_fields = VALUE #(")
+        for k, v in llm.items():
+            lines.append(f"        ( name = `{k}` value = `{_kv(v)}` )")
+        lines.append("      )")
     fields = exp.get("fields") or {}
     if fields:
         lines.append("      exp_fields = VALUE #(")
         for k, v in fields.items():
-            val = "true" if v is True else "false" if v is False else str(v)
-            lines.append(f"        ( name = `{k}` value = `{val}` )")
+            lines.append(f"        ( name = `{k}` value = `{_kv(v)}` )")
         lines.append("      )")
     notes = exp.get("notes") or []
     if notes:
@@ -66,8 +75,26 @@ def _case_abap(c: dict, doc_type: str) -> str:
         for n in notes:
             lines.append(f"        ( {_lit(n)} )")
         lines.append("      )")
+    if exp.get("verdict"):
+        lines.append(f"      exp_verdict = `{exp['verdict']}`")
+    findings = exp.get("findings") or []
+    if findings:
+        lines.append("      exp_findings = VALUE #(")
+        for rid in findings:
+            lines.append(f"        ( `{rid}` )")
+        lines.append("      )")
     lines.append("    ) TO gt_cases.")
     return "\n".join(lines)
+
+
+def gen_hash() -> str:
+    """Hash of the GENERATOR sources (this file + run_golden.py) — emitted as a
+    second header so check_parity §7 catches a generator edit without regen."""
+    import hashlib
+    h = hashlib.sha256()
+    for p in (HERE / "gen_abap_golden.py", HERE / "run_golden.py"):
+        h.update(p.read_bytes())
+    return h.hexdigest()[:16]
 
 
 def build_abap(cases_with_types: list[tuple[dict, str]], corpus_hash: str) -> str:
@@ -75,6 +102,7 @@ def build_abap(cases_with_types: list[tuple[dict, str]], corpus_hash: str) -> st
     return f"""\" GENERATED from tools/golden/golden_cases.json by tools/golden/gen_abap_golden.py
 \" *** DO NOT EDIT BY HAND — edit the JSON corpus and re-run the generator ***
 \" GOLDEN-HASH {corpus_hash}
+\" GEN-HASH {gen_hash()}
 CLASS zcl_mdmdoc_golden_data DEFINITION
   PUBLIC
   FINAL
@@ -87,13 +115,16 @@ CLASS zcl_mdmdoc_golden_data DEFINITION
            END OF ty_exp_field,
            tt_exp_fields TYPE STANDARD TABLE OF ty_exp_field WITH DEFAULT KEY.
     TYPES: BEGIN OF ty_case,
-             id         TYPE string,
-             doc_class  TYPE string,
-             doc_type   TYPE string,
-             filename   TYPE string,
-             raw_text   TYPE string,
-             exp_fields TYPE tt_exp_fields,
-             exp_notes  TYPE string_table,
+             id           TYPE string,
+             doc_class    TYPE string,
+             doc_type     TYPE string,
+             filename     TYPE string,
+             raw_text     TYPE string,
+             llm_fields   TYPE tt_exp_fields,
+             exp_fields   TYPE tt_exp_fields,
+             exp_notes    TYPE string_table,
+             exp_verdict  TYPE string,
+             exp_findings TYPE string_table,
            END OF ty_case,
            tt_cases TYPE STANDARD TABLE OF ty_case WITH DEFAULT KEY.
 
@@ -139,8 +170,8 @@ def main() -> int:
     for c in run_golden.load_cases():
         raw = run_golden._build_raw(c)
         from mdmdoc.stage_b import extract
-        ext = extract(raw, engine="deterministic")
-        # refuse to emit a stale corpus: the Python case must still pass
+        ext = extract(raw, engine="deterministic", injected_llm=c.get("llm_fields"))
+        # refuse to emit a stale corpus: the Python case (incl. verdict) must pass
         res = run_golden.run_case(c)
         if not res["ok"]:
             print(f"REFUSING: Python case {c['id']} fails: {res['fails']}")

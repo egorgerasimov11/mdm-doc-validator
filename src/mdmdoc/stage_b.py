@@ -697,7 +697,11 @@ def _engine_compare(llm_fields: dict, raw: RawDoc, doc_class: str) -> list[dict]
 
 
 def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
-            engine: str = "auto") -> Extraction:
+            engine: str = "auto", injected_llm: dict | None = None) -> Extraction:
+    """injected_llm (deterministic engine only): simulated model fields seeded
+    into the extraction so guards/crosscheck run over them — the exact Python
+    mirror of ABAP `build(it_llm_fields)`. Used by the golden parity corpus;
+    ignored on every LLM-backed engine."""
     doc_class = raw.doc_class
     keys = BANK_KEYS if doc_class == "bank" else W9_KEYS
     types = BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES
@@ -731,13 +735,18 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
             ext_res.fields = {k: "" for k in keys}
     else:
         ext_res.doc_type = ext_res.doc_type or raw.type_hint or ("other" if doc_class == "bank" else "unknown")
-        ext_res.fields = {k: "" for k in keys}
-        if no_llm:
-            ext_res.warnings.append(
-                "deterministic engine: LLM extraction skipped — fields come from "
-                "OCR patterns only; narrative fields may be empty")
-        elif not raw.locked and not raw.editable:
-            ext_res.warnings.append("no text available for extraction")
+        if no_llm and injected_llm is not None:
+            # golden-parity seam: seed simulated model fields (doc_type stays
+            # deterministic — mirrors ABAP where doc_type is a build() input)
+            ext_res.fields = {k: injected_llm.get(k, "") for k in keys}
+        else:
+            ext_res.fields = {k: "" for k in keys}
+            if no_llm:
+                ext_res.warnings.append(
+                    "deterministic engine: LLM extraction skipped — fields come from "
+                    "OCR patterns only; narrative fields may be empty")
+            elif not raw.locked and not raw.editable:
+                ext_res.warnings.append("no text available for extraction")
 
     # packet-aware classification: a bank confirmation letter inside the packet
     # beats invoice pages elsewhere (the letter IS the banking support)

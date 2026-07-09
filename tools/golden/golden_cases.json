@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "note": "Deterministic-engine parity corpus. Each case is run through the Python deterministic path (no LLM) AND its ABAP twin; both must reproduce the same fields/notes. Only guards that fire without a model are covered (checksum, e-signature, statement period, JP form, doc_type classification) — narrative-field guards (VIGILADO bank_name, model-misplaced numeric IBAN) need the model and are covered by unit tests, not here. Fake IBANs are mod-97 valid.",
+  "version": 2,
+  "note": "Deterministic-engine parity corpus. Each case runs through the Python deterministic path (no LLM) AND its ABAP twin; both must reproduce the same fields/notes AND (v2) the same rule findings + verdict via the real rules engine (enforce_approvals=false — parity measures the machine, not the human gate). llm_fields simulate model output fed to BOTH sides (Python injected_llm seam == ABAP build(it_llm_fields)), so guard/crosscheck/rule behavior over model-shaped input is parity-tested too. Expectations are DETERMINISTIC-ENGINE behavior (parity, not goodness). Fake IBANs are mod-97 valid unless the case name says invalid; all entities invented.",
   "cases": [
     {
       "id": "it-iban-checksum-valid",
@@ -26,8 +26,12 @@
       "doc_class": "bank",
       "filename": "statement.pdf",
       "raw_text": "Bank statement for account holder Meridian Ltd. IBAN GB29 NWBK 6016 1331 9268 19. Statement period 1 Jan 2025 to 31 Mar 2025.",
+      "llm_fields": {"account_holder": "Meridian Ltd", "bank_name": "NatWest Bank"},
       "expect": {
-        "notes": ["document date = statement period"]
+        "doc_type": "bank_statement",
+        "notes": ["document date = statement period"],
+        "findings": ["BNK-006"],
+        "verdict": "ACCEPT"
       }
     },
     {
@@ -46,7 +50,9 @@
       "filename": "invoice.pdf",
       "raw_text": "INVOICE Invoice Number INV-2044 Invoice date 2025-01-10 Total due 1200.00 EUR remit to IBAN DE89370400440532013000",
       "expect": {
-        "doc_type": "invoice"
+        "doc_type": "invoice",
+        "findings": ["BNK-001"],
+        "verdict": "REJECT"
       }
     },
     {
@@ -55,7 +61,72 @@
       "filename": "w9_form.pdf",
       "raw_text": "Form W-9 Request for Taxpayer Identification Number and Certification. 1 Name China Med Device LLC. 3 LLC. Employer identification number 45-3859289",
       "expect": {
-        "doc_type": "w9"
+        "doc_type": "w9",
+        "notes": ["tin=filled-from-OCR(XX-XXX9289)"],
+        "findings": ["W9-001", "W9-003", "W9-020"],
+        "verdict": "NEED_MANUAL_REVIEW"
+      }
+    },
+    {
+      "id": "unsigned-bank-letter",
+      "doc_class": "bank",
+      "filename": "unsigned_letter.pdf",
+      "raw_text": "Bank confirmation letter. We confirm that Vela s.r.o. holds account IBAN CZ65 0800 0000 1920 0014 5399 with our bank.",
+      "llm_fields": {"account_holder": "Vela s.r.o.", "bank_name": "Ceska sporitelna", "signed": false},
+      "expect": {
+        "doc_type": "bank_letter",
+        "findings": ["BNK-021"],
+        "verdict": "WARNING"
+      }
+    },
+    {
+      "id": "iban-invalid-checksum",
+      "doc_class": "bank",
+      "filename": "letter_bad_iban.pdf",
+      "raw_text": "Bank confirmation letter. Account holder Norwind ApS. Bank: Danske Bank. Kindly note the account details below. Signed by officer.",
+      "llm_fields": {"account_holder": "Norwind ApS", "bank_name": "Danske Bank", "iban": "DE44500105175407324930", "signed": true},
+      "expect": {
+        "doc_type": "bank_letter",
+        "notes": ["iban checksum (ISO 13616 mod-97): INVALID"],
+        "findings": ["BNK-011"],
+        "verdict": "NEED_MANUAL_REVIEW"
+      }
+    },
+    {
+      "id": "iban-model-vs-ocr-mismatch",
+      "doc_class": "bank",
+      "filename": "letter_mismatch.pdf",
+      "raw_text": "Bank confirmation letter for Helios OU. IBAN: DE44 5001 0517 5407 3249 31. Signed.",
+      "llm_fields": {"account_holder": "Helios OU", "bank_name": "Deutsche Bank", "iban": "DE89370400440532013000", "signed": true},
+      "expect": {
+        "doc_type": "bank_letter",
+        "notes": ["iban=MISMATCH(model=DE**…3000 vs ocr=DE**…4931)"],
+        "fields": {"iban": "DE**…3000"},
+        "verdict": "ACCEPT"
+      }
+    },
+    {
+      "id": "missing-holder-nmr",
+      "doc_class": "bank",
+      "filename": "no_holder.pdf",
+      "raw_text": "Bank confirmation letter. IBAN FR14 2004 1010 0505 0001 3M02 606. BIC PSSTFRPP. Signed by officer.",
+      "llm_fields": {"bank_name": "La Banque Postale", "signed": true},
+      "expect": {
+        "doc_type": "bank_letter",
+        "findings": ["BNK-023"],
+        "verdict": "NEED_MANUAL_REVIEW"
+      }
+    },
+    {
+      "id": "date-older-2y",
+      "doc_class": "bank",
+      "filename": "old_letter.pdf",
+      "raw_text": "Bank confirmation letter dated 15 Jan 2019. Account of Kestrel BV, IBAN NL91 ABNA 0417 1643 00. Signed by officer.",
+      "llm_fields": {"account_holder": "Kestrel BV", "bank_name": "ABN AMRO", "doc_date": "15 Jan 2019", "signed": true},
+      "expect": {
+        "doc_type": "bank_letter",
+        "findings": ["BNK-020"],
+        "verdict": "ACCEPT"
       }
     }
   ]

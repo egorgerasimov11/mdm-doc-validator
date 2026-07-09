@@ -128,22 +128,66 @@ def abap_guard_markers(abap_root: Path = ABAP_ROOT) -> set[str]:
     return set(re.findall(r"\[GUARD:([a-z0-9_]+)\]", text))
 
 
-def _golden_freshness(py_root: Path = PY_ROOT, abap_root: Path = ABAP_ROOT) -> str | None:
-    """The ABAP golden data class must embed the current JSON corpus hash.
-    Skipped when either side is absent (golden is optional tooling)."""
+def golden_freshness(py_root: Path = PY_ROOT, abap_root: Path = ABAP_ROOT,
+                     regen_diff: bool = True) -> list[str]:
+    """§7 (M4, drift-proof): the ABAP golden twin must be EXACTLY what the
+    current corpus + current generator + current Python behavior produce.
+    Three layers, each catching a drift the previous one cannot:
+      1. GOLDEN-HASH header == hash(golden_cases.json)   (corpus edit w/o regen)
+      2. GEN-HASH header == hash(generator sources)      (generator edit w/o regen)
+      3. regenerate-into-tmp + byte-compare              (hand-edits of the .abap,
+         and stale BAKED doc_type — regen recomputes it from live Python).
+    Returns a problem list; empty when fresh. Skipped when golden absent."""
     import hashlib
+    import subprocess
+    import sys as _sys
+    import tempfile
     cases = py_root / "tools" / "golden" / "golden_cases.json"
+    gen_src = py_root / "tools" / "golden" / "gen_abap_golden.py"
+    run_src = py_root / "tools" / "golden" / "run_golden.py"
     gen = abap_root / "src" / "zcl_mdmdoc_golden_data.clas.abap"
     if not cases.exists() or not gen.exists():
-        return None
+        return []
+    problems: list[str] = []
+    text = gen.read_text()
     want = hashlib.sha256(cases.read_bytes()).hexdigest()[:16]
-    m = re.search(r"GOLDEN-HASH\s+([0-9a-f]{16})", gen.read_text())
+    m = re.search(r"GOLDEN-HASH\s+([0-9a-f]{16})", text)
     if not m:
-        return "golden: zcl_mdmdoc_golden_data has no GOLDEN-HASH header"
-    if m.group(1) != want:
-        return (f"golden: corpus hash {want} != ABAP GOLDEN-HASH {m.group(1)} — "
-                "re-run tools/golden/gen_abap_golden.py")
-    return None
+        problems.append("golden: zcl_mdmdoc_golden_data has no GOLDEN-HASH header")
+    elif m.group(1) != want:
+        problems.append(f"golden: corpus hash {want} != ABAP GOLDEN-HASH {m.group(1)} — "
+                        "re-run tools/golden/gen_abap_golden.py")
+    h = hashlib.sha256()
+    for p in (gen_src, run_src):
+        h.update(p.read_bytes())
+    want_gen = h.hexdigest()[:16]
+    mg = re.search(r"GEN-HASH\s+([0-9a-f]{16})", text)
+    if not mg:
+        problems.append("golden: zcl_mdmdoc_golden_data has no GEN-HASH header — "
+                        "re-run tools/golden/gen_abap_golden.py")
+    elif mg.group(1) != want_gen:
+        problems.append(f"golden: generator sources hash {want_gen} != ABAP GEN-HASH "
+                        f"{mg.group(1)} — the generator changed; re-run it")
+    if problems or not regen_diff:
+        return problems
+    # 3. regenerate into a tmp dir and byte-compare (headers are pure functions
+    # of corpus+generator, so a full byte-compare is exact — no volatile parts)
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "src").mkdir()
+        env = dict(os.environ, MDMDOC_ABAP_HOME=td)
+        r = subprocess.run([_sys.executable, str(gen_src)], env=env,
+                           capture_output=True, text=True, timeout=300,
+                           cwd=str(py_root))
+        if r.returncode != 0:
+            problems.append("golden: regenerate-and-diff could not regenerate "
+                            f"(stale corpus or broken env): {r.stderr.strip()[-300:] or r.stdout.strip()[-300:]}")
+            return problems
+        fresh = (Path(td) / "src" / "zcl_mdmdoc_golden_data.clas.abap").read_text()
+        if fresh != text:
+            problems.append("golden: committed zcl_mdmdoc_golden_data differs from a "
+                            "fresh regeneration (hand-edit or stale baked doc_type) — "
+                            "re-run tools/golden/gen_abap_golden.py and commit")
+    return problems
 
 
 def submodule_staleness(py_root: Path = PY_ROOT,
@@ -291,12 +335,10 @@ def run() -> int:
     if stale:
         problems.append(stale)
 
-    # 7. golden parity corpus freshness — the ABAP generated data class must carry
-    # the CURRENT corpus hash (else someone edited golden_cases.json without
-    # regenerating the ABAP twin, so the two run different cases)
-    gp = _golden_freshness()
-    if gp:
-        problems.append(gp)
+    # 7. golden parity corpus freshness — hash headers + regenerate-and-diff
+    # (corpus edits, generator edits, hand-edits and stale baked doc_type all
+    # fail here instead of silently drifting)
+    problems.extend(golden_freshness())
 
     # report
     if notes:
