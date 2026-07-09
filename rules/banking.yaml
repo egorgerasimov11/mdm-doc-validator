@@ -139,3 +139,19 @@ rules:
     severity: WARNING
     verdict_effect: WARNING
     message: "Bank name not readable on the document."
+
+  - id: BNK-030
+    name: unrecognized_document_type
+    # An UNRECOGNIZED document (doc_type could not be established) must never
+    # auto-accept, however complete its fields look — "understand what the
+    # document IS" is the first check. Live case: a Chinese conference
+    # exhibition notice carrying the organiser's remittance details.
+    # NMR-only: cannot produce a false REJECT. Left PENDING on purpose —
+    # while pending, the approvals gate already holds doc_type=other at
+    # NEED_MANUAL_REVIEW; the rule owner decides its fate in the panel.
+    applies_to: [other]
+    when: {always: true}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Document type could not be established — an unrecognized document is never auto-accepted; review manually."
+    message_ru: "Тип документа не установлен — неопознанный документ не принимается автоматически; проверьте вручную."
