@@ -92,14 +92,28 @@ def _cmd_eval(args) -> int:
         # re-scores stored predictions — no model host needed at all
         from .evalrun import run_rescore
         return run_rescore(tag=args.tag, record=bool(args.tag))
-    try:
-        mc.preflight()
-    except mc.OllamaUnavailable as e:
-        print(str(e), file=sys.stderr)
-        return config.EXIT_OLLAMA_DOWN
+    engine = getattr(args, "engine", "") or None
+    if engine != "deterministic":
+        # a deterministic eval runs fully offline (synthetic corpus in CI)
+        try:
+            mc.preflight()
+        except mc.OllamaUnavailable as e:
+            print(str(e), file=sys.stderr)
+            return config.EXIT_OLLAMA_DOWN
     from .evalrun import run_eval
     return run_eval(only=args.only, limit=args.limit, tag=args.tag,
-                    scenario=args.scenario)
+                    scenario=args.scenario, dataset=getattr(args, "dataset", "real"),
+                    engine=engine)
+
+
+def _cmd_synth_gen(args) -> int:
+    from . import synth
+    if args.check:
+        return synth.check(seed=args.seed)
+    res = synth.generate(seed=args.seed)
+    print(f"generated {res['count']} synthetic docs "
+          f"(truth vs deterministic agreement {res['agreement']}) -> {res['labels_path']}")
+    return 0
 
 
 def _cmd_train(args) -> int:
@@ -288,11 +302,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tag", default="")
     p.add_argument("--scenario", default=None,
                    help="only labels carrying this scenario tag (e.g. w9_boxed_tin)")
+    p.add_argument("--dataset", choices=("real", "synthetic", "both"), default="real",
+                   help="which corpus: real (headline 18-doc stream), synthetic "
+                        "(PII-free stratum, separate synthetic_* artifacts), both")
+    p.add_argument("--engine", choices=config.ENGINE_MODES, default="",
+                   help="force the analysis engine; 'deterministic' runs fully "
+                        "offline (no Ollama preflight)")
     p.add_argument("--rescore", action="store_true",
                    help="re-score the LAST eval's stored predictions under the current "
                         "scorers (strict fidelity + lenient column) — no model calls; "
                         "--tag records the anchor in history")
     p.set_defaults(func=_cmd_eval)
+
+    p = sub.add_parser("synth-gen",
+                       help="(re)generate the PII-free synthetic eval corpus "
+                            "(eval/synthetic/) with known ground truth")
+    p.add_argument("--seed", type=int, default=20260709)
+    p.add_argument("--check", action="store_true",
+                   help="staleness self-check: regenerate to a temp dir and "
+                        "compare labels + per-doc text against the committed corpus")
+    p.set_defaults(func=_cmd_synth_gen)
 
     p = sub.add_parser("train", help="build few-shot prompts and/or a custom Ollama model from labels")
     p.add_argument("--fewshot", action="store_true")

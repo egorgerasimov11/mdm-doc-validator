@@ -12,6 +12,11 @@ models/
 **/.DS_Store
 eval/candidate_report.md
 eval/candidate_results.json
+# synthetic-stream RUN artifacts (the corpus itself, eval/synthetic/, IS committed)
+eval/synthetic_report.md
+eval/synthetic_results.json
+eval/synthetic_history.jsonl
+eval/gold_staleness.json
 dataset/corpus/
 dataset/labels.jsonl.bak-*
 settings.json

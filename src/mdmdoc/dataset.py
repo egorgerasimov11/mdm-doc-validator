@@ -62,9 +62,26 @@ def label_fakes(label: dict) -> list[str]:
     return [it.get("fake", "") for it in label.get("sensitive_map", []) if it.get("fake")]
 
 
+def load_synth_labels() -> list[dict]:
+    """The synthetic stratum (eval/synthetic/labels.jsonl) — same schema as
+    real labels, source:'synthetic'. Deliberately NOT part of load_labels():
+    few-shot, LoRA export and precedents must never see synthetic rows."""
+    if not config.SYNTH_LABELS_PATH.exists():
+        return []
+    out = []
+    for line in config.SYNTH_LABELS_PATH.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            out.append(json.loads(line))
+    return out
+
+
 def all_fakes() -> list[str]:
     out: list[str] = []
     for lab in load_labels():
+        out += label_fakes(lab)
+    # synthetic identities are fakes by construction — the strict leak sweep
+    # must allow them wherever they appear (they can never be real PII)
+    for lab in load_synth_labels():
         out += label_fakes(lab)
     return out
 

@@ -179,27 +179,99 @@ def scenario_slices(rows: list[dict]) -> dict:
             for tag, s in sorted(slices.items())}
 
 
+def update_gold_staleness(rows: list[dict], labels_by_file: dict) -> dict:
+    """M7 gold-label lifecycle: per-doc counters of verdict disagreements SINCE
+    the label was last confirmed. Reset when the label carries a newer
+    last_confirmed_ts than the one we tracked; ranked output is the
+    active-learning signal ('re-confirm these first'). Never mutates labels."""
+    path = config.EVAL_DIR / "gold_staleness.json"
+    state: dict = {}
+    if path.exists():
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            state = {}
+    for r in rows:
+        if "error" in r and not r.get("crash"):
+            continue
+        if r.get("crash"):
+            continue    # a crash says nothing about label staleness
+        lab = labels_by_file.get(r.get("file"))
+        if not lab:
+            continue
+        key = str(lab.get("doc_sha256") or r.get("file"))
+        confirmed = str(lab.get("last_confirmed_ts") or lab.get("ts") or "")
+        ent = state.get(key) or {"file": r.get("file"), "confirmed_ts_seen": confirmed,
+                                 "disagreements_since_confirm": 0, "unsafe": 0,
+                                 "safe": 0, "last_disagreement_ts": ""}
+        if confirmed > str(ent.get("confirmed_ts_seen") or ""):
+            # the operator re-confirmed since we last looked — counters reset
+            ent = {"file": r.get("file"), "confirmed_ts_seen": confirmed,
+                   "disagreements_since_confirm": 0, "unsafe": 0, "safe": 0,
+                   "last_disagreement_ts": ""}
+        if not r.get("verdict_ok"):
+            ent["disagreements_since_confirm"] += 1
+            d = r.get("verdict_direction") or ""
+            if d in ("unsafe", "safe"):
+                ent[d] += 1
+            ent["last_disagreement_ts"] = runstore.now_iso()
+        state[key] = ent
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    return state
+
+
+def gold_staleness_ranking(state: dict) -> list[dict]:
+    """Ranked 're-confirm these first' list: most disagreements first, unsafe
+    direction breaking ties — the highest-information next label."""
+    rows = [e for e in state.values() if e.get("disagreements_since_confirm", 0) > 0]
+    return sorted(rows, key=lambda e: (-e["disagreements_since_confirm"],
+                                       -e.get("unsafe", 0), e.get("file", "")))
+
+
 def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
              progress=None, scenario: str | None = None, record: bool = True,
-             results_name: str = "last_results.json") -> int:
+             results_name: str = "last_results.json", dataset: str = "real",
+             engine: str | None = None) -> int:
     """progress: optional Callable[[str], None] for live line-by-line status
     (used by the server's job log); CLI output is unchanged.
     scenario: only labels carrying that scenario tag.
     record=False (candidate/model-adoption evals): write results to results_name
     but do NOT touch history.jsonl or the main report — gate evals must never
-    masquerade as the adopted model's track record."""
+    masquerade as the adopted model's track record.
+    dataset: 'real' (dataset/labels.jsonl — the headline stream) | 'synthetic'
+    (eval/synthetic/ — a SEPARATE artifact stream synthetic_*, never mixed into
+    the headline metrics) | 'both' (two sequential runs, two streams).
+    engine: pass-through to run_check (e.g. 'deterministic' for offline runs)."""
+    if dataset == "both":
+        rc = run_eval(only=only, limit=limit, tag=tag, progress=progress,
+                      scenario=scenario, record=record, dataset="real",
+                      engine=engine)
+        rc |= run_eval(only=only, limit=limit, tag=tag, progress=progress,
+                       scenario=scenario, record=record, dataset="synthetic",
+                       engine=engine)
+        return rc
+    if dataset not in ("real", "synthetic"):
+        raise ValueError(f"dataset must be real|synthetic|both, got {dataset!r}")
+    synth = dataset == "synthetic"
+    if synth:
+        # the synthetic stratum NEVER writes the headline artifacts
+        results_name = "synthetic_results.json"
+
     def _p(line: str) -> None:
         if progress:
             progress(line)
 
     config.ensure_dirs()
-    labels = [l for l in load_labels() if not only or l.get("doc_class") == only]
+    from .dataset import load_synth_labels
+    src_labels = load_synth_labels() if synth else load_labels()
+    labels = [l for l in src_labels if not only or l.get("doc_class") == only]
     if scenario:
         labels = [l for l in labels if scenario in (l.get("scenarios") or [])]
     if limit:
         labels = labels[:limit]
     if not labels:
-        print("no labels yet — run some checks and label them with `mdmdoc review`"
+        print(("no synthetic corpus — generate it with `mdmdoc synth-gen`" if synth else
+               "no labels yet — run some checks and label them with `mdmdoc review`")
               + (f" (no label carries scenario {scenario!r})" if scenario else ""))
         return 1
 
@@ -210,7 +282,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
     field_stats: dict = {}
     confusion: dict = {}
     for lab in labels:
-        path = resolve_doc_path(lab["doc_path"])
+        path = (config.SYNTH_DOCS_DIR / lab["doc_path"] if synth
+                else resolve_doc_path(lab["doc_path"]))
         if not path.exists():
             # ENVIRONMENT problem (corpus not synced), not a pipeline outcome —
             # excluded from every metric but surfaced as skipped_missing (M1)
@@ -220,7 +293,7 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         try:
             # precedents OFF: eval measures the machine, not stored operator answers
             res = run_check(path, lab["doc_class"], apply_precedent=False, web_evidence=False,
-                            enforce_approvals=False)
+                            enforce_approvals=False, engine=engine)
         except Exception as e:  # noqa: BLE001 — eval must survive any doc
             # a CRASH is an attempted document: it counts in every denominator,
             # is never a hit, and costs like an NMR (fails loudly to a human)
@@ -335,9 +408,11 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         "precedent_relaxations_unconfirmed": precedent_relax_unconfirmed,
     }
 
-    # structured per-doc results + regression diff vs the previous MAIN eval
-    # (candidate evals diff against the adopted model's last results, read-only)
-    main_results_path = config.EVAL_DIR / "last_results.json"
+    # structured per-doc results + regression diff vs the previous eval of the
+    # SAME stream (synthetic diffs against synthetic; candidate evals diff
+    # against the adopted model's last results, read-only)
+    main_results_path = config.EVAL_DIR / ("synthetic_results.json" if synth
+                                           else "last_results.json")
     results_path = config.EVAL_DIR / results_name
     prev_rows = {}
     if main_results_path.exists():
@@ -360,13 +435,26 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             diff["regressed"].append(r["file"])
         elif not r["ok"] and not prev["ok"]:
             diff["unchanged_wrong"].append(r["file"])
+    # gold-label lifecycle: only the REAL recorded stream accumulates staleness
+    # (candidate evals and the synthetic stratum say nothing about gold labels)
+    staleness_rank: list[dict] = []
+    if record and not synth:
+        labels_by_file = {}
+        for lab in labels:
+            p = resolve_doc_path(lab["doc_path"])
+            labels_by_file[p.name] = lab
+        staleness_rank = gold_staleness_ranking(
+            update_gold_staleness(rows, labels_by_file))
+
     results_path.write_text(json.dumps(
         {"ts": runstore.now_iso(), "tag": tag, "scenario": scenario, "rows": rows,
-         "diff": diff, "metrics": metrics, "gold_review": gold_review},
+         "diff": diff, "metrics": metrics, "gold_review": gold_review,
+         "gold_staleness": staleness_rank},
         ensure_ascii=False, indent=1))
 
-    # history + delta
-    hist_path = config.EVAL_DIR / "history.jsonl"
+    # history + delta (per-stream: synthetic history never touches the headline)
+    hist_path = config.EVAL_DIR / ("synthetic_history.jsonl" if synth
+                                   else "history.jsonl")
     prev = None
     if hist_path.exists():
         lines = [l for l in hist_path.read_text().splitlines() if l.strip()]
@@ -405,6 +493,14 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         for s, m in metrics["scenarios"].items():
             lines.append(f"- {s}: {m['accuracy']} of {m['n']} fully correct "
                          f"(doc_type {m['doc_type_accuracy']}, verdict {m['verdict_accuracy']})")
+    if staleness_rank:
+        lines.append("")
+        lines.append("## Gold staleness — re-confirm these first")
+        lines.append("(disagreements since the label was last confirmed; unsafe-direction "
+                     "first — this ranked list is the highest-information next label)")
+        for e in staleness_rank[:10]:
+            lines.append(f"- {e['file']}: {e['disagreements_since_confirm']} disagreement(s) "
+                         f"since confirm (unsafe {e.get('unsafe', 0)} / safe {e.get('safe', 0)})")
     lines.append("")
     lines.append("## Confusion (gold -> predicted)")
     for g, preds in sorted(confusion.items()):
@@ -419,7 +515,9 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             lines.append(f"- {r['file']}: type {r['doc_type']}, verdict {r['verdict']}"
                          + (f", field misses: {', '.join(bad)}" if bad else ", all fields OK"))
     report = "\n".join(lines) + "\n"
-    report_name = "report.md" if record else results_name.replace("_results.json", "_report.md")
+    report_name = ("synthetic_report.md" if synth
+                   else "report.md" if record
+                   else results_name.replace("_results.json", "_report.md"))
     (config.EVAL_DIR / report_name).write_text(report, encoding="utf-8")
     print(report)
     _p(f"done: doc_type={metrics['doc_type_accuracy']} verdict={metrics['verdict_accuracy']} "

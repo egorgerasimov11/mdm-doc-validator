@@ -22,6 +22,12 @@ CORPUS_DIR = Path(os.environ.get("MDMDOC_CORPUS_DIR", str(DATASET_DIR / "corpus"
 LORA_DIR = DATASET_DIR / "mlx-lora"
 EVAL_DIR = PROJECT_ROOT / "eval"
 INBOX_DIR = PROJECT_ROOT / "inbox"      # uploaded documents (raw, gitignored)
+# Synthetic eval stratum (П1): PII-free generated corpus, COMMITTED for
+# reproducibility. Never mixed into the headline real-corpus metrics; never
+# visible to load_labels() (few-shot/LoRA/precedents can't train on it).
+SYNTH_DIR = EVAL_DIR / "synthetic"
+SYNTH_DOCS_DIR = SYNTH_DIR / "docs"
+SYNTH_LABELS_PATH = SYNTH_DIR / "labels.jsonl"
 
 SERVER_DEFAULT_PORT = 8766   # 8765 is Anki's local port on this Mac
 
