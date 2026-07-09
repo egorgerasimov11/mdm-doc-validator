@@ -190,6 +190,108 @@ def golden_freshness(py_root: Path = PY_ROOT, abap_root: Path = ABAP_ROOT,
     return problems
 
 
+def constants_manifest(py_root: Path = PY_ROOT) -> dict:
+    """tools/parity/constants.json — the hand-maintained registry of constants
+    duplicated between the two implementations (§8, audit M5)."""
+    import json
+    p = py_root / "tools" / "parity" / "constants.json"
+    if not p.exists():
+        return {}
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _const_extract(root: Path, spec: dict) -> tuple[object | None, str | None]:
+    """-> (value, problem). literal-mode: the exact literal must occur `count`
+    times (drift = someone edited it). extract-mode: regex with ONE capture
+    group must match exactly once; the capture is parsed per `parse`."""
+    f = root / spec["file"]
+    if not f.exists():
+        return None, f"file missing: {spec['file']}"
+    text = f.read_text(encoding="utf-8")
+    if "literal" in spec:
+        n = text.count(spec["literal"])
+        want = int(spec.get("count", 1))
+        if n != want:
+            return None, (f"literal occurs {n}x, manifest expects {want}x — "
+                          "the constant was edited on this side; update BOTH "
+                          "sides and the manifest consciously")
+        return spec["literal"], None
+    ms = list(re.finditer(spec["extract"], text, re.S))
+    if len(ms) != 1:
+        return None, f"extract anchor matched {len(ms)}x (want exactly 1) — stale anchor?"
+    blob = ms[0].group(1)
+    parse = spec.get("parse", "raw")
+    if parse == "py_strs":
+        return re.findall(r'"([^"]*)"', blob) + re.findall(r"'([^']*)'", blob), None
+    if parse == "abap_ticks":
+        return re.findall(r"`([^`]*)`", blob), None
+    if parse == "py_pairs":
+        return [f"{k.lower()}={v.lower()}"
+                for k, v in re.findall(r'"([^"]+)":\s*"([^"]+)"', blob)], None
+    if parse == "abap_kv":
+        return [f"{k.lower()}={v.lower()}"
+                for k, v in re.findall(r"key = `([^`]+)` val = `([^`]+)`", blob)], None
+    return blob.strip(), None
+
+
+def _const_equal(a, b) -> bool:
+    if isinstance(a, list) or isinstance(b, list):
+        return set(a if isinstance(a, list) else [a]) == set(b if isinstance(b, list) else [b])
+    return str(a) == str(b)
+
+
+def check_constants(py_root: Path = PY_ROOT, abap_root: Path = ABAP_ROOT) -> list[str]:
+    """§8: every hand-duplicated constant is either identical on both sides
+    (canon 'same') or pinned per-side (canon 'pinned'); every [CONST:id] marker
+    is registered and every entry is marked — a NEW duplicated constant cannot
+    ship unregistered, and a single-side edit cannot ship silently."""
+    manifest = constants_manifest(py_root)
+    problems: list[str] = []
+    ids: set[str] = set()
+    for c in manifest.get("constants", []):
+        cid = str(c.get("id", "?"))
+        ids.add(cid)
+        vals: dict[str, object] = {}
+        for side, root in (("py", py_root), ("abap", abap_root)):
+            spec = c.get(side)
+            if not spec:
+                continue
+            v, prob = _const_extract(root, spec)
+            if prob:
+                problems.append(f"const[{cid}].{side}: {prob}")
+                continue
+            vals[side] = v
+            if "expected" in spec and not _const_equal(v, spec["expected"]):
+                problems.append(f"const[{cid}].{side}: value drifted from the "
+                                "manifest's pinned expectation — update BOTH "
+                                "sides and the manifest consciously")
+        if c.get("canon") == "same" and "py" in vals and "abap" in vals \
+                and not _const_equal(vals["py"], vals["abap"]):
+            pv, av = vals["py"], vals["abap"]
+            if isinstance(pv, list) and isinstance(av, list):
+                d = sorted(set(pv) ^ set(av))
+                problems.append(f"const[{cid}]: Python and ABAP value sets DIFFER "
+                                f"(symmetric diff: {d[:6]}{'…' if len(d) > 6 else ''})")
+            else:
+                problems.append(f"const[{cid}]: Python {pv!r} != ABAP {av!r}")
+    # marker discipline: [CONST:x] in either repo must be registered, and every
+    # manifest entry must be marked at its source site
+    marker_re = re.compile(r"\[CONST:([a-z0-9_]+)\]")
+    found: set[str] = set()
+    for f in (py_root / "src" / "mdmdoc").rglob("*.py"):
+        found |= set(marker_re.findall(f.read_text(encoding="utf-8")))
+    if (abap_root / "src").exists():
+        for f in (abap_root / "src").glob("*.abap"):
+            found |= set(marker_re.findall(f.read_text(encoding="utf-8")))
+    for missing in sorted(found - ids):
+        problems.append(f"const marker [CONST:{missing}] has no manifest entry — "
+                        "register it in tools/parity/constants.json")
+    for unmarked in sorted(ids - found):
+        problems.append(f"manifest constant '{unmarked}' has no [CONST:{unmarked}] "
+                        "marker at its source site")
+    return problems
+
+
 def submodule_staleness(py_root: Path = PY_ROOT,
                         abap_root: Path = ABAP_ROOT) -> str | None:
     """The abap/ submodule pin must equal the live ABAP checkout's HEAD —
@@ -339,6 +441,10 @@ def run() -> int:
     # (corpus edits, generator edits, hand-edits and stale baked doc_type all
     # fail here instead of silently drifting)
     problems.extend(golden_freshness())
+
+    # 8. hand-duplicated constants (regexes/thresholds/phrase lists) — every
+    # registered constant matches its manifest contract on both sides
+    problems.extend(check_constants())
 
     # report
     if notes:

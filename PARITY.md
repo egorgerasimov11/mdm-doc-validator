@@ -69,6 +69,20 @@ port) and asserts fields + crosscheck-note substrings. check_parity §7 will the
 compare the corpus hash to the ABAP header. Until generated, this is the ONE
 tracked ABAP follow-up (guards themselves are already ported).
 
+## Constants parity (§8, audit M5)
+Hand-duplicated constants (regexes, thresholds, phrase lists) are registered in
+`tools/parity/constants.json` and marked `[CONST:id]` at both source sites;
+check_parity §8 extracts and compares them (canon `same`) or pins each side's
+literal (canon `pinned`, for dialect-divergent regexes). Registered now (14):
+BIC/IBAN shapes, 4 OCR id-regexes, SWIFT-lengths/EIN-digits/years defaults,
+_EV_POSITIVE, no_bank_ids keys, ES/DE month map, ABAP month table, Python date
+formats. Backlog to register incrementally (each = marker + manifest entry):
+business-suffix regex, _BANKNAME_NOISE, person-name regex + stopwords,
+classification keywords, e-sig markers, JP markers + 口座番号/postal regexes,
+statement-period regex, COUNTRY_NAME_TO_ISO map, verdict precedence/next_step.
+Known §8-documented gap: the ABAP EIN/SSN regex lacks Python's hyphen-adjacency
+guards (phantom-EIN fix) — port candidate, tracked in the manifest note.
+
 ## Pending ABAP logic ports (Python has it, ABAP not yet — remove the line once applied)
 (none — the US numeric-IBAN guard was applied to `p_iban_valid` + test
 `pred_iban_numeric_us_ok` on 2026-07-09, together with the wave-5 extract-guard pack.

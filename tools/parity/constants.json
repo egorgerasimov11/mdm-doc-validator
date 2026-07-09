@@ -1,0 +1,238 @@
+{
+ "version": 1,
+ "note": "§8 constants-parity manifest (audit M5). Each entry names a constant that is HAND-DUPLICATED between the Python reference and the ABAP twin. canon 'same' = both sides must extract to the SAME value; 'pinned' = each side is pinned to its own expected literal (regex dialects legitimately differ) so ANY single-side edit fails until the manifest is consciously updated. Sides use either {'literal': ..., 'count': N} (the exact literal must occur N times in file) or {'extract': <regex, 1 capture, exactly one match>, 'parse': py_strs|abap_ticks|py_pairs|abap_kv|raw, 'expected': ...}. A [CONST:id] marker comment must sit at every source site; unregistered markers and marker-less entries fail §8.",
+ "constants": [
+  {
+   "id": "bic_shape_regex",
+   "canon": "same",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "literal": "^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "literal": "^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$",
+    "count": 2
+   }
+  },
+  {
+   "id": "iban_shape_regex",
+   "canon": "same",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "literal": "^[A-Z]{2}\\d{2}[A-Z0-9]+$",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "literal": "^[A-Z]{2}\\d{2}[A-Z0-9]+$",
+    "count": 2
+   }
+  },
+  {
+   "id": "ocr_iban_regex",
+   "canon": "pinned",
+   "note": "dialects differ by design: Python \\b word boundary vs ABAP \\< \\>",
+   "py": {
+    "file": "src/mdmdoc/ocr.py",
+    "literal": "\\b([A-Z]{2}\\d{2}(?:[ ]?[A-Z0-9]){10,30})\\b",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_regex.clas.abap",
+    "literal": "\\<([A-Z][A-Z]\\d\\d(?:[ ]?[A-Z0-9]){10,30})\\>",
+    "count": 1
+   }
+  },
+  {
+   "id": "ocr_swift_regex",
+   "canon": "pinned",
+   "py": {
+    "file": "src/mdmdoc/ocr.py",
+    "literal": "\\b([A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)\\b",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_regex.clas.abap",
+    "literal": "\\<([A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z0-9][A-Z0-9](?:[A-Z0-9][A-Z0-9][A-Z0-9])?)\\>",
+    "count": 1
+   }
+  },
+  {
+   "id": "ocr_ein_regex",
+   "canon": "pinned",
+   "note": "KNOWN GAP (tracked): Python carries (?<![\\d-]) hyphen-adjacency guards (phantom-EIN fix); the ABAP \\< \\> variant does not — a sort-code print like 61-26-1234500 can still yield a phantom EIN on the ABAP side. Port candidate.",
+   "py": {
+    "file": "src/mdmdoc/ocr.py",
+    "literal": "(?<![\\d-])(\\d{2}-\\d{7})(?![\\d-])",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_regex.clas.abap",
+    "literal": "\\<(\\d\\d-\\d{7})\\>",
+    "count": 1
+   }
+  },
+  {
+   "id": "ocr_ssn_regex",
+   "canon": "pinned",
+   "py": {
+    "file": "src/mdmdoc/ocr.py",
+    "literal": "(?<![\\d-])(\\d{3}-\\d{2}-\\d{4})(?![\\d-])",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_regex.clas.abap",
+    "literal": "\\<(\\d{3}-\\d\\d-\\d{4})\\>",
+    "count": 1
+   }
+  },
+  {
+   "id": "swift_lengths_default",
+   "canon": "pinned",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "literal": "args.get(\"lengths\", [8, 11])",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "literal": "iv_name = `lengths` iv_default = `8,11`",
+    "count": 1
+   }
+  },
+  {
+   "id": "ein_digits_default",
+   "canon": "pinned",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "literal": "args.get(\"digits\", 9)",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "literal": "iv_name = `digits` iv_default = `9`",
+    "count": 1
+   }
+  },
+  {
+   "id": "date_older_than_years_default",
+   "canon": "pinned",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "literal": "args.get(\"years\", 2)",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "literal": "iv_name = `years` iv_default = `2`",
+    "count": 1
+   }
+  },
+  {
+   "id": "ev_positive_phrases",
+   "canon": "same",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "extract": "_EV_POSITIVE = \\((.*?)\\)",
+    "parse": "py_strs"
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "extract": "lt_ev = VALUE #\\((.*?)\\)\\.",
+    "parse": "abap_ticks"
+   }
+  },
+  {
+   "id": "no_bank_ids_keys",
+   "canon": "same",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "extract": "def no_bank_ids.*?for k in \\((.*?)\\):",
+    "parse": "py_strs"
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "extract": "METHOD p_no_bank_ids\\.(.*?)IF lv_iban",
+    "parse": "abap_ticks"
+   }
+  },
+  {
+   "id": "months_es_de_map",
+   "canon": "same",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "extract": "_MONTHS = \\{(.*?)\\}",
+    "parse": "py_pairs"
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_norm.clas.abap",
+    "extract": "gt_es_de = VALUE #\\((.*?)\\)\\.",
+    "parse": "abap_kv"
+   }
+  },
+  {
+   "id": "months_abbrev_set",
+   "canon": "pinned",
+   "note": "Python %b/%B month names live inside strptime — pinned ABAP-side only",
+   "abap": {
+    "file": "src/zcl_mdmdoc_norm.clas.abap",
+    "extract": "gt_months = VALUE #\\((.*?)\\)\\.",
+    "parse": "abap_ticks",
+    "expected": [
+     "january",
+     "february",
+     "march",
+     "april",
+     "may",
+     "june",
+     "july",
+     "august",
+     "september",
+     "october",
+     "november",
+     "december",
+     "jan",
+     "feb",
+     "mar",
+     "apr",
+     "jun",
+     "jul",
+     "aug",
+     "sep",
+     "oct",
+     "nov",
+     "dec"
+    ]
+   }
+  },
+  {
+   "id": "date_formats_py",
+   "canon": "pinned",
+   "note": "Python-only: the ABAP counterpart is the numeric+textual parser pair in zcl_mdmdoc_norm (try_textual_date + gt_months); behavioral parity is pinned by the golden date-older-2y case",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "extract": "_DATE_FORMATS = \\((.*?)\\)\\n",
+    "parse": "py_strs",
+    "expected": [
+     "%d.%m.%Y",
+     "%d/%m/%Y",
+     "%m/%d/%Y",
+     "%Y-%m-%d",
+     "%d-%m-%Y",
+     "%B %d, %Y",
+     "%d %B %Y",
+     "%b %d, %Y",
+     "%m/%d/%y",
+     "%d.%m.%y",
+     "%d %b %Y",
+     "%d %b, %Y",
+     "%d %B, %Y",
+     "%B %d %Y",
+     "%b %d %Y"
+    ]
+   }
+  }
+ ]
+}

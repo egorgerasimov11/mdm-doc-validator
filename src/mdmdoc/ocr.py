@@ -119,12 +119,14 @@ def _clean(s: str) -> str:
     return re.sub(r"[\s]", "", s or "").upper()
 
 
+# [CONST:ocr_iban_regex] [CONST:ocr_swift_regex]
 IBAN_RE = re.compile(r"\b([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){10,30})\b")
 SWIFT_RE = re.compile(r"\b([A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)\b")
 # (?<![\d-]) / (?![\d-]) guards: \b alone lets these match INSIDE hyphen-grouped
 # bank numbers (LV/GB sort-code prints like "61-26-1234500" yielded a phantom
 # EIN "26-1234500" — a fake TIN 'secret' that then gate-blocked the document's
 # own account digits). A real EIN/SSN is never digit- or hyphen-adjacent.
+# [CONST:ocr_ein_regex] [CONST:ocr_ssn_regex]
 EIN_RE = re.compile(r"(?<![\d-])(\d{2}-\d{7})(?![\d-])")
 SSN_RE = re.compile(r"(?<![\d-])(\d{3}-\d{2}-\d{4})(?![\d-])")
 

@@ -19,9 +19,11 @@ def swift_valid(value, flds, args, tables):
     sw = _norm_id(value)
     if not sw:
         return False, ""
+    # [CONST:swift_lengths_default]
     lengths = args.get("lengths", [8, 11])
     if len(sw) not in lengths:
         return True, f"length {len(sw)}, must be one of {lengths}"
+    # [CONST:bic_shape_regex]
     if not re.match(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$", sw):
         return True, "not a valid BIC shape (6 letters + 2/5 alphanumerics)"
     bank_country = to_iso2(str(flds.get("bank_country") or ""))
@@ -35,6 +37,7 @@ def iban_valid(value, flds, args, tables):
     iban = _norm_id(value)
     if not iban:
         return False, ""
+    # [CONST:iban_shape_regex]
     if not re.match(r"^[A-Z]{2}\d{2}[A-Z0-9]+$", iban):
         # A purely numeric value is a plain account number — the US and other
         # non-IBAN countries have no IBAN, so a domestic/international account
@@ -62,6 +65,7 @@ def ein_shape(value, flds, args, tables):
     if not v:
         return False, ""
     d = re.sub(r"\D", "", v)
+    # [CONST:ein_digits_default]
     if len(d) != int(args.get("digits", 9)):
         return True, f"{len(d)} digits, must be {args.get('digits', 9)}"
     return False, ""
@@ -123,12 +127,14 @@ def line_swap_suspect(value, flds, args, tables):
     return False, ""
 
 
+# [CONST:date_formats_py]
 _DATE_FORMATS = ("%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y", "%B %d, %Y",
                  "%d %B %Y", "%b %d, %Y", "%m/%d/%y", "%d.%m.%y",
-                 # day-first abbreviated + comma variants (audit C13): "15 Jan 2023"
-                 # used to fall through to the year-only fallback (-> July 1) while
+                 # day-first abbreviated + comma variants (audit C13): 15 Jan 2023
+                 # used to fall through to the year-only fallback -> July 1 while
                  # the ABAP twin parsed it — a live cross-implementation divergence
                  "%d %b %Y", "%d %b, %Y", "%d %B, %Y", "%B %d %Y", "%b %d %Y")
+# [CONST:months_es_de_map]
 _MONTHS = {  # minimal ES/DE month mapping for bank letters
     "enero": "January", "febrero": "February", "marzo": "March", "abril": "April",
     "mayo": "May", "junio": "June", "julio": "July", "agosto": "August",
@@ -181,6 +187,7 @@ def date_older_than(value, flds, args, tables):
     dt = parse_date(str(value or ""))
     if dt is None:
         return False, ""
+    # [CONST:date_older_than_years_default]
     years = int(args.get("years", 2))
     age_days = (_now() - dt).days
     if age_days > years * 365:
@@ -188,6 +195,7 @@ def date_older_than(value, flds, args, tables):
     return False, ""
 
 
+# [CONST:ev_positive_phrases]
 _EV_POSITIVE = ("computer generated", "computer-generated", "system generated",
                 "system-generated", "electronically", "electronic confirmation",
                 "requires no signature", "no signature required", "verification code",
@@ -240,6 +248,7 @@ def field_empty(value, flds, args, tables):
 
 
 def no_bank_ids(value, flds, args, tables):
+    # [CONST:no_bank_ids_keys]
     for k in ("iban", "account_number", "routing_aba"):
         if str(flds.get(k) or "").strip():
             return False, ""

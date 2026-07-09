@@ -110,6 +110,53 @@ def test_golden_gen_hash_mismatch_flagged(tmp_path):
     assert any("GEN-HASH" in p for p in problems)
 
 
+def test_constants_manifest_parses_and_matches():
+    """§8 M5: every registered constant extracts uniquely on both sides and
+    matches its contract (same-value or pinned) on the REAL repos."""
+    _need_abap()
+    m = cp.constants_manifest(PY_ROOT)
+    assert m.get("version") == 1 and len(m.get("constants", [])) >= 13
+    assert cp.check_constants(PY_ROOT, cp.ABAP_ROOT) == []
+
+
+def test_constants_single_side_edit_fails(tmp_path):
+    """Editing a pinned literal on one side must fail §8 until the manifest is
+    consciously updated."""
+    _need_abap()
+    import shutil
+    fake_py = tmp_path / "py"
+    (fake_py / "tools" / "parity").mkdir(parents=True)
+    shutil.copy(PY_ROOT / "tools" / "parity" / "constants.json",
+                fake_py / "tools" / "parity" / "constants.json")
+    src = fake_py / "src" / "mdmdoc"
+    (src / "rules").mkdir(parents=True)
+    for rel in ("rules/predicates.py", "ocr.py"):
+        shutil.copy(PY_ROOT / "src" / "mdmdoc" / rel, src / rel)
+    # tamper the BIC shape on the Python side only
+    p = src / "rules" / "predicates.py"
+    p.write_text(p.read_text().replace(
+        "^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$", "^[A-Z]{6}[A-Z0-9]{5}$"))
+    problems = cp.check_constants(fake_py, cp.ABAP_ROOT)
+    assert any("bic_shape_regex" in p and "edited on this side" in p for p in problems)
+
+
+def test_constants_unregistered_marker_fails(tmp_path):
+    _need_abap()
+    import json as _json
+    import shutil
+    fake_py = tmp_path / "py"
+    (fake_py / "tools" / "parity").mkdir(parents=True)
+    shutil.copy(PY_ROOT / "tools" / "parity" / "constants.json",
+                fake_py / "tools" / "parity" / "constants.json")
+    src = fake_py / "src" / "mdmdoc"
+    (src / "rules").mkdir(parents=True)
+    for rel in ("rules/predicates.py", "ocr.py"):
+        shutil.copy(PY_ROOT / "src" / "mdmdoc" / rel, src / rel)
+    (src / "newmod.py").write_text("# [CONST:brand_new_threshold]\nX = 7\n")
+    problems = cp.check_constants(fake_py, cp.ABAP_ROOT)
+    assert any("brand_new_threshold" in p and "no manifest entry" in p for p in problems)
+
+
 def test_absent_abap_exits_nonzero_without_optin(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "ABAP_ROOT", tmp_path / "nope")
     monkeypatch.delenv("MDMDOC_PARITY_OPTIONAL", raising=False)
