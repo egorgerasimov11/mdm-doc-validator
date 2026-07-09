@@ -211,10 +211,18 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
     excerpt = scrub_text((stage_a_pub.get("raw_text_excerpt") or "")[:config.EXCERPT_LIMIT],
                          run_vault, policy="strict")
 
-    from .dataset import portable_doc_path
+    from .dataset import load_labels, portable_doc_path
+    # gold-label lifecycle (M7): label_ts = FIRST labeling time (survives
+    # re-confirms), last_confirmed_ts/confirm_count track re-reviews. Written
+    # only on human submit — there is no auto-mutation path.
+    prev_label = next((l for l in load_labels()
+                       if l.get("doc_sha256") == run_id), None) or {}
     label = {
         "label_id": f"lbl-{runstore.now_iso().replace(':', '').replace('-', '')}",
         "ts": runstore.now_iso(),
+        "label_ts": prev_label.get("label_ts") or prev_label.get("ts") or runstore.now_iso(),
+        "last_confirmed_ts": runstore.now_iso(),
+        "confirm_count": int(prev_label.get("confirm_count") or 0) + 1,
         "doc_sha256": run_id,
         "doc_path": portable_doc_path(meta.get("path")),
         "doc_class": doc_class,
