@@ -158,7 +158,7 @@ def test_w9_line_swap_suspect():
     assert any(x.rule_id == "W9-013" for x in f)
 
 
-def test_bad_rule_never_crashes(tmp_path, monkeypatch):
+def test_bad_rule_fails_closed_to_nmr(tmp_path, monkeypatch):
     import yaml
     from mdmdoc import config
     bad = {"version": 1, "tables": {},
@@ -169,4 +169,24 @@ def test_bad_rule_never_crashes(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "RULES_DIR", tmp_path)
     f = run_rules(_bank("bank_letter"))
     assert any("engine_error" in x.message for x in f)
-    assert decide(f) == "ACCEPT"  # engine errors are NOTE, not verdicts
+    assert any(x.rule_id == "ENGINE-GUARD" for x in f)
+    # an errored rule might have been a REJECT — fail closed, never ACCEPT
+    assert decide(f) == "NEED_MANUAL_REVIEW"
+
+
+def test_invalid_verdict_effect_fails_closed(tmp_path, monkeypatch):
+    import yaml
+    from mdmdoc import config
+    bad = {"version": 1, "tables": {},
+           "rules": [{"id": "X-2", "when": {"always": True},
+                      "severity": "CRITICAL", "verdict_effect": "REJCT",
+                      "message": "typo'd effect"}]}
+    (tmp_path / "banking.yaml").write_text(yaml.safe_dump(bad))
+    (tmp_path / "w9.yaml").write_text(yaml.safe_dump({"version": 1, "rules": []}))
+    monkeypatch.setattr(config, "RULES_DIR", tmp_path)
+    f = run_rules(_bank("bank_letter"))
+    own = [x for x in f if x.rule_id == "X-2"]
+    assert own and own[0].verdict_effect is None  # approved text not mutated
+    assert any(x.rule_id == "ENGINE-GUARD" and "invalid verdict_effect" in x.message
+               for x in f)
+    assert decide(f) == "NEED_MANUAL_REVIEW"

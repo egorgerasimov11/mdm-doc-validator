@@ -2,8 +2,9 @@
 """
 engine.py — declarative rule engine. Rules live in rules/*.yaml (editable, no
 hidden model intuition). The engine iterates rules over the extraction, each
-firing rule yields a Finding. It never crashes on a bad rule — it emits an
-`engine_error` finding instead.
+firing rule yields a Finding. It never crashes on a bad rule — it emits a
+fail-closed `engine_error` finding (ENGINE-GUARD → NEED_MANUAL_REVIEW), so a
+broken rule can hide a blocker but can never let a document silently ACCEPT.
 
 `when` vocabulary:
   {always: true} | {field_missing: name} | {flag_true: name} | {flag_false: name}
@@ -133,12 +134,23 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
                 value=value_masked if kind else raw_value, value_masked=value_masked, detail=detail)
             sev = rule.get("severity", "WARNING")
             eff = rule.get("verdict_effect")
+            if eff is not None and eff not in VERDICTS:
+                # A human approved a verdict effect the engine cannot honor —
+                # dropping it silently would fail open. Hold for manual review.
+                findings.append(Finding(
+                    "ENGINE-GUARD", "WARNING", "NEED_MANUAL_REVIEW",
+                    f"engine_error: rule {rid} declares invalid verdict_effect {eff!r} "
+                    "— held for manual review"))
             findings.append(Finding(rid, sev if sev in SEVERITIES else "WARNING",
                                     eff if eff in VERDICTS else None, msg, detail,
                                     fname or ""))
         except Exception as e:
-            findings.append(Finding(rid, "NOTE", None,
-                                    f"engine_error: rule {rid} failed ({e.__class__.__name__}: {e})"))
+            # Fail closed: an errored rule might have been a REJECT/NMR. The
+            # document is held for a human instead of silently passing.
+            findings.append(Finding(
+                "ENGINE-GUARD", "WARNING", "NEED_MANUAL_REVIEW",
+                f"engine_error: rule {rid} failed ({e.__class__.__name__}: {e}) "
+                "— fail-closed: held for manual review"))
     if pending_applicable:
         shown = ", ".join(pending_applicable[:8]) + ("…" if len(pending_applicable) > 8 else "")
         findings.insert(0, Finding(
