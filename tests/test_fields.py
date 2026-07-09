@@ -19,6 +19,36 @@ def test_crosscheck_fills_and_flags():
     assert "DE44500105175407324931" not in " ".join(notes)
 
 
+def test_w9_tin_ocr_model_mismatch_flagged():
+    """audit-wave C5: an OCR EIN that disagrees with the model TIN used to be
+    silently dropped — no note, no signal. Now it is a hard-masked MISMATCH."""
+    fields = {"tin_raw": "12-3456789", "tin_type": "SSN"}
+    notes = crosscheck_ids(fields, {"ein": "98-7654321"}, doc_class="w9")
+    assert any(n.startswith("tin_raw=MISMATCH") and "vs ocr=" in n for n in notes)
+    assert fields["tin_raw"] == "12-3456789"          # model value not overwritten
+    assert fields["tin_type"] == "SSN"                # contested read settles nothing
+    blob = " ".join(notes)
+    assert "123456789" not in blob and "12-3456789" not in blob   # hard-masked
+    assert "987654321" not in blob and "98-7654321" not in blob
+
+
+def test_w9_tin_ocr_confirm_sets_provenance():
+    fields = {"tin_raw": "98-7654321"}
+    prov = {"tin_raw": {"source": "model"}}
+    notes = crosscheck_ids(fields, {"ein": "98-7654321"}, doc_class="w9", prov=prov)
+    assert fields["tin_type"] == "EIN"
+    assert prov["tin_raw"].get("confirmed") is True   # feeds the confidence gate
+    assert not any("MISMATCH" in n for n in notes)
+
+
+def test_w9_boxed_tin_mismatch_single_note():
+    fields = {"tin_raw": "12-3456789"}
+    det = {"ein": "98-7654321", "tin_boxed": "987654321", "tin_boxed_type": "EIN"}
+    notes = crosscheck_ids(fields, det, doc_class="w9")
+    assert sum(1 for n in notes if n.startswith("tin_raw=MISMATCH")) == 1
+    assert fields.get("tin_type") in (None, "")       # nothing settled
+
+
 def test_find_boxed_tin():
     from mdmdoc.fields import find_boxed_tin
     text = "Form W-9 boilerplate\nAmerican Epilepsy Society\n3\n6\n1\n2\n3\n4\n5\n6\n7\n06/09/2026\n"

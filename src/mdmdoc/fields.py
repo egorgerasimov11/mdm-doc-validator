@@ -138,9 +138,18 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
             notes.append(f"tin=filled-from-OCR({mask('ein', det['ein'])})")
             prov["tin_raw"] = {"source": "ocr-regex", "page": None}
         if _norm_id(fields.get("tin_raw")) == _norm_id(det["ein"]):
+            if prov.get("tin_raw", {}).get("source") != "ocr-regex":
+                prov["tin_raw"] = {"source": "model", "page": None, "confirmed": True}
             if str(fields.get("tin_type") or "").upper() != "EIN":
                 notes.append("tin_type=EIN (settled by the EIN detector)")
             fields["tin_type"] = "EIN"
+        else:
+            # OCR found an anchored EIN that DISAGREES with the model's TIN.
+            # Do not settle tin_type from a contested read; the note shape
+            # `tin_raw=…MISMATCH` is a HARD confidence signal (confidence.py)
+            # and an escalation trigger (stage_b). TIN is hard-masked always.
+            notes.append(f"tin_raw=MISMATCH(model={mask('tin', str(fields.get('tin_raw') or ''))} "
+                         f"vs ocr={mask('ein', det['ein'])})")
     # W-9 digit boxes (one digit per line in the text layer)
     if doc_class == "w9" and det.get("tin_boxed"):
         if not str(fields.get("tin_raw") or "").strip():
@@ -148,10 +157,18 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
             notes.append(f"tin=filled-from-boxed-digits({mask('tin', det['tin_boxed'])})")
             prov["tin_raw"] = {"source": "ocr-regex", "page": None}
         boxed_type = str(det.get("tin_boxed_type") or "")
-        if boxed_type and _norm_id(fields.get("tin_raw")) == _norm_id(det["tin_boxed"]):
-            if str(fields.get("tin_type") or "").upper() != boxed_type:
-                notes.append(f"tin_type={boxed_type} (settled by the {boxed_type} box label)")
-            fields["tin_type"] = boxed_type
+        if _norm_id(fields.get("tin_raw")) == _norm_id(det["tin_boxed"]):
+            if prov.get("tin_raw", {}).get("source") != "ocr-regex":
+                prov["tin_raw"] = {"source": "model", "page": None, "confirmed": True}
+            if boxed_type:
+                if str(fields.get("tin_type") or "").upper() != boxed_type:
+                    notes.append(f"tin_type={boxed_type} (settled by the {boxed_type} box label)")
+                fields["tin_type"] = boxed_type
+        elif not any(n.startswith("tin_raw=MISMATCH") for n in notes):
+            # boxed digits disagree with the model's TIN (one hard note is
+            # enough — the EIN detector usually sees the same digits)
+            notes.append(f"tin_raw=MISMATCH(model={mask('tin', str(fields.get('tin_raw') or ''))} "
+                         f"vs boxed={mask('tin', det['tin_boxed'])})")
     return notes
 
 
