@@ -91,6 +91,17 @@ def _leak_sweep() -> int:
 # error; predicting a stricter one just costs an extra manual review.
 _VERDICT_RANK = {"ACCEPT": 0, "WARNING": 1, "NEED_MANUAL_REVIEW": 2, "REJECT": 3}
 
+# A document that CRASHES the pipeline is an attempted doc, not a skipped one
+# (M1): it is NEVER an accuracy hit, and for cost it ranks like NMR — it fails
+# loudly to a human and ships nothing wrong, unlike a false ACCEPT.
+CRASH = "CRASH"
+
+
+def _rank_of(v: str) -> int | None:
+    if v == CRASH:
+        return _VERDICT_RANK["NEED_MANUAL_REVIEW"]
+    return _VERDICT_RANK.get(v)
+
 
 def _wilson(hits: int, n: int, z: float = 1.96) -> list[float]:
     """Wilson score 95% CI for a proportion (meaningful on a tiny corpus where
@@ -106,16 +117,18 @@ def _wilson(hits: int, n: int, z: float = 1.96) -> list[float]:
 
 def verdict_direction(pred: str, gold: str) -> str:
     """'unsafe' when the machine is SOFTER than the gold (dangerous), 'safe' when
-    stricter, '' when equal or unrankable."""
-    if pred not in _VERDICT_RANK or gold not in _VERDICT_RANK or pred == gold:
+    stricter, '' when equal or unrankable. CRASH ranks like NMR (see _rank_of)."""
+    pr, gr = _rank_of(pred), _VERDICT_RANK.get(gold)
+    if pr is None or gr is None or pred == gold or pr == gr:
         return ""
-    return "unsafe" if _VERDICT_RANK[pred] < _VERDICT_RANK[gold] else "safe"
+    return "unsafe" if pr < gr else "safe"
 
 
 def verdict_metrics(pairs: list[tuple[str, str]]) -> dict:
     """Cost-weighted verdict metrics from (pred, gold) pairs. UNSAFE (pred softer
     than gold) is weighted 3x; SAFE (stricter) 1x — so a system that gets more
-    conservative scores BETTER on verdict_cost even if raw accuracy dips."""
+    conservative scores BETTER on verdict_cost even if raw accuracy dips.
+    A CRASH pred is never a hit (even on gold NMR) and costs like an NMR."""
     n = len(pairs)
     if not n:
         return {"verdict_accuracy": 0, "verdict_accuracy_ci": [0.0, 0.0],
@@ -125,15 +138,17 @@ def verdict_metrics(pairs: list[tuple[str, str]]) -> dict:
         if pred == gold:
             hits += 1
             continue
-        d = verdict_direction(pred, gold)
-        if pred in _VERDICT_RANK and gold in _VERDICT_RANK:
-            gap = abs(_VERDICT_RANK[pred] - _VERDICT_RANK[gold])
-            if d == "unsafe":
-                unsafe += 1
-                cost += 3 * gap
-            else:
-                safe += 1
-                cost += 1 * gap
+        pr, gr = _rank_of(pred), _VERDICT_RANK.get(gold)
+        if pr is None or gr is None:
+            continue
+        gap = abs(pr - gr)
+        if pr < gr:
+            unsafe += 1
+            cost += 3 * gap
+        elif pr > gr:
+            safe += 1
+            cost += 1 * gap
+        # pr == gr (CRASH vs gold NMR): accuracy miss, zero cost, no direction
     return {
         "verdict_accuracy": round(hits / n, 3),
         "verdict_accuracy_ci": _wilson(hits, n),
@@ -145,10 +160,11 @@ def verdict_metrics(pairs: list[tuple[str, str]]) -> dict:
 
 def scenario_slices(rows: list[dict]) -> dict:
     """Per-scenario regression buckets from scored rows (pure, unit-testable).
-    A row counts toward every scenario tag on its label."""
+    A row counts toward every scenario tag on its label. CRASH rows count —
+    a crash on scenario X is regression signal for that slice (M1)."""
     slices: dict = {}
     for r in rows:
-        if "error" in r:
+        if "error" in r and not r.get("crash"):
             continue
         for tag in r.get("scenarios") or []:
             s = slices.setdefault(tag, {"n": 0, "ok": 0, "type_ok": 0, "verdict_ok": 0})
@@ -196,15 +212,35 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
     for lab in labels:
         path = resolve_doc_path(lab["doc_path"])
         if not path.exists():
-            rows.append({"file": lab["doc_path"], "error": "missing file"})
+            # ENVIRONMENT problem (corpus not synced), not a pipeline outcome —
+            # excluded from every metric but surfaced as skipped_missing (M1)
+            rows.append({"file": lab["doc_path"], "error": "missing file",
+                         "skipped": True})
             continue
         try:
             # precedents OFF: eval measures the machine, not stored operator answers
             res = run_check(path, lab["doc_class"], apply_precedent=False, web_evidence=False,
                             enforce_approvals=False)
         except Exception as e:  # noqa: BLE001 — eval must survive any doc
+            # a CRASH is an attempted document: it counts in every denominator,
+            # is never a hit, and costs like an NMR (fails loudly to a human)
             from .privacy import scrub_text
-            rows.append({"file": path.name, "error": scrub_text(str(e))})
+            gold_type = lab.get("doc_type_gold", "")
+            gold_v = lab.get("verdict_gold", "")
+            confusion.setdefault(gold_type, {}).setdefault(CRASH, 0)
+            confusion[gold_type][CRASH] += 1
+            if gold_type == "invoice":
+                invoice_total += 1
+                invoice_false_accept += 1   # CRASH != REJECT under the strict gate
+            rows.append({"file": path.name, "error": scrub_text(str(e)), "crash": True,
+                         "doc_class": lab["doc_class"],
+                         "doc_type": f"{CRASH}/{gold_type}",
+                         "verdict": f"{CRASH}/{gold_v}",
+                         "verdict_direction": "",
+                         "type_ok": False, "verdict_ok": False, "ok": False,
+                         "scenarios": lab.get("scenarios") or [],
+                         "fields": {}, "fields_lenient": {}})
+            _p(f"[{len(rows)}/{len(labels)}] {path.name}: CRASH ({e.__class__.__name__})")
             continue
         pred_type = res.pub.get("doc_type", "")
         gold_type = lab.get("doc_type_gold", "")
@@ -254,16 +290,28 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
            + (f", misses: {', '.join(k for k, ok in row_fields.items() if not ok)}"
               if any(not ok for ok in row_fields.values()) else ""))
 
-    n = sum(1 for r in rows if "error" not in r)
-    leaks = _leak_sweep()
     scored_rows = [r for r in rows if "error" not in r]
-    vpairs = [tuple(r["verdict"].split("/", 1)) for r in scored_rows if "/" in r.get("verdict", "")]
+    crash_rows = [r for r in rows if r.get("crash")]
+    skipped_missing = sum(1 for r in rows if r.get("skipped"))
+    n_scored = len(scored_rows)
+    # M1: n = ATTEMPTED documents (scored + crashed). A pipeline that fails on
+    # the hard docs must not score artificially clean by shrinking the
+    # denominator. Only missing files (environment) stay excluded.
+    n = n_scored + len(crash_rows)
+    leaks = _leak_sweep()
+    vpairs = [tuple(r["verdict"].split("/", 1))
+              for r in scored_rows + crash_rows if "/" in r.get("verdict", "")]
     vm = verdict_metrics(vpairs)
     # gold-review queue: the machine was STRICTER than the gold — often the gold
     # label is stale (the machine improved past it), so re-review the LABEL.
+    # Crashes say nothing about label staleness — excluded (scored only).
     gold_review = [r["file"] for r in scored_rows if r.get("verdict_direction") == "safe"]
     metrics = {
         "n": n,
+        "n_scored": n_scored,
+        "crashes": len(crash_rows),
+        "crash_rate": round(len(crash_rows) / n, 3) if n else 0,
+        "skipped_missing": skipped_missing,
         "doc_type_accuracy": round(type_hits / n, 3) if n else 0,
         "doc_type_accuracy_ci": _wilson(type_hits, n),
         "verdict_accuracy": round(verdict_hits / n, 3) if n else 0,
@@ -271,7 +319,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         "unsafe_error_rate": vm["unsafe_error_rate"],
         "safe_disagreement_rate": vm["safe_disagreement_rate"],
         "verdict_cost": vm["verdict_cost"],
-        "json_valid_first_try": round(json_ok / n, 3) if n else 0,
+        # per-field extraction quality is diagnosable only on scored docs
+        "json_valid_first_try": round(json_ok / n_scored, 3) if n_scored else 0,
         "invoice_false_accept_rate": (round(invoice_false_accept / invoice_total, 3)
                                       if invoice_total else None),
         "fields": {k: round(v[0] / v[1], 3) for k, v in sorted(field_stats.items())},
@@ -300,7 +349,7 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             prev_rows = {}
     diff = {"improved": [], "regressed": [], "unchanged_wrong": []}
     for r in rows:
-        if "error" in r:
+        if "error" in r and not r.get("crash"):   # crash rows carry ok=False
             continue
         prev = prev_rows.get(r["file"])
         if prev is None or "ok" not in prev:
@@ -330,14 +379,15 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
 
     # report
     lines = [f"# mdmdoc eval — {entry['ts']}" + (f" ({tag})" if tag else ""), ""]
-    lines.append(f"Labels evaluated: {n} (errors: {len(rows) - n})"
+    lines.append(f"Labels attempted: {n} (scored: {n_scored}, crashed: {len(crash_rows)}, "
+                 f"skipped missing: {skipped_missing})"
                  + (f", scenario filter: {scenario}" if scenario else ""))
     lines.append("")
     lines.append("| metric | value |" + (" previous |" if prev else ""))
     lines.append("|---|---|" + ("---|" if prev else ""))
     for k in ("doc_type_accuracy", "verdict_accuracy", "unsafe_error_rate",
-              "safe_disagreement_rate", "verdict_cost", "json_valid_first_try",
-              "invoice_false_accept_rate", "leakage_count"):
+              "safe_disagreement_rate", "verdict_cost", "crash_rate",
+              "json_valid_first_try", "invoice_false_accept_rate", "leakage_count"):
         pv = f" {prev['metrics'].get(k)} |" if prev else ""
         lines.append(f"| {k} | {metrics.get(k)} |{pv}")
     lines.append("")
@@ -400,7 +450,12 @@ def run_rescore(tag: str = "", record: bool = False) -> int:
     fidelity_bad: list[str] = []
     scored_rows = 0
     for r in data.get("rows", []):
-        if not isinstance(r, dict) or "error" in r or not r.get("run_id"):
+        if not isinstance(r, dict):
+            continue
+        if r.get("crash"):
+            print(f"  ! crash row (no stored prediction to re-score): {r.get('file', '?')}")
+            continue
+        if "error" in r or not r.get("run_id"):
             continue
         lab = labels.get(r["run_id"])
         pub = runstore.load(r["run_id"], "extraction.json")
