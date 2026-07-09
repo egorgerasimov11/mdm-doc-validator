@@ -124,7 +124,11 @@ def line_swap_suspect(value, flds, args, tables):
 
 
 _DATE_FORMATS = ("%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y", "%B %d, %Y",
-                 "%d %B %Y", "%b %d, %Y", "%m/%d/%y", "%d.%m.%y")
+                 "%d %B %Y", "%b %d, %Y", "%m/%d/%y", "%d.%m.%y",
+                 # day-first abbreviated + comma variants (audit C13): "15 Jan 2023"
+                 # used to fall through to the year-only fallback (-> July 1) while
+                 # the ABAP twin parsed it — a live cross-implementation divergence
+                 "%d %b %Y", "%d %b, %Y", "%d %B, %Y", "%B %d %Y", "%b %d %Y")
 _MONTHS = {  # minimal ES/DE month mapping for bank letters
     "enero": "January", "febrero": "February", "marzo": "March", "abril": "April",
     "mayo": "May", "junio": "June", "julio": "July", "agosto": "August",
@@ -160,12 +164,25 @@ def parse_date(s: str):
     return None
 
 
+def _now() -> datetime:
+    """Injectable clock: MDMDOC_NOW (ISO date/datetime) pins 'today' for tests
+    and golden runs; invalid or unset -> real now(). Predicates never raise."""
+    import os
+    v = os.environ.get("MDMDOC_NOW", "").strip()
+    if v:
+        try:
+            return datetime.fromisoformat(v)
+        except ValueError:
+            pass
+    return datetime.now()
+
+
 def date_older_than(value, flds, args, tables):
     dt = parse_date(str(value or ""))
     if dt is None:
         return False, ""
     years = int(args.get("years", 2))
-    age_days = (datetime.now() - dt).days
+    age_days = (_now() - dt).days
     if age_days > years * 365:
         return True, f"document date {dt.date()} is ~{age_days // 365} years old"
     return False, ""

@@ -51,6 +51,10 @@ The signature 3-state change (band/page/text votes + `uncertain`) is inside the
 existing `apply_signature_probe` (n/a — vision). The confidence gate (`confidence.py`
 → CONF-001) is a Python pipeline layer, not a stage_b guard; ABAP corp v1 is
 deterministic-only and does not carry it (documented n/a — no marker expected).
+MDMDOC_NOW (audit C13) is a Python-only test clock for `date_older_than`; the
+ABAP side stays on sy-datum by design — no port expected. The Python
+`_DATE_FORMATS` day-first-abbreviated additions of the same commit CONVERGE
+Python toward ABAP's `try_textual_date` (which already parsed "15 Jan 2023").
 
 ## Golden parity corpus (behavioural, beyond marker grep) — 2026-07-09
 `tools/golden/golden_cases.json` (6 cases) runs through the Python DETERMINISTIC

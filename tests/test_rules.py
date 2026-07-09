@@ -189,6 +189,35 @@ def test_w9_line_swap_suspect():
     assert any(x.rule_id == "W9-013" for x in f)
 
 
+def test_parse_date_day_first_abbrev():
+    """audit C13: '15 Jan 2023' fell to the year-only fallback (-> July 1)
+    while the ABAP twin parsed it — BNK-020 fired on one side only."""
+    from datetime import datetime
+
+    from mdmdoc.rules.predicates import parse_date
+    assert parse_date("15 Jan 2023") == datetime(2023, 1, 15)
+    assert parse_date("15 Jan, 2023") == datetime(2023, 1, 15)
+    assert parse_date("15 January, 2023") == datetime(2023, 1, 15)
+    assert parse_date("Jan 15 2023") == datetime(2023, 1, 15)
+    assert parse_date("January 15 2023") == datetime(2023, 1, 15)
+    # existing behaviors unchanged
+    assert parse_date("15 January 2023") == datetime(2023, 1, 15)
+    assert parse_date("Jan 15, 2023") == datetime(2023, 1, 15)
+    assert parse_date("3 de enero de 2024") == datetime(2024, 1, 3)
+
+
+def test_date_older_than_injectable_clock(monkeypatch):
+    from mdmdoc.rules.predicates import date_older_than
+    monkeypatch.setenv("MDMDOC_NOW", "2026-07-09")
+    fired, detail = date_older_than("15 Jan 2023", {}, {"years": 2}, {})
+    assert fired and "2023-01-15" in detail
+    fired, _ = date_older_than("15 Jan 2025", {}, {"years": 2}, {})
+    assert not fired
+    monkeypatch.setenv("MDMDOC_NOW", "not-a-date")   # invalid -> falls back, no raise
+    fired, _ = date_older_than("15 Jan 2019", {}, {"years": 2}, {})
+    assert fired
+
+
 def test_bad_rule_fails_closed_to_nmr(tmp_path, monkeypatch):
     import yaml
     from mdmdoc import config
