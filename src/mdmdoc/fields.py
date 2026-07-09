@@ -451,6 +451,11 @@ class Extraction:
     # Guards that print banking values into notes must respect it (C6);
     # fail-safe default is masked. Not serialized (to_public builds its own).
     policy: str = "masked"
+    # П3/R1 evidence-rescue: the doc_type was reclassified from an ungrounded
+    # model guess by deterministic evidence — a confidence WEAK signal, and the
+    # component booleans are persisted for the review UI / eval debugging
+    doc_type_uncertain: bool = False
+    doc_type_evidence: dict = field(default_factory=dict)
 
     def register_secrets(self) -> None:
         keys = _SENSITIVE_BANK if self.doc_class == "bank" else _SENSITIVE_W9
@@ -511,4 +516,7 @@ class Extraction:
         }
         if self.engine_compare:
             pub_wrap["engine_compare"] = self.engine_compare
+        if self.doc_type_uncertain:
+            pub_wrap["doc_type_uncertain"] = True
+            pub_wrap["doc_type_evidence"] = dict(self.doc_type_evidence)
         return pub_wrap

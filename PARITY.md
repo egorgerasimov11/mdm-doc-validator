@@ -104,3 +104,9 @@ The golden ABAP twin above is data/test generation, not a logic port.)
    into `ZCL_MDMDOC_RULES_DATA` (preferred: enables "corp profile = only tier:corp rules"
    in ZMDMDOC) or ignore them; must not fail on unknown keys. `tools/check_parity.py`
    will treat these fields as non-verdict metadata (audit session keeps that file).
+5. **П3 evidence-rescue (2026-07-09 audit wave)**: `ground_payment_instructions` gained a
+   rescue sub-path backed by `doctype_evidence.score` (pure, table-driven AND-gate:
+   letter shape + named-bank identity + account facts + holder signal → bank_letter with
+   `doc_type_uncertain`). NOT yet ported; ABAP keeps the stricter grounding
+   (other → NMR) — a safe temporary divergence. Port target: table + AND-gate inside
+   `zcl_mdmdoc_extract` `[GUARD:ground_payment_instructions]`.

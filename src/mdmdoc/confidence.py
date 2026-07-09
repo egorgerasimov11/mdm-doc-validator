@@ -80,6 +80,12 @@ def assess(ext: Extraction, raw=None) -> dict:
         weak += 1
         reasons.append("signature read uncertain")
 
+    # WEAK: doc_type was rescued from an ungrounded model guess by deterministic
+    # evidence (П3) — right type, shaky provenance; hold a borderline ACCEPT
+    if getattr(ext, "doc_type_uncertain", False):
+        weak += 1
+        reasons.append("doc_type rescued by evidence (model said payment_instructions)")
+
     if hard or weak >= 2:
         level = "low"
     elif weak == 1:

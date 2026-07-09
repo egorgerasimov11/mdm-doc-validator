@@ -111,6 +111,12 @@ def save_setting(key: str, value) -> None:
                       json.dumps(s, ensure_ascii=False, indent=1) + "\n")
 
 
+def doctype_rescue_enabled() -> bool:
+    """П3 evidence-rescue kill switch: MDMDOC_DOCTYPE_RESCUE=0 reverts to the
+    blunt payment_instructions->other->NMR grounding. Default ON."""
+    return os.environ.get("MDMDOC_DOCTYPE_RESCUE", "1").strip() != "0"
+
+
 def engine_mode() -> str:
     """Which analysis engine drives a check when the request does not say:
     MDMDOC_ENGINE env (ops override) > settings.json (operator panel) > auto."""

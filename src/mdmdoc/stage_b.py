@@ -443,6 +443,27 @@ def _ground_payment_instructions(ext: Extraction, raw: RawDoc) -> None:
     from .fields import payment_instruction_marks
     if payment_instruction_marks(raw.raw_text):
         return
+    # Evidence rescue (П3/R1): when the page carries OVERWHELMING deterministic
+    # bank-letter evidence (letter shape AND bank identity AND account facts
+    # AND holder signal — every component required), the model's ungrounded
+    # payment_instructions call is a mislabel of a real letter; classify
+    # bank_letter but FLAG it (doc_type_uncertain -> confidence weak signal),
+    # so a shaky ACCEPT can still be held by CONF-001. Weaker evidence keeps
+    # the conservative grounding below (the CJK exhibition-notice case has
+    # bank tokens + account digits but no letter shape/holder -> unchanged).
+    if config.doctype_rescue_enabled():
+        from .doctype_evidence import score
+        sc = score(raw.raw_text, raw.regex_candidates, raw.bank_letter_pages)
+        if sc["bank_letter_strong"]:
+            ext.warnings.append(
+                "model said payment_instructions; deterministic evidence (letter "
+                "shape + bank identity + account facts + holder signal) says "
+                "bank_letter — classified bank_letter (uncertain)")
+            ext.doc_type = "bank_letter"
+            ext.provenance["doc_type"] = {"source": "rule", "page": None}
+            ext.doc_type_uncertain = True
+            ext.doc_type_evidence = dict(sc["components"])
+            return
     # ALWAYS degrade to 'other' — never to the type hint. A weak hint can be
     # STRONGER-accepting than the ungrounded claim (live case: 开户银行 on the
     # organiser's remittance block hinted bank_letter, which would have turned
