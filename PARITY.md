@@ -45,9 +45,30 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 - apply_signature_probe — n/a (vision signature probe; same reason)
 - finalize_provenance — n/a (Python report provenance structure; the ABAP result has no provenance field)
 
+## Guards (continued, 2026-07-09 accuracy wave)
+- normalize_tin — ported (already listed)
+The signature 3-state change (band/page/text votes + `uncertain`) is inside the
+existing `apply_signature_probe` (n/a — vision). The confidence gate (`confidence.py`
+→ CONF-001) is a Python pipeline layer, not a stage_b guard; ABAP corp v1 is
+deterministic-only and does not carry it (documented n/a — no marker expected).
+
+## Golden parity corpus (behavioural, beyond marker grep) — 2026-07-09
+`tools/golden/golden_cases.json` (6 cases) runs through the Python DETERMINISTIC
+engine (`tools/golden/run_golden.py`, `tests/test_golden_parity.py`, all green).
+The SAME cases must reproduce identical fields/notes in ABAP. **ABAP twin =
+tracked verify-on-system next-step** (ABAP Unit runs only on a real system;
+abaplint only lints syntax): a generator emits `zcl_mdmdoc_golden_data`
+(precedent: `zcl_mdmdoc_rules_data`, "DO NOT EDIT" + a `GOLDEN-HASH <hex>` header
+= the corpus hash) + a hand-written loop testclass that calls
+`zcl_mdmdoc_extract=>build` (doc_type supplied per case — ABAP has no type_hint
+port) and asserts fields + crosscheck-note substrings. check_parity §7 will then
+compare the corpus hash to the ABAP header. Until generated, this is the ONE
+tracked ABAP follow-up (guards themselves are already ported).
+
 ## Pending ABAP logic ports (Python has it, ABAP not yet — remove the line once applied)
 (none — the US numeric-IBAN guard was applied to `p_iban_valid` + test
-`pred_iban_numeric_us_ok` on 2026-07-09, together with the wave-5 extract-guard pack.)
+`pred_iban_numeric_us_ok` on 2026-07-09, together with the wave-5 extract-guard pack.
+The golden ABAP twin above is data/test generation, not a logic port.)
 
 ## Coordination requests → rules-editor/ABAP session (2026-07-07, audit milestone)
 1. ~~US-IBAN port reminder~~ — **closed 2026-07-09**: applied by the audit session

@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "note": "Deterministic-engine parity corpus. Each case is run through the Python deterministic path (no LLM) AND its ABAP twin; both must reproduce the same fields/notes. Only guards that fire without a model are covered (checksum, e-signature, statement period, JP form, doc_type classification) — narrative-field guards (VIGILADO bank_name, model-misplaced numeric IBAN) need the model and are covered by unit tests, not here. Fake IBANs are mod-97 valid.",
+  "cases": [
+    {
+      "id": "it-iban-checksum-valid",
+      "doc_class": "bank",
+      "filename": "it_bank_letter.pdf",
+      "raw_text": "Certificazione bancaria. Intestatario: Rossi SRL. Banca: Intesa Sanpaolo. IBAN: IT60 X054 2811 1010 0000 0123 456. Firmato.",
+      "expect": {
+        "notes": ["iban checksum (ISO 13616 mod-97): valid"]
+      }
+    },
+    {
+      "id": "docusign-esignature",
+      "doc_class": "bank",
+      "filename": "signed_letter.pdf",
+      "raw_text": "Bank letter for Globex GmbH. IBAN DE89 3704 0044 0532 0130 00 BIC COBADEFFXXX. DocuSign Envelope ID: 5F2A-9911. Signed 2024-05-03 | 10:22 PDT.",
+      "expect": {
+        "doc_type": "bank_letter",
+        "fields": {"signed": true}
+      }
+    },
+    {
+      "id": "statement-period-as-date",
+      "doc_class": "bank",
+      "filename": "statement.pdf",
+      "raw_text": "Bank statement for account holder Meridian Ltd. IBAN GB29 NWBK 6016 1331 9268 19. Statement period 1 Jan 2025 to 31 Mar 2025.",
+      "expect": {
+        "notes": ["document date = statement period"]
+      }
+    },
+    {
+      "id": "jp-domestic-form",
+      "doc_class": "bank",
+      "filename": "jp_form.pdf",
+      "raw_text": "銀行口座認証 〒813-0044 福岡市 口座番号 1234567 三井住友銀行 普通",
+      "expect": {
+        "fields": {"bank_country": "JP"},
+        "notes": ["bank country inferred: JP", "口座番号"]
+      }
+    },
+    {
+      "id": "invoice-classified",
+      "doc_class": "bank",
+      "filename": "invoice.pdf",
+      "raw_text": "INVOICE Invoice Number INV-2044 Invoice date 2025-01-10 Total due 1200.00 EUR remit to IBAN DE89370400440532013000",
+      "expect": {
+        "doc_type": "invoice"
+      }
+    },
+    {
+      "id": "w9-form-classified",
+      "doc_class": "w9",
+      "filename": "w9_form.pdf",
+      "raw_text": "Form W-9 Request for Taxpayer Identification Number and Certification. 1 Name China Med Device LLC. 3 LLC. Employer identification number 45-3859289",
+      "expect": {
+        "doc_type": "w9"
+      }
+    }
+  ]
+}
