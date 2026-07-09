@@ -158,10 +158,16 @@ def _doc_types(doc_class: str) -> set[str]:
         return set()
 
 
-def validate_rule(rule: dict, doc_class: str) -> list[str]:
-    """Semantic checks `save_rules` does NOT do (it only checks parse + dup id).
-    A rule that references an unknown predicate would silently become an
-    engine_error NOTE at runtime — catch it here before offering 'apply'."""
+_MESSAGE_PLACEHOLDERS = {"value", "value_masked", "detail"}   # engine.py supplies exactly these
+
+
+def validate_rule(rule: dict, doc_class: str,
+                  known_doc_types: set[str] | None = None) -> list[str]:
+    """Semantic checks YAML-parse does NOT do. Runs on every proposal AND (since
+    the audit wave) on every rules-file save, so a rule that would error at
+    runtime (unknown predicate, bad message placeholder, typo'd effect) is
+    rejected at authoring time instead of failing closed in production.
+    known_doc_types: validate against the file BEING SAVED (else the on-disk one)."""
     issues: list[str] = []
     if not isinstance(rule, dict):
         return ["proposed rule is not a mapping"]
@@ -177,23 +183,50 @@ def validate_rule(rule: dict, doc_class: str) -> list[str]:
     if not isinstance(when, dict) or not when:
         issues.append("`when` must be a non-empty mapping")
     else:
-        op = next(iter(when))
-        if op not in WHEN_OPS:
-            issues.append(f"`when` operator {op!r} not in {sorted(WHEN_OPS)}")
+        # the engine probes known operators in a fixed order — mirror that
+        # instead of trusting dict order (a {field:…, check:…} clause used to
+        # be judged by whichever key came first)
+        present = [op for op in WHEN_OPS if op in when]
+        if not present:
+            issues.append(f"`when` has no recognized operator "
+                          f"(keys: {sorted(when)}; valid: {sorted(WHEN_OPS)})")
+        elif len(present) > 1:
+            issues.append(f"`when` is ambiguous — multiple operators {present}; "
+                          "the engine evaluates only the first it probes")
         if "check" in when and when["check"] not in PREDICATES:
             issues.append(f"check predicate {when['check']!r} does not exist "
                           f"(known: {sorted(PREDICATES)}) — needs_code")
     at = rule.get("applies_to")
     if at is not None:
-        known = _doc_types(doc_class)
+        known = known_doc_types if known_doc_types is not None else _doc_types(doc_class)
         bad = [t for t in at if known and t not in known]
         if bad:
             issues.append(f"applies_to has unknown doc_type(s): {bad}")
-    # privacy: a rule message must never carry a document value (account/IBAN)
     for k in ("message", "message_ru"):
-        if _DIGIT_RUN.search(str(rule.get(k, ""))):
+        msg = str(rule.get(k, "") or "")
+        # privacy: a rule message must never carry a document value (account/IBAN).
+        # Decision-record references (rule DR-YYYYMMDD-HHMMSS) are a documented
+        # convention, not document values — strip them before the digit scan.
+        scan = re.sub(r"\bDR-\d{8}-\d{6}\b", "", msg)
+        if _DIGIT_RUN.search(scan):
             issues.append(f"{k} contains a long digit run — a rule message must not "
                           "embed document values; use {value_masked}/{detail} placeholders")
+        # a placeholder the engine does not supply raises KeyError at runtime —
+        # which is now a fail-closed ENGINE-GUARD NMR (C1). Catch it here.
+        try:
+            import string
+            for _, fname, _, _ in string.Formatter().parse(msg):
+                if fname is None:
+                    continue
+                if fname == "" or fname.isdigit():
+                    issues.append(f"{k} uses a positional {{}} placeholder — only "
+                                  f"named {sorted(_MESSAGE_PLACEHOLDERS)} are supplied")
+                elif fname.split(".")[0].split("[")[0] not in _MESSAGE_PLACEHOLDERS:
+                    issues.append(f"{k} uses unknown placeholder {{{fname}}} — allowed: "
+                                  f"{sorted(_MESSAGE_PLACEHOLDERS)}")
+        except ValueError:
+            issues.append(f"{k} has malformed {{}} braces (literal braces must be "
+                          "doubled: '{{' and '}}')")
     return issues
 
 

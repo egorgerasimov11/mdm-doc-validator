@@ -28,7 +28,10 @@ def rules_path(doc_class: str) -> Path:
 
 def save_rules(doc_class: str, text: str) -> int:
     """Validate and overwrite a doc-class rule file; return the rule count.
-    A rule is 'deleted' by removing its block. Raises ValueError on bad input."""
+    A rule is 'deleted' by removing its block. Raises ValueError on bad input.
+    Every rule passes the SEMANTIC validation too (unknown predicate, bad
+    message placeholder, typo'd verdict_effect) — such a rule would fail
+    closed at runtime (ENGINE-GUARD NMR), so refuse to save it at all."""
     try:
         parsed = yaml.safe_load(text)
     except yaml.YAMLError as e:
@@ -38,6 +41,17 @@ def save_rules(doc_class: str, text: str) -> int:
     ids = [r.get("id") for r in parsed["rules"] if isinstance(r, dict)]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate rule id in the file")
+    from .rule_propose import validate_rule   # function-local: rule_propose imports rules_io
+    known = set(parsed.get("doc_types") or [])
+    problems: list[str] = []
+    for r in parsed["rules"]:
+        if not isinstance(r, dict):
+            problems.append("a rules: entry is not a mapping")
+            continue
+        for issue in validate_rule(r, doc_class, known_doc_types=known):
+            problems.append(f"rule {r.get('id', '?')}: {issue}")
+    if problems:
+        raise ValueError("; ".join(problems))
     with _LOCK:
         config.atomic_write_text(rules_path(doc_class), text)
     return len(parsed["rules"])
