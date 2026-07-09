@@ -709,9 +709,32 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
 
     ext_res.register_secrets()
     # regex candidates hold full values too — register so the leak gate knows them
-    from .privacy import FIELD_KIND
+    from .privacy import FIELD_KIND, _digits
+    # TIN/banking kind-conflict guard: one digit string CANNOT be both a banking
+    # identifier (shown in full under the operator display policy) and a TIN
+    # (masked under EVERY policy) — the tin-only leak gate would then block the
+    # run for 'leaking' the document's own routing/account digits. Real case: a
+    # Latvian print '61-2612345' matched the EIN shape while the same nine
+    # digits were the routing/account candidate. On a collision the BANKING
+    # identity wins (bank ids drive this doc class; the ein detector is a W-9
+    # tool) and the value is not registered as a TIN secret.
+    bank_seqs = {_digits(str(v)) for k, v in raw.regex_candidates.items()
+                 if k in ("iban", "account_number", "routing_aba", "routing_aba_wires")}
+    bank_seqs |= {_digits(str(ext_res.fields.get(k) or ""))
+                  for k in ("iban", "account_number", "routing_aba", "routing_aba_wires")}
+    bank_seqs.discard("")
+
+    def _collides_with_bank_id(value: str) -> bool:
+        d = _digits(str(value))
+        return bool(d) and any(d in b or b in d for b in bank_seqs)
+
     for k, v in raw.regex_candidates.items():
-        if k in ("iban", "account_number", "routing_aba", "routing_aba_wires",
-                 "ein", "tin_boxed"):
+        if k in ("iban", "account_number", "routing_aba", "routing_aba_wires"):
             ext_res.vault.register(FIELD_KIND.get(k, "account_number"), v)
+        elif k in ("ein", "tin_boxed"):
+            if _collides_with_bank_id(v):
+                _cross_note(ext_res, f"{k}-shaped candidate matches a banking "
+                                     "identifier's digits — treated as a bank id, not a TIN")
+            else:
+                ext_res.vault.register(FIELD_KIND.get(k, "account_number"), v)
     return ext_res
