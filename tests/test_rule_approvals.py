@@ -82,3 +82,47 @@ def test_approved_then_edited_reverts_to_pending(rules_env):
     f = run_rules(_ext(), enforce_approvals=True)
     assert any(x.rule_id == "RULE-GATE" for x in f)         # changed rule needs re-approval
     assert decide(f) == "NEED_MANUAL_REVIEW"
+
+
+def test_corrupt_ledger_fails_closed_with_backup(rules_env):
+    rule_approvals.set_decision("bank", _rule(), "approved")
+    p = config.RULES_DIR / "approvals.json"
+    original_garbage = "{not json at all"
+    p.write_text(original_garbage, encoding="utf-8")
+    assert rule_approvals.load() == {}                      # fail closed: all PENDING
+    backup = p.with_name("approvals.json.corrupt")
+    assert backup.read_text(encoding="utf-8") == original_garbage
+    # a second, different corruption must NOT clobber the first snapshot
+    p.write_text("other garbage", encoding="utf-8")
+    assert rule_approvals.load() == {}
+    assert backup.read_text(encoding="utf-8") == original_garbage
+    # and the gate holds the run at NMR
+    f = run_rules(_ext(), enforce_approvals=True)
+    assert decide(f) == "NEED_MANUAL_REVIEW"
+
+
+def test_concurrent_decisions_lose_nothing(rules_env):
+    import threading
+    rules = [dict(_rule(), id=f"T-{i}") for i in range(8)]
+    threads = [threading.Thread(target=rule_approvals.set_decision,
+                                args=("bank", r, "approved")) for r in rules]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    store = rule_approvals.load()                           # parses (not torn)
+    assert {f"bank:T-{i}" for i in range(8)} <= set(store)  # no update lost
+
+
+def test_rejected_then_edited_reverts_to_pending(rules_env):
+    rule_approvals.set_decision("bank", _rule(), "rejected")
+    # rejection is bound to the exact text the human saw — a rewritten rule
+    # under the same id must NOT inherit the old rejection (fail-open hole)
+    edited_rule = dict(_rule(), when={"always": True}, message="rewritten check")
+    assert rule_approvals.status(rule_approvals.load(), "bank", edited_rule) \
+        == rule_approvals.PENDING
+    edited = dict(MINI_RULES, rules=[edited_rule])
+    (rules_env / "rules" / "banking.yaml").write_text(yaml.safe_dump(edited))
+    f = run_rules(_ext(), enforce_approvals=True)
+    assert any(x.rule_id == "RULE-GATE" for x in f)         # surfaces for review
+    assert decide(f) == "NEED_MANUAL_REVIEW"

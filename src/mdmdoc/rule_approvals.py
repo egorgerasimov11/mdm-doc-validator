@@ -9,8 +9,11 @@ per-rule decisions ({approved|rejected} + the content hash of the rule he saw).
 Status of a rule against the current YAML:
   * approved — decision "approved" AND the rule's content hash still matches what
                was approved (so an edited rule auto-reverts to pending).
-  * rejected — Egor disabled the rule on purpose → it never fires, no review flag.
-  * pending  — never reviewed, OR approved earlier but the rule text changed.
+  * rejected — Egor disabled the exact rule text he saw → it never fires, no
+               review flag. An edited rejected rule reverts to pending (a
+               repurposed rule id must never inherit an old rejection).
+  * pending  — never reviewed, OR reviewed earlier (approved OR rejected) but
+               the rule text changed since.
 
 The engine (rules/engine.py) consults this: approved rules run normally; a
 pending rule that APPLIES to the document does not fire but forces the run to
@@ -25,10 +28,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import shutil
+import threading
 
 from . import config
 
 APPROVED, REJECTED, PENDING = "approved", "rejected", "pending"
+
+# serializes read-modify-write of the ledger across the server threadpool
+_LOCK = threading.Lock()
+_log = logging.getLogger("mdmdoc.rule_approvals")
 
 # Keys that are governance METADATA, not verdict behaviour. They are excluded
 # from the content hash so annotating a rule with tier/source does NOT invalidate
@@ -57,12 +67,25 @@ def _key(doc_class: str, rule_id: str) -> str:
 
 def load() -> dict:
     p = _path()
-    if p.exists():
-        try:
-            return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        # The human-approval ledger is unreadable. Fail CLOSED (empty store =
+        # every rule PENDING -> RULE-GATE NMR, nothing silently fires), but do
+        # it LOUDLY and keep the first corrupt snapshot for forensics — the
+        # operator's decisions must never vanish without a trace.
+        _log.error("approvals.json is corrupt (%s: %s) — treating every rule "
+                   "as PENDING; original bytes preserved at approvals.json.corrupt",
+                   e.__class__.__name__, e)
+        backup = p.with_name(p.name + ".corrupt")
+        if not backup.exists():
+            try:
+                shutil.copy2(p, backup)
+            except OSError:
+                pass
+        return {}
 
 
 def status(store: dict, doc_class: str, rule: dict) -> str:
@@ -70,11 +93,11 @@ def status(store: dict, doc_class: str, rule: dict) -> str:
     entry = store.get(_key(doc_class, str(rule.get("id", ""))))
     if not entry:
         return PENDING
-    if entry.get("status") == REJECTED:
+    if entry.get("status") == REJECTED and entry.get("hash") == rule_hash(rule):
         return REJECTED
     if entry.get("status") == APPROVED and entry.get("hash") == rule_hash(rule):
         return APPROVED
-    return PENDING   # approved earlier but the rule text changed → re-approve
+    return PENDING   # reviewed earlier but the rule text changed → re-review
 
 
 def set_decision(doc_class: str, rule: dict, decision: str, note: str = "",
@@ -82,15 +105,17 @@ def set_decision(doc_class: str, rule: dict, decision: str, note: str = "",
     """Record Approve/Reject for one rule. Returns the updated store."""
     if decision not in (APPROVED, REJECTED, PENDING):
         raise ValueError(f"decision must be approved/rejected/pending, got {decision!r}")
-    store = load()
-    if decision == PENDING:
-        store.pop(_key(doc_class, str(rule.get("id", ""))), None)
-    else:
-        store[_key(doc_class, str(rule.get("id", "")))] = {
-            "status": decision, "hash": rule_hash(rule), "note": note, "by": by,
-            "ts": __import__("mdmdoc.runstore", fromlist=["now_iso"]).now_iso()}
-    config.ensure_dirs()
-    _path().write_text(json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8")
+    with _LOCK:
+        store = load()
+        if decision == PENDING:
+            store.pop(_key(doc_class, str(rule.get("id", ""))), None)
+        else:
+            store[_key(doc_class, str(rule.get("id", "")))] = {
+                "status": decision, "hash": rule_hash(rule), "note": note, "by": by,
+                "ts": __import__("mdmdoc.runstore", fromlist=["now_iso"]).now_iso()}
+        config.ensure_dirs()
+        config.atomic_write_text(_path(),
+                                 json.dumps(store, indent=2, ensure_ascii=False))
     return store
 
 
