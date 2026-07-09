@@ -41,6 +41,24 @@ def _ctx(**kw) -> dict:
             **kw}
 
 
+def _field_confidence(prov: dict | None, engine_agree: bool | None) -> str:
+    """Roll the already-recorded signals into one 3-level chip:
+    'verified'   — deterministic source (ocr-regex/zone-probe/rule/precedent)
+                   or a model read CONFIRMED by the OCR regex crosscheck;
+    'agreed'     — dual mode saw both engines agree on the value;
+    'check'      — dual mode saw the engines DISAGREE (look here first);
+    'model-only' — a single-source model read, nothing corroborated it."""
+    src = (prov or {}).get("source") or ""
+    if src in ("ocr-regex", "zone-probe", "rule", "precedent", "vision-crop") \
+            or (prov or {}).get("confirmed"):
+        return "verified"
+    if engine_agree is True:
+        return "agreed"
+    if engine_agree is False:
+        return "check"
+    return "model-only" if src == "model" else ""
+
+
 def _doctor_safe() -> dict:
     try:
         return api_doctor()
@@ -87,6 +105,9 @@ def run_page(request: Request, run_id: str, flash: str = ""):
     except Exception:
         evidence = {}
     prov = pub.get("provenance") or {}
+    # dual-mode per-field agreement (engine_compare) feeds the confidence chip
+    eng_agree = {r.get("field"): r.get("agree")
+                 for r in (pub.get("engine_compare") or []) if isinstance(r, dict)}
     data_rows, seen_ev = [], set()
     if pub.get("fields") is not None:
         try:
@@ -101,7 +122,9 @@ def run_page(request: Request, run_id: str, flash: str = ""):
                 data_rows.append({"label": row_label, "value": value, "hint": hint,
                                   "fkey": fkey,
                                   "copy_value": _display_field(pub.get("fields") or {}, fkey),
-                                  "prov": prov.get(fkey), "ev": ev})
+                                  "prov": prov.get(fkey), "ev": ev,
+                                  "confidence": _field_confidence(
+                                      prov.get(fkey), eng_agree.get(fkey))})
         except Exception:
             data_rows = []
     for f in findings:

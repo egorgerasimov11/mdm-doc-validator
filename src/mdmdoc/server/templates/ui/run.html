@@ -165,6 +165,11 @@
           {{ r.prov.source }}{% if r.prov.page %} · p{{ r.prov.page }}{% endif %}{% if r.prov.confirmed %} ✓{% endif %}
         </span>
         {% endif %}
+        {% if r.confidence == 'verified' %}<span class="tag" title="deterministic source or model read confirmed by OCR regex">verified ✓</span>
+        {% elif r.confidence == 'agreed' %}<span class="tag" title="dual mode: both engines read the same value">agreed ✓</span>
+        {% elif r.confidence == 'check' %}<span class="tag" style="color:var(--danger,#c00)" title="dual mode: the engines DISAGREE — check this field first">check ⚠</span>
+        {% elif r.confidence == 'model-only' %}<span class="tag" title="single-source model read — nothing corroborated it yet">model-only</span>
+        {% endif %}
       </td>
       <td>
         {% if r.ev %}

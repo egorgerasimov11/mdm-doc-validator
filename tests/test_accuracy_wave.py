@@ -116,3 +116,100 @@ def test_ground_payment_instructions_guard():
     ext2 = Extraction(doc_class="bank", doc_type="payment_instructions")
     _ground_payment_instructions(ext2, raw2)
     assert ext2.doc_type == "payment_instructions"
+
+
+# --- Batch 2: holder recovery ------------------------------------------------
+def test_fast_prompt_byte_identical_without_focus(monkeypatch):
+    import mdmdoc.stage_b as sb
+    monkeypatch.setattr(sb, "_load_fewshot", lambda dc: [])
+    monkeypatch.setattr(sb.mc, "resolve", lambda role: "mdmdoc-extract")
+    raw = RawDoc(path="/x/d.pdf", sha256="1" * 64, ext=".pdf", doc_class="bank")
+    raw.raw_text = "some text"
+    assert sb.build_prompt(raw, "TEXT") == sb.build_prompt(raw, "TEXT", focus=None)
+    assert sb.build_prompt(raw, "TEXT") == sb.build_prompt(raw, "TEXT", focus=[])
+    # unknown reasons are ignored silently
+    assert sb.build_prompt(raw, "TEXT") == sb.build_prompt(raw, "TEXT",
+                                                           focus=["json-retry"])
+
+
+def test_focus_hint_lands_in_strong_prompt(monkeypatch):
+    import mdmdoc.stage_b as sb
+    monkeypatch.setattr(sb, "_load_fewshot", lambda dc: [])
+    monkeypatch.setattr(sb.mc, "resolve", lambda role: "mdmdoc-extract")
+    raw = RawDoc(path="/x/d.pdf", sha256="2" * 64, ext=".pdf", doc_class="bank")
+    raw.raw_text = "some text"
+    p = sb.build_prompt(raw, "TEXT_STRONG", focus=["bank-no-holder", "bank-no-bank-name"])
+    assert "PRIOR-PASS GAP: no account holder" in p
+    assert "PRIOR-PASS GAP: no bank name" in p
+    assert p.rstrip().rfind("FOCUS:") > p.rfind("Return JSON")
+
+
+def test_holder_labels_predicate():
+    from mdmdoc.stage_a import _holder_labels_present
+    assert _holder_labels_present("Account Holder: Acme GmbH")
+    assert _holder_labels_present("户名：湖南省医师协会")
+    assert _holder_labels_present("Kontoinhaber: ConSol GmbH")
+    assert not _holder_labels_present("IBAN DE89 3704 0044 0532 0130 00 BIC COBADEFF")
+
+
+# --- Batch 3: W-9 name zone apply rules ---------------------------------------
+def _w9_ext(l1="", l2=""):
+    e = Extraction(doc_class="w9", doc_type="w9")
+    e.fields = {"line1_name": l1, "line2_business_name": l2,
+                "tin_raw": "", "tin_type": ""}
+    return e
+
+
+def _w9_raw(z1="", z2=""):
+    r = RawDoc(path="/x/w9.pdf", sha256="3" * 64, ext=".pdf", doc_class="w9")
+    r.w9_probe = {"line1_name": z1, "line2_business_name": z2, "page": 0}
+    return r
+
+
+def test_name_zone_fills_empty():
+    from mdmdoc.stage_b import _apply_w9_zone_probe
+    e = _w9_ext()
+    _apply_w9_zone_probe(e, _w9_raw(z1="Catamorphic Co.", z2="LaunchDarkly"))
+    assert e.fields["line1_name"] == "Catamorphic Co."
+    assert e.fields["line2_business_name"] == "LaunchDarkly"
+    assert e.provenance["line1_name"]["source"] == "zone-probe"
+
+
+def test_name_zone_repairs_line_swap():
+    from mdmdoc.stage_b import _apply_w9_zone_probe
+    # the live campaign case: text tier put line2's DBA into line1
+    e = _w9_ext(l1="LaunchDarkly", l2="")
+    _apply_w9_zone_probe(e, _w9_raw(z1="Catamorphic Co.", z2="LaunchDarkly"))
+    assert e.fields["line1_name"] == "Catamorphic Co."
+    assert e.fields["line2_business_name"] == "LaunchDarkly"
+    assert any("repaired from the name-box crop" in w for w in e.warnings)
+
+
+def test_name_zone_disagreement_keeps_text():
+    from mdmdoc.stage_b import _apply_w9_zone_probe
+    e = _w9_ext(l1="Acme Industries Inc", l2="Acme DBA")
+    _apply_w9_zone_probe(e, _w9_raw(z1="Totally Different LLC", z2="Acme DBA"))
+    assert e.fields["line1_name"] == "Acme Industries Inc"   # text wins
+    assert any("kept the text value" in w for w in e.warnings)
+
+
+def test_name_zone_never_blanks_and_drops_captions():
+    from mdmdoc.stage_b import _apply_w9_zone_probe
+    e = _w9_ext(l1="Real Name Co", l2="Real DBA")
+    _apply_w9_zone_probe(e, _w9_raw(z1="Name of entity/individual",
+                                    z2="Business name/disregarded entity"))
+    assert e.fields["line1_name"] == "Real Name Co"
+    assert e.fields["line2_business_name"] == "Real DBA"
+    assert not any("zone" in str(p.get("source")) for p in e.provenance.values())
+
+
+# --- Batch 5: confidence chip ---------------------------------------------
+def test_field_confidence_mapping():
+    from mdmdoc.server.ui import _field_confidence
+    assert _field_confidence({"source": "ocr-regex"}, None) == "verified"
+    assert _field_confidence({"source": "zone-probe"}, None) == "verified"
+    assert _field_confidence({"source": "model", "confirmed": True}, None) == "verified"
+    assert _field_confidence({"source": "model"}, True) == "agreed"
+    assert _field_confidence({"source": "model"}, False) == "check"
+    assert _field_confidence({"source": "model"}, None) == "model-only"
+    assert _field_confidence(None, None) == ""

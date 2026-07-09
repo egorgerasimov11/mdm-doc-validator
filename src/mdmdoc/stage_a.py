@@ -43,6 +43,29 @@ VISION_TARGETED_PROMPT = (
     "routing/ABA/sort code, currency. Transcribe each one exactly, with its label. "
     "If a detail is truly absent, say ABSENT."
 )
+HOLDER_TARGETED_PROMPT = (
+    "This is a banking document. Find WHO OWNS the account — the account "
+    "holder / beneficiary / account name (usually a company, often with a legal "
+    "suffix like GmbH, S.A.S., Ltd, 株式会社). Check labels in any language "
+    "('account holder', 'beneficiary', 'a nombre de', 'titular', 'Kontoinhaber', "
+    "'intestato a', '口座名義', '户名'), the addressee block and the letterhead. "
+    "Also transcribe the BANK's name. Answer with labels, e.g. "
+    "'Account holder: ...' and 'Bank: ...'. If truly absent, say ABSENT."
+)
+# holder-label tokens — when NONE of these appear in the recovered text, the
+# holder is invisible to the text path and only a vision re-read can find it
+_HOLDER_LABELS_RE = None  # compiled lazily below
+
+
+def _holder_labels_present(text: str) -> bool:
+    global _HOLDER_LABELS_RE
+    if _HOLDER_LABELS_RE is None:
+        import re as _re
+        _HOLDER_LABELS_RE = _re.compile(
+            r"account\s*holder|beneficiary|account\s*name|in\s+the\s+name\s+of|"
+            r"a\s+nombre\s+de|titular|kontoinhaber|intestat|口座名義|户名|戶名",
+            _re.IGNORECASE)
+    return bool(_HOLDER_LABELS_RE.search(text or ""))
 SIGNATURE_PROMPT = (
     "Inspect this document page for a HANDWRITTEN signature (ink strokes) or an ink "
     "stamp/seal. IMPORTANT: a typed or printed name, title or contact block is NOT a "
@@ -63,6 +86,10 @@ SIGNATURE_PROMPT = (
 # Relative coordinates of the IRS W-9 (Rev. 2018-2024) layout:
 W9_CLASS_ZONE = (0.03, 0.16, 0.82, 0.34)   # x0, y0, x1, y1 fractions
 W9_TIN_ZONE = (0.52, 0.40, 1.00, 0.60)
+# Line 1 + Line 2 name boxes sit directly under the form header on both
+# revisions. Positional read kills the line1<->line2 swap by construction
+# (real case: line1 came back with line2's DBA and the owner name was lost).
+W9_NAME_ZONE = (0.03, 0.06, 0.97, 0.18)
 W9_CLASS_PROMPT = (
     "This is the 'federal tax classification' section of IRS Form W-9 with seven "
     "checkboxes: Individual/sole proprietor, C corporation, S corporation, Partnership, "
@@ -78,6 +105,16 @@ W9_TIN_PROMPT = (
     "with 9 digits. Read the digits box by box. Return strict JSON: "
     '{"tin_type": "SSN or EIN or none", "digits": "<the 9 digits in order, no separators>", '
     '"evidence": "<which boxes are filled>"}'
+)
+W9_NAME_PROMPT = (
+    "This crop shows the TOP of IRS Form W-9: box 1 'Name of entity/individual' "
+    "and box 2 'Business name/disregarded entity name, if different from above'. "
+    "Read ONLY the handwritten/typed VALUES the taxpayer entered — never the "
+    "printed captions. A box may legitimately be empty. Do NOT copy box 2's "
+    "value into box 1. Return strict JSON: "
+    '{"line1_name": "<value in box 1, or empty>", '
+    '"line2_business_name": "<value in box 2, or empty>", '
+    '"evidence": "<which boxes hold entered values>"}'
 )
 
 
@@ -338,27 +375,76 @@ def _signature_page(path: Path, raw: RawDoc) -> int:
     return 0
 
 
+def _signature_band(path: Path, idx: int, doc_class: str) -> tuple | None:
+    """Zone (x0,y0,x1,y1 fractions) where the signature most likely sits.
+    Text-layer pages: anchored on the y-position of the _SIG_HINTS line (a
+    cursive mark is a sub-1%-of-page target on a dense letter — the same
+    failure mode the W-9 zones fixed). Scans: bottom third for letters,
+    the Part II certification region for W-9s."""
+    try:
+        doc = fitz.open(path)
+        page = doc[idx]
+        h = page.rect.height or 1
+        y_frac = None
+        for w in page.get_text("words"):
+            if _SIG_HINTS.search(w[4] or ""):
+                y_frac = w[1] / h    # top of the hint word
+        doc.close()
+        if y_frac is not None:
+            return (0.0, max(0.0, y_frac - 0.05), 1.0, min(1.0, y_frac + 0.28))
+    except Exception:
+        pass
+    return (0.0, 0.50, 1.0, 0.85) if doc_class == "w9" else (0.0, 0.60, 1.0, 1.0)
+
+
 def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
     """Vision check for a real (wet) signature/stamp. Signatures are image
     overlays — invisible to the text layer — so this runs for text-layer PDFs
-    too. Called while VISION is still resident (no extra model swap)."""
+    too. Called while VISION is still resident (no extra model swap).
+
+    Band-first: probe a signature-band CROP, and only when the band shows
+    neither signature nor stamp re-probe the full page (never-worse: both live
+    misses were false negatives, so band-first can only add positives)."""
     try:
         idx = 0
+        png = band_png = None
         if path.suffix.lower() == ".pdf":
-            doc = fitz.open(path)
             idx = _signature_page(path, raw)
-            png = _render_page(doc, idx, render_dir, config.VISION_DPI,
-                               raw.rotations.get(idx, 0), False, "sig")
-            doc.close()
+            band = _signature_band(path, idx, raw.doc_class)
+            band_png = _render_zone(path, idx, band, render_dir, "sig",
+                                    raw.rotations.get(idx, 0))
+            if not band_png:
+                doc = fitz.open(path)
+                png = _render_page(doc, idx, render_dir, config.VISION_DPI,
+                                   raw.rotations.get(idx, 0), False, "sig")
+                doc.close()
         else:
             png = raw.images[0] if raw.images else None
-        if not png:
-            return
-        obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [png])
+        obj = None
+        if band_png:
+            obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [band_png])
+            band_neg = not (isinstance(obj, dict)
+                            and (obj.get("handwritten_signature") or obj.get("stamp")))
+            if band_neg:
+                # fall back to the whole page (today's behavior) — keep the
+                # positive read if either fires; overwrite sig.png so the
+                # evidence thumbnail shows what was decisive
+                doc = fitz.open(path)
+                png = _render_page(doc, idx, render_dir, config.VISION_DPI,
+                                   raw.rotations.get(idx, 0), False, "sig")
+                doc.close()
+                obj2, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [png]) \
+                    if png else (None, False)
+                if isinstance(obj2, dict) and (obj2.get("handwritten_signature")
+                                               or obj2.get("stamp")):
+                    obj = obj2
+        elif png:
+            obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [png])
         if isinstance(obj, dict):
             raw.signature_probe = {
                 "handwritten_signature": bool(obj.get("handwritten_signature")),
                 "stamp": bool(obj.get("stamp")),
+                "date_near_signature": str(obj.get("date_near_signature") or "")[:40],
                 "evidence": str(obj.get("evidence") or "")[:200],
                 "page": idx,
             }
@@ -420,6 +506,17 @@ def w9_zone_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
                 probe["tin_type"] = ttype
                 probe["tin_digits"] = digits          # FULL — memory only
                 probe["tin_evidence"] = str(obj.get("evidence") or "")[:160]
+    crop = _render_zone(path, page, W9_NAME_ZONE, render_dir, "z_name", rot) \
+        if path.suffix.lower() == ".pdf" else None
+    if crop:
+        obj, _ = mc.generate_json_vision(W9_NAME_PROMPT, [crop])
+        if isinstance(obj, dict):
+            l1 = str(obj.get("line1_name") or "").strip()
+            l2 = str(obj.get("line2_business_name") or "").strip()
+            if l1 or l2:
+                probe["line1_name"] = l1
+                probe["line2_business_name"] = l2
+                probe["name_evidence"] = str(obj.get("evidence") or "")[:160]
     if probe:
         probe["page"] = page
     raw.w9_probe = probe
@@ -501,6 +598,19 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             raw.vision_text = (raw.vision_text + "\n\n[targeted search]\n" + vt2).strip()
             raw.regex_candidates = ocr.regex_fields(_merged(raw))
             raw.warnings.append("targeted vision pass used (no IDs found on first read)")
+    # holder hunt: IDs were found but the text carries NO holder-label tokens —
+    # the account OWNER is invisible to the text path (weakest-recovery field);
+    # one extra vision question while the model is resident. The reply flows
+    # through raw text like any read (never blanks anything, leak-gated as
+    # ordinary vision text).
+    elif (doc_class == "bank" and use_vision and raw.images
+            and not _holder_labels_present(_merged(raw))):
+        vt3 = mc.vision("VISION", HOLDER_TARGETED_PROMPT, raw.images,
+                        options={"temperature": 0, "seed": 7})
+        if not vt3.startswith("[vision"):
+            raw.vision_text = (raw.vision_text + "\n\n[holder search]\n" + vt3).strip()
+            raw.regex_candidates = ocr.regex_fields(_merged(raw))
+            raw.warnings.append("targeted holder pass used (no holder labels in text)")
     # signature probe — ALWAYS for bank/w9 (quality first), even for text-layer
     # PDFs (a wet signature is pixels, not text). Skipped for hard-reject types.
     if (use_vision and not raw.editable and not raw.locked

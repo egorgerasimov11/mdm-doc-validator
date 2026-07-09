@@ -42,7 +42,33 @@ def _load_fewshot(doc_class: str) -> list[dict]:
         return []
 
 
-def build_prompt(raw: RawDoc, role: str = "TEXT") -> str:
+# Strong-tier FOCUS suffixes keyed on escalation reasons: the retry must know
+# WHAT the fast pass missed instead of re-reading with the identical prompt.
+# Strong-tier only (build_prompt(..., focus=...)) — the fast prompt stays
+# byte-identical, so the trainable exemplar format never changes.
+FOCUS_HINTS = {
+    "bank-no-holder": (
+        "PRIOR-PASS GAP: no account holder found. Search again for the "
+        "beneficiary / account OWNER: 'account holder', 'beneficiary', "
+        "'account name', 'in the name of', 'a nombre de', 'titular', "
+        "'Kontoinhaber', 'intestato a', '口座名義', the addressee/company block "
+        "above the bank details, the letterhead company name. The holder is "
+        "usually a company, often with a legal suffix (GmbH, S.A.S., Ltd)."),
+    "bank-no-bank-name": (
+        "PRIOR-PASS GAP: no bank name found. Look at the letterhead, logo "
+        "caption, footer, stamp and the 'Bank:'/'开户银行' label."),
+    "us-bank-no-routing": (
+        "PRIOR-PASS GAP: US account without a routing number. Look for a "
+        "9-digit ABA / routing number near 'ABA', 'routing', 'ACH' or 'wire' "
+        "labels — there may be separate ACH and wire routing numbers."),
+    "w9-no-line1": (
+        "PRIOR-PASS GAP: Line 1 (legal name) is empty. Line 1 is the FIRST "
+        "name box at the top of the W-9 — do not confuse it with Line 2 "
+        "(business/DBA name); both may be filled with different names."),
+}
+
+
+def build_prompt(raw: RawDoc, role: str = "TEXT", focus: list[str] | None = None) -> str:
     doc_class = raw.doc_class
     keys = BANK_KEYS if doc_class == "bank" else W9_KEYS
     types = BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES
@@ -88,12 +114,16 @@ def build_prompt(raw: RawDoc, role: str = "TEXT") -> str:
            "mention invoices; a real invoice carries its own invoice number, date and "
            "amount due." if doc_class == "bank" else "")
     )
+    hints = [FOCUS_HINTS[r] for r in (focus or []) if r in FOCUS_HINTS]
+    if hints:
+        parts.append("FOCUS:\n" + "\n".join(hints))
     return "\n\n".join(parts)
 
 
-def _run_model(raw: RawDoc, role: str) -> tuple[dict | None, bool, str]:
+def _run_model(raw: RawDoc, role: str,
+               focus: list[str] | None = None) -> tuple[dict | None, bool, str]:
     """One tier run -> (fields-bearing obj or None, json_first_try, model_id)."""
-    obj, first_try = mc.generate_json(role, build_prompt(raw, role),
+    obj, first_try = mc.generate_json(role, build_prompt(raw, role, focus=focus),
                                       system=_load_system(raw.doc_class),
                                       options={"num_ctx": 16384, "temperature": 0, "seed": 7})
     mc.unload(role)
@@ -483,6 +513,45 @@ def _apply_w9_zone_probe(ext: Extraction, raw: RawDoc) -> None:
         ext.fields["tin_raw"] = formatted
         ext.fields["tin_type"] = ttype
         ext.provenance["tin_raw"] = {"source": "zone-probe", "page": probe_page}
+    # name boxes (positional read of Line 1 / Line 2). Rules, in order:
+    # fill-empty; swap-repair (text line1 == zone line2 while zone line1 differs);
+    # any other disagreement keeps the TEXT value (names are not checkboxes) with
+    # a warning; a zone value NEVER blanks a non-empty field; printed-caption
+    # echoes are dropped.
+    _CAPTIONS = ("as shown on", "income tax return", "business name",
+                 "disregarded entity", "name of entity")
+
+    def _zone_name(key: str) -> str:
+        v = str(probe.get(key) or "").strip()
+        return "" if any(c in v.lower() for c in _CAPTIONS) else v
+
+    z1, z2 = _zone_name("line1_name"), _zone_name("line2_business_name")
+    if z1 or z2:
+        from .fields import _norm_name
+        t1 = str(ext.fields.get("line1_name") or "").strip()
+        t2 = str(ext.fields.get("line2_business_name") or "").strip()
+        if (z1 and t1 and _norm_name(t1) == _norm_name(z2 or "")
+                and _norm_name(t1) != _norm_name(z1)):
+            # the text tier put Line 2's value into Line 1 — positional repair
+            ext.warnings.append(
+                "line1/line2: text model put the business name (Line 2) into "
+                "Line 1 — repaired from the name-box crop; verify")
+            ext.fields["line1_name"] = z1
+            ext.fields["line2_business_name"] = z2 or t1
+            ext.provenance["line1_name"] = {"source": "zone-probe", "page": probe_page}
+            ext.provenance["line2_business_name"] = {"source": "zone-probe",
+                                                     "page": probe_page}
+        else:
+            if z1 and not t1:
+                ext.fields["line1_name"] = z1
+                ext.provenance["line1_name"] = {"source": "zone-probe", "page": probe_page}
+            elif z1 and t1 and _norm_name(z1) != _norm_name(t1):
+                ext.warnings.append("line1_name: name-box crop disagrees with the "
+                                    "text read — kept the text value; verify")
+            if z2 and not t2:
+                ext.fields["line2_business_name"] = z2
+                ext.provenance["line2_business_name"] = {"source": "zone-probe",
+                                                         "page": probe_page}
 
 
 def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
@@ -684,7 +753,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     # --- escalation to the strong tier (quality first) -------------------------
     reasons = [] if no_llm else escalation_reasons(ext_res, raw, quality)
     if reasons and raw.raw_text.strip() and mc.strong_distinct():
-        strong_obj, strong_ok, strong_model = _run_model(raw, "TEXT_STRONG")
+        strong_obj, strong_ok, strong_model = _run_model(raw, "TEXT_STRONG",
+                                                         focus=reasons)
         ext_res.strong_json_valid = strong_ok and strong_obj is not None
         if strong_obj is not None:
             strong_fields = _fields_from(strong_obj, keys)
