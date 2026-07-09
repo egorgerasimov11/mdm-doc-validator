@@ -128,6 +128,24 @@ def abap_guard_markers(abap_root: Path = ABAP_ROOT) -> set[str]:
     return set(re.findall(r"\[GUARD:([a-z0-9_]+)\]", text))
 
 
+def _golden_freshness(py_root: Path = PY_ROOT, abap_root: Path = ABAP_ROOT) -> str | None:
+    """The ABAP golden data class must embed the current JSON corpus hash.
+    Skipped when either side is absent (golden is optional tooling)."""
+    import hashlib
+    cases = py_root / "tools" / "golden" / "golden_cases.json"
+    gen = abap_root / "src" / "zcl_mdmdoc_golden_data.clas.abap"
+    if not cases.exists() or not gen.exists():
+        return None
+    want = hashlib.sha256(cases.read_bytes()).hexdigest()[:16]
+    m = re.search(r"GOLDEN-HASH\s+([0-9a-f]{16})", gen.read_text())
+    if not m:
+        return "golden: zcl_mdmdoc_golden_data has no GOLDEN-HASH header"
+    if m.group(1) != want:
+        return (f"golden: corpus hash {want} != ABAP GOLDEN-HASH {m.group(1)} — "
+                "re-run tools/golden/gen_abap_golden.py")
+    return None
+
+
 def submodule_staleness(py_root: Path = PY_ROOT,
                         abap_root: Path = ABAP_ROOT) -> str | None:
     """The abap/ submodule pin must equal the live ABAP checkout's HEAD —
@@ -264,6 +282,13 @@ def run() -> int:
     stale = submodule_staleness()
     if stale:
         problems.append(stale)
+
+    # 7. golden parity corpus freshness — the ABAP generated data class must carry
+    # the CURRENT corpus hash (else someone edited golden_cases.json without
+    # regenerating the ABAP twin, so the two run different cases)
+    gp = _golden_freshness()
+    if gp:
+        problems.append(gp)
 
     # report
     if notes:
