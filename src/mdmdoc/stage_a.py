@@ -89,7 +89,9 @@ W9_TIN_ZONE = (0.52, 0.40, 1.00, 0.60)
 # Line 1 + Line 2 name boxes sit directly under the form header on both
 # revisions. Positional read kills the line1<->line2 swap by construction
 # (real case: line1 came back with line2's DBA and the owner name was lost).
-W9_NAME_ZONE = (0.03, 0.06, 0.97, 0.18)
+# y-range probed live on Rev 3-2024: 0.06-0.18 cuts the boxes off; 0.09-0.22
+# reads both values (2018-rev boxes at ~0.10-0.16 stay inside too).
+W9_NAME_ZONE = (0.03, 0.09, 0.97, 0.22)
 W9_CLASS_PROMPT = (
     "This is the 'federal tax classification' section of IRS Form W-9 with seven "
     "checkboxes: Individual/sole proprietor, C corporation, S corporation, Partnership, "

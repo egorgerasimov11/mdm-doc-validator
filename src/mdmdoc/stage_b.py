@@ -438,13 +438,15 @@ def _ground_payment_instructions(ext: Extraction, raw: RawDoc) -> None:
     from .fields import payment_instruction_marks
     if payment_instruction_marks(raw.raw_text):
         return
-    new_type = raw.type_hint or "other"
-    if new_type == "payment_instructions":
-        return
+    # ALWAYS degrade to 'other' — never to the type hint. A weak hint can be
+    # STRONGER-accepting than the ungrounded claim (live case: 开户银行 on the
+    # organiser's remittance block hinted bank_letter, which would have turned
+    # an exhibition notice into an auto-ACCEPTed bank confirmation). 'other'
+    # routes to the missing-holder/no-bank-ids review rules — conservative.
     ext.warnings.append(
         "model classified payment_instructions but the document carries no "
-        f"payment-instruction markers — classified as {new_type}")
-    ext.doc_type = new_type
+        "payment-instruction markers — classified as other")
+    ext.doc_type = "other"
     ext.provenance["doc_type"] = {"source": "rule", "page": None}
 
 

@@ -116,6 +116,14 @@ def test_ground_payment_instructions_guard():
     ext2 = Extraction(doc_class="bank", doc_type="payment_instructions")
     _ground_payment_instructions(ext2, raw2)
     assert ext2.doc_type == "payment_instructions"
+    # a weak type hint must NOT rescue an ungrounded claim into a
+    # stronger-accepting type (live case: 开户银行 hinted bank_letter)
+    raw3 = RawDoc(path="/x/n2.pdf", sha256="9" * 64, ext=".pdf", doc_class="bank")
+    raw3.raw_text = "展览通知 汇款账户 开户银行：中国工商银行"
+    raw3.type_hint = "bank_letter"
+    ext3 = Extraction(doc_class="bank", doc_type="payment_instructions")
+    _ground_payment_instructions(ext3, raw3)
+    assert ext3.doc_type == "other"
 
 
 # --- Batch 2: holder recovery ------------------------------------------------
