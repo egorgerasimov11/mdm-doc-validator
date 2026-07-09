@@ -73,7 +73,9 @@ SIGNATURE_PROMPT = (
     "signature even if you cannot prove it is original ink — then say "
     "'signature-like mark present; wet/original cannot be confirmed from a scan' in "
     "evidence. A DocuSign/Adobe-Sign box with a typed name is an ELECTRONIC signature: "
-    "handwritten_signature=false, but mention it in evidence. Return strict JSON: "
+    "handwritten_signature=false, but mention it in evidence. A REGULATOR watermark or "
+    "margin stamp (e.g. 'VIGILADO Superintendencia Financiera') is NOT a signature "
+    "stamp: stamp=false, mention it in evidence. Return strict JSON: "
     '{"handwritten_signature": true/false, "stamp": true/false, '
     '"date_near_signature": "<handwritten/printed date next to the signature, or empty>", '
     '"evidence": "<short phrase describing what you see in the signature area>"}'

@@ -564,8 +564,17 @@ def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
         return
     from .privacy import scrub_text
     probe_page = probe.get("page", 0) + 1 if isinstance(probe.get("page"), int) else None
+    # a stamp whose evidence is a REGULATOR watermark (VIGILADO / Superintendencia
+    # margin plate on Colombian letters) is compliance noise, not a signature —
+    # same noise list that guards bank_name (deterministic backstop; the prompt
+    # also says so, but the model must not be trusted alone here)
+    ev_low = str(probe.get("evidence") or "").lower()
+    stamp_ok = bool(probe.get("stamp")) and not any(n in ev_low for n in _BANKNAME_NOISE)
+    if probe.get("stamp") and not stamp_ok:
+        ext.warnings.append("signature probe: the 'stamp' evidence is a regulator "
+                            "watermark — not counted as a signature")
     visual = bool(probe.get("handwritten_signature")) or (
-        ext.doc_class == "bank" and bool(probe.get("stamp")))
+        ext.doc_class == "bank" and stamp_ok)
     model_said = ext.fields.get("signed")
     model_said = model_said if isinstance(model_said, bool) else \
         str(model_said).lower() in ("true", "yes")
