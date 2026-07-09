@@ -208,10 +208,18 @@ def run() -> int:
     problems: list[str] = []
     notes: list[str] = []
 
-    if not ABAP_ROOT.exists():
-        print(f"↷ ABAP repo not found at {ABAP_ROOT} — parity check skipped "
-              "(set MDMDOC_ABAP_HOME to enable).")
-        return 0
+    if not ABAP_ROOT.exists() or not (ABAP_ROOT / "src").exists():
+        # M2: an absent ABAP checkout must NOT be vacuously green — the gate's
+        # whole job is to catch drift, and 'skipped' used to read as 'in sync'.
+        if os.environ.get("MDMDOC_PARITY_OPTIONAL") == "1":
+            print(f"↷ ABAP repo not found at {ABAP_ROOT} — SKIPPED by "
+                  "MDMDOC_PARITY_OPTIONAL=1 (parity NOT verified).")
+            return 0
+        print(f"✗ ABAP repo not found at {ABAP_ROOT} — parity CANNOT be verified.\n"
+              "  Fix: clone the sibling ~/Projects/mdm-doc-validator-abap, or run\n"
+              "  `git submodule update --init abap`, or set MDMDOC_ABAP_HOME, or\n"
+              "  export MDMDOC_PARITY_OPTIONAL=1 to skip consciously.")
+        return 1
 
     # 1. rule DATA parity (semantic)
     for cls in DOC_CLASSES:
