@@ -128,6 +128,17 @@ def test_but000_central_block_warns(tmp_path):
     assert any(f.rule_id == "SAP-032" for f in findings)
 
 
+def test_but000_with_trailing_bank_columns_not_but0bk(tmp_path):
+    # real BUT000 SE16N dumps carry a trailing Bank Country/Bank Key pair — that
+    # must NOT make them read as BUT0BK (regression from the real export)
+    headers = ["Business Partner", "Partner Cat.", "Name 1", "Full Name",
+               "Central Block", "Natural Person", "Bank Country/Region", "Bank Key"]
+    p = _xlsx(tmp_path, "g.xlsx", headers,
+              [["29653", "2", "ACME LLC", "ACME LLC", "", "", "", ""]])
+    kind, _ = sap_tables.load(p)
+    assert kind == "BUT000"
+
+
 def test_unknown_sheet_raises(tmp_path):
     p = _xlsx(tmp_path, "x.xlsx", ["Foo", "Bar", "Baz"], [["1", "2", "3"]])
     with pytest.raises(sap_tables.SapTableError):

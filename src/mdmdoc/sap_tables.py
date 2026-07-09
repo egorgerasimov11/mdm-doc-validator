@@ -68,8 +68,13 @@ _alias("XDELE", "Archiving Flag")
 _alias("NATPERS", "Natural Person")
 _alias("LEGAL_ENTITY", "Legal entity")
 
-_BUT0BK_MARKERS = {"BANKL", "BANKN", "BKVID"}
-_BUT000_MARKERS = {"NAME_ORG1", "TYPE", "BU_FULLNAME"}
+# BUT0BK is a per-account table → it has a Bank Details ID / Bank account column
+# that BUT000 never carries. BUT000 (BP general data) carries name+category and,
+# in a wide SE16N dump, ALSO a trailing Bank Country/Bank Key pair (BANKS/BANKL)
+# — so BANKL alone must NOT trigger BUT0BK. Detect on the columns that are unique
+# to each table.
+_BUT0BK_MARKERS = {"BANKN", "BKVID"}
+_BUT000_MARKERS = {"NAME_ORG1", "BU_FULLNAME"}
 
 
 class SapTableError(ValueError):
@@ -116,9 +121,17 @@ def load(path) -> tuple[str, list[dict]]:
         wb.close()
         raise SapTableError("not a recognized BUT0BK/BUT000 export (no known headers)")
     cols = set(col_map)
-    kind = ("BUT0BK" if _BUT0BK_MARKERS & cols
-            else "BUT000" if _BUT000_MARKERS & cols else "")
-    if not kind:
+    has_bk = bool(_BUT0BK_MARKERS & cols)          # bank-details-specific columns
+    has_bp = bool(_BUT000_MARKERS & cols) and "TYPE" in cols   # general-data-specific
+    if has_bk and not has_bp:
+        kind = "BUT0BK"
+    elif has_bp and not has_bk:
+        kind = "BUT000"
+    elif has_bk:                                    # both present → bank-details wins
+        kind = "BUT0BK"
+    elif has_bp:
+        kind = "BUT000"
+    else:
         wb.close()
         raise SapTableError("known headers found but neither BUT0BK nor BUT000 markers")
     rows: list[dict] = []
