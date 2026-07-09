@@ -18,7 +18,7 @@ COPY . .
 RUN uv sync --frozen --no-dev
 
 RUN useradd -m mdmdoc \
-    && mkdir -p /app/runs /app/inbox /app/dataset /app/eval /app/prompts/fewshot \
+    && mkdir -p /app/runs /app/inbox /app/dataset /app/eval /app/prompts/fewshot /app/models \
     && chown -R mdmdoc:mdmdoc /app
 USER mdmdoc
 

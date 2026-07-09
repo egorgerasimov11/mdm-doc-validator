@@ -51,6 +51,10 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 ## Coordination requests → rules-editor/ABAP session (2026-07-07, audit milestone)
 1. ~~US-IBAN port reminder~~ — **closed 2026-07-09**: applied by the audit session
    (ABAP tree was clean and the session inactive for 3 days, per the agreed rule).
+4. **add_cr_note (Data Owner / approver note) — NEW handoff 2026-07-09**: full spec in
+   `docs/SAP_READINESS.md` §7 (exact signature, graceful-fallback behavior mirroring the
+   GOS attachment template, candidate mechanisms all marked investigate-on-system).
+   Implementation is on-system ABAP work; nothing in either repo asserts a note API exists.
 2. **`rules_io.save_rules` must preserve UNKNOWN yaml keys per rule on any round-trip**
    (incl. the Approvals panel "Correct" path). The audit milestone adds per-rule
    provenance metadata `tier: corp|experimental|learned` and `source: skill|policy|operator`

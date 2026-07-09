@@ -13,7 +13,7 @@ manually, pre-commit, or in CI — non-zero exit = drift).
 | Artifact | Mechanism |
 |---|---|
 | Rule DATA (`rules/banking.yaml`, `rules/w9.yaml`) | Single source of truth is THIS repo. The panel's `/rules/regenerate` (or `tools/gen_rules_abap.py`) copies the YAML into the ABAP repo and regenerates `ZCL_MDMDOC_RULES_DATA`. DATA only — never logic. |
-| Rule metadata (`tier:`, `source:`) | Carried with the YAML; `gen_rules_abap.py` treats unknown keys as additive/optional (never a failure). |
+| Rule metadata (`tier:`, `source:`) — **planned**, not yet in the YAML | Will be carried with the YAML once the governance decisions land (PARITY.md coordination requests 2-3); `gen_rules_abap.py` must treat unknown keys as additive/optional (never a failure). |
 
 ## What is HAND-PORTED (with receipts the checker greps for)
 

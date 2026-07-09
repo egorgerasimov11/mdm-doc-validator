@@ -1,0 +1,182 @@
+# =============================================================================
+# compose.full.yaml — SELF-CONTAINED corporate deployment of mdmdoc
+# (FULL mode: operator console + teach loop + local Ollama, zero egress)
+#
+#   docker compose -f btp/compose.full.yaml up -d
+#
+# Differs from the api-only BTP image on purpose:
+#   * MDMDOC_MODE=full → the web panel (/ui, /ui/rules/approve, /ui/training,
+#     review/label/teach routes) is served by this container. The image's
+#     default CMD appends --api-only, so we override both the env and the CMD.
+#   * An Ollama service runs NEXT TO the validator on the same private compose
+#     network. Nothing leaves the host: models are provisioned offline via
+#     scripts/bundle-models.sh (see docs/CORP_DEPLOY.md).
+#
+# Secrets: MDMDOC_API_TOKEN comes from a .env file next to this compose file
+# (same directory), never from the image or this file. Example .env:
+#   MDMDOC_API_TOKEN=<long-random-token>
+# =============================================================================
+
+name: mdmdoc   # fixed project name → predictable container/volume prefixes
+
+services:
+
+  validator:
+    # Build from the repo's existing api-only Dockerfile; FULL mode is turned
+    # on purely via env + command below (the image itself is mode-agnostic).
+    # The build context MUST be the repo root — btp/Dockerfile copies
+    # pyproject.toml/uv.lock and the whole tree from there.
+    build:
+      context: ..
+      dockerfile: btp/Dockerfile
+    # Air-gapped alternative: build on a connected host, `docker save`/`load`,
+    # then comment out `build:` and use the pre-loaded image instead:
+    # image: registry.corp.example.com/mdm/mdmdoc:latest   # <-- placeholder
+    restart: unless-stopped
+
+    # Image CMD is `mdmdoc serve ... --api-only`; drop the flag for FULL mode
+    # (operator console + teach router + UI static files + Host-header check).
+    command: ["mdmdoc", "serve", "--host", "0.0.0.0", "--port", "8080"]
+
+    environment:
+      # /app holds rules/, prompts/, templates/ baked into the image — this is
+      # already the image default, repeated here so the contract is explicit.
+      MDMDOC_HOME: /app
+
+      # FULL mode (overrides the image's MDMDOC_MODE=api-only ENV). Enables the
+      # web panel and the teach/train/eval routes.
+      MDMDOC_MODE: full
+
+      # Zero egress: the external-evidence layer (FDIC/GLEIF/SEC EDGAR lookups)
+      # stays OFF. This is the master flag for the ONLY internet-touching code
+      # path in the app. See docs/CORP_DEPLOY.md "Zero egress" for the one
+      # exception (the operator's explicit "Verify externally" click) and how
+      # the network layer should back this up.
+      MDMDOC_WEB_EVIDENCE: "0"
+
+      # In FULL mode the Host-header allowlist is ACTIVE (DNS-rebinding
+      # hardening): every request whose Host is not 127.0.0.1/localhost or
+      # listed here gets 403 forbidden_host. Put the exact hostname the corp
+      # reverse proxy forwards here, or the panel is unreachable.
+      MDMDOC_ALLOWED_HOSTS: "mdmdoc.corp.example.com"   # <-- REPLACE with the corp host
+
+      # Bearer token required on all /api/v1 routes (constant-time compare).
+      # Second factor behind the corp SSO proxy — never run without it when
+      # the port is reachable beyond localhost. Sourced from .env; the
+      # `:?` form makes compose fail fast if it is unset.
+      MDMDOC_API_TOKEN: ${MDMDOC_API_TOKEN:?set MDMDOC_API_TOKEN in .env}
+
+      # Point the model client at the sibling Ollama service. Setting this env
+      # short-circuits ALL fallback probing (no SSH auto-tunnel, no localhost
+      # probe) — the container never shells out to ssh.
+      MDMDOC_OLLAMA_HOST: http://ollama:11434
+
+      # Optional hardening: FULL mode defaults bank identifiers to "full"
+      # display (operator verifies digits). Uncomment to mask account/IBAN/
+      # routing in the panel too. TIN/SSN/EIN is masked under EVERY policy —
+      # no env var can reveal it.
+      # MDMDOC_BANK_VALUES: masked
+
+      # Human rule-approval gate. Default is already ON ("1"); listed here as
+      # the documented off-switch (set "0" — no redeploy needed, just restart).
+      # MDMDOC_RULE_GATE: "1"
+
+    ports:
+      # The ONLY published port in this deployment. Bound to loopback because
+      # the corp reverse proxy / SSO terminator is expected on the same host;
+      # widen to "8766:8080" only if the proxy is remote — and then only on a
+      # firewalled interface. 8766 mirrors the app's native default port.
+      - "127.0.0.1:8766:8080"
+
+    volumes:
+      # Every mutable path gets its own named volume, mounted INSIDE /app —
+      # NEVER mount anything over /app itself: /app carries the shipped
+      # rules/, prompts/, templates/ and mounting over it would blank them
+      # (btp/Dockerfile:25-26 warning).
+      - mdmdoc-runs:/app/runs               # masked run artifacts (erasure unit)
+      - mdmdoc-inbox:/app/inbox             # raw uploaded docs — SENSITIVE (erasure unit)
+      - mdmdoc-dataset:/app/dataset         # labels.jsonl + mlx-lora export (teach loop)
+      - mdmdoc-eval:/app/eval               # eval history.jsonl + report.md
+      - mdmdoc-modelfiles:/app/models       # Modelfile.mdmdoc-extract* + adoption.json (adoption gate)
+      # prompts/fewshot is rebuilt by the teach loop → must persist. The image
+      # ships seed exemplars in this directory; Docker copies them into the
+      # empty named volume on first start, then the volume is authoritative.
+      - mdmdoc-fewshot:/app/prompts/fewshot
+      # rules/approvals.json = the human Approve/Reject store (write choke
+      # point rule_approvals.py). It lives inside the shipped rules/ dir, so a
+      # whole-dir volume would shadow banking.yaml/w9.yaml updates — instead
+      # bind-mount just the file. IT MUST EXIST ON THE HOST FIRST:
+      #   mkdir -p state && echo '{}' > state/approvals.json
+      # (otherwise Docker creates a directory of that name and the panel
+      # cannot save decisions). Must be writable by the container user
+      # (`useradd mdmdoc` in the image; on Linux hosts chown to that uid).
+      - ./state/approvals.json:/app/rules/approvals.json
+
+    depends_on:
+      - ollama   # start order only; the app re-probes the model host per run
+
+    networks:
+      - internal
+
+  ollama:
+    # Official image — same one referenced by the commented Kyma sidecar block
+    # (btp/kyma/deployment.yaml). Pin a digest/tag in corp registries.
+    image: ollama/ollama:latest
+    restart: unless-stopped
+
+    # NO `ports:` section — this is deliberate. The model API (:11434) is
+    # reachable ONLY by the validator over the private compose network. The
+    # models are provisioned offline (scripts/bundle-models.sh import), so
+    # this container never needs registry access either.
+
+    volumes:
+      # Ollama's model store. bundle-models.sh untars the offline model bundle
+      # into this volume (blobs + manifests for qwen2.5vl:7b, qwen3:4b,
+      # qwen3:14b, nomic-embed-text) and then builds mdmdoc-extract.
+      - mdmdoc-ollama:/root/.ollama
+      # Read-only view of the validator's Modelfiles. The app image ships NO
+      # `ollama` CLI binary, so `ollama create mdmdoc-extract -f ...` is run
+      # from THIS container against the shared Modelfile:
+      #   docker compose -f btp/compose.full.yaml exec ollama \
+      #     ollama create mdmdoc-extract -f /mdmdoc-models/Modelfile.mdmdoc-extract
+      # (bundle-models.sh import does exactly this.)
+      - mdmdoc-modelfiles:/mdmdoc-models:ro
+
+    environment:
+      # The app calls every model with keep_alive=0 (evicted after each
+      # stage), so a single loaded model at a time keeps RAM bounded — same
+      # posture as the reference host. qwen2.5vl:7b + qwen3:4b want ~12-16 GiB;
+      # qwen3:14b (escalation tier) more. CPU-only inference is 5-10x slower.
+      OLLAMA_MAX_LOADED_MODELS: "1"
+
+    networks:
+      - internal
+
+networks:
+  # One private bridge network defined by this file — nothing `external:`.
+  # NOTE on `internal: true`: it would also cut the validator's PUBLISHED port
+  # (no gateway on internal-only networks), so it is not set here. Outbound
+  # traffic is instead gated in the app itself (MDMDOC_WEB_EVIDENCE=0,
+  # trust_env=False, MDMDOC_OLLAMA_HOST pinned); if corp policy demands
+  # network-layer sealing on top, add a host firewall rule / egress proxy
+  # denying the compose bridge outbound access.
+  internal:
+    driver: bridge
+
+volumes:
+  # Explicit names so scripts/bundle-models.sh and backup jobs can address the
+  # volumes without depending on the compose project prefix.
+  mdmdoc-runs:
+    name: mdmdoc-runs
+  mdmdoc-inbox:
+    name: mdmdoc-inbox
+  mdmdoc-dataset:
+    name: mdmdoc-dataset
+  mdmdoc-eval:
+    name: mdmdoc-eval
+  mdmdoc-modelfiles:
+    name: mdmdoc-modelfiles
+  mdmdoc-fewshot:
+    name: mdmdoc-fewshot
+  mdmdoc-ollama:
+    name: mdmdoc-ollama
