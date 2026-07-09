@@ -7,6 +7,11 @@ from .rules.engine import Finding
 
 _PRECEDENCE = ["REJECT", "NEED_MANUAL_REVIEW", "WARNING", "ACCEPT"]
 
+# strictness rank for comparing two verdicts (higher = stricter); used by the
+# operator-precedent guardrail (a precedent may tighten freely, relaxing needs
+# explicit confirmation) and by eval cost metrics
+RANK = {"ACCEPT": 0, "WARNING": 1, "NEED_MANUAL_REVIEW": 2, "REJECT": 3}
+
 _NEXT_STEP = {
     "bank": {
         "ACCEPT": "use as banking support — compare against SAP/the request form before entry",

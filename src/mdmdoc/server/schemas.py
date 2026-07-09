@@ -21,6 +21,9 @@ class ReviewSubmission(BaseModel):
     scenarios: list[str] = Field(default_factory=list)  # scenario tags (see scenarios.py)
     error_source: str = ""   # ocr_missed | model_mapped_wrong | rule_wrong | ...
     retrain: bool = True     # save-and-retrain is the default feedback flow
+    # explicit opt-in required for a precedent that RELAXES the machine verdict
+    # (rule REJECT/NMR -> stored ACCEPT); tightening precedents don't need it
+    verdict_confirmed: bool = False
 
 
 class FeedbackIn(BaseModel):

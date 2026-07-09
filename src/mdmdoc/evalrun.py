@@ -190,6 +190,7 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
     rows = []
     type_hits = verdict_hits = json_ok = 0
     invoice_total = invoice_false_accept = 0
+    precedent_relax = precedent_relax_unconfirmed = 0
     field_stats: dict = {}
     confusion: dict = {}
     for lab in labels:
@@ -228,12 +229,19 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             st[2] += int(ok_len)
             row_fields[k] = ok
             row_fields_lenient[k] = ok_len
+        direction = verdict_direction(res.verdict, lab.get("verdict_gold", ""))
+        if direction == "safe":
+            # machine stricter than the stored gold — on a live run this label
+            # would RELAX the verdict; count how many lack the explicit
+            # confirmation the C11 guardrail now requires
+            precedent_relax += 1
+            if not lab.get("verdict_confirmed"):
+                precedent_relax_unconfirmed += 1
         rows.append({"file": path.name, "run_id": res.run_id,
                      "doc_class": lab["doc_class"],
                      "doc_type": f"{pred_type}/{gold_type}",
                      "verdict": f"{res.verdict}/{lab.get('verdict_gold')}",
-                     "verdict_direction": verdict_direction(res.verdict,
-                                                            lab.get("verdict_gold", "")),
+                     "verdict_direction": direction,
                      "tier": res.pub.get("tier", "fast"),
                      "type_ok": pred_type == gold_type,
                      "verdict_ok": res.verdict == lab.get("verdict_gold"),
@@ -272,6 +280,10 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
                            if k.split(".", 1)[1] in _LENIENT_NAME_FIELDS},
         "scenarios": scenario_slices(rows),
         "leakage_count": leaks,
+        # informational (C11): stored labels that would RELAX a live verdict,
+        # and how many of those lack the now-required explicit confirmation
+        "precedent_relaxations": precedent_relax,
+        "precedent_relaxations_unconfirmed": precedent_relax_unconfirmed,
     }
 
     # structured per-doc results + regression diff vs the previous MAIN eval

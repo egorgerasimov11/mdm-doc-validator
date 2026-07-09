@@ -55,6 +55,16 @@ def test_keep_sensitive_synthesizes_fake(run_env):
     assert_no_leak(json.dumps(label), allowed_fakes=[fake])
 
 
+def test_verdict_confirmed_roundtrip(run_env):
+    """C11: the explicit relax-confirmation flag persists on the label and
+    defaults to False when the reviewer did not check it."""
+    label, _ = review_core.build_label(run_env, {"fields": {}})
+    assert label["verdict_confirmed"] is False
+    label, _ = review_core.build_label(
+        run_env, {"fields": {}, "verdict_gold": "ACCEPT", "verdict_confirmed": True})
+    assert label["verdict_confirmed"] is True
+
+
 def test_set_sensitive_masks_and_returns_secret(run_env):
     sub = {"fields": {"tin_raw": {"action": "set", "value": "123-45-6789"},
                       "tin_type": {"action": "set", "value": "SSN"}},

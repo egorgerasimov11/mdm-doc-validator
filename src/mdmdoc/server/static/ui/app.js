@@ -267,6 +267,7 @@ window.mdmdoc = (() => {
         notes: document.getElementById("f-notes").value,
         scenarios,
         error_source: document.getElementById("f-error_source").value,
+        verdict_confirmed: !!document.getElementById("f-verdict-confirmed")?.checked,
       };
       const err = document.getElementById("review-error");
       const btn = form.querySelector("button[type=submit]");

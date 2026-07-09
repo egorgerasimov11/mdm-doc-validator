@@ -231,6 +231,9 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
         "error_source": (str(sub.get("error_source") or "")
                          if str(sub.get("error_source") or "") in scenarios.ERROR_SOURCES else ""),
         "confirmed": True,
+        # a RELAXING precedent (stored verdict softer than the machine's) only
+        # applies when this flag is true — see pipeline's OPERATOR-2 guardrail
+        "verdict_confirmed": bool(sub.get("verdict_confirmed")),
     }
     # union: typed corrections + full values harvested from the run artifacts —
     # the strict gate must know them all
