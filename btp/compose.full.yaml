@@ -84,9 +84,11 @@ services:
     ports:
       # The ONLY published port in this deployment. Bound to loopback because
       # the corp reverse proxy / SSO terminator is expected on the same host;
-      # widen to "8766:8080" only if the proxy is remote — and then only on a
-      # firewalled interface. 8766 mirrors the app's native default port.
-      - "127.0.0.1:8766:8080"
+      # widen only if the proxy is remote — and then only on a firewalled
+      # interface. Default 8766 mirrors the app's native port; override with
+      # MDMDOC_PORT in .env when 8766 is taken (e.g. a bare-metal instance
+      # already runs on the same host).
+      - "127.0.0.1:${MDMDOC_PORT:-8766}:8080"
 
     volumes:
       # Every mutable path gets its own named volume, mounted INSIDE /app —

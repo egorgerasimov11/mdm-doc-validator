@@ -160,7 +160,8 @@ docker compose -f compose.full.yaml up -d
 ```
 
 Then provision models (§3) if not done yet, and point the corp reverse proxy
-at `127.0.0.1:8766`.
+at `127.0.0.1:8766` (or `127.0.0.1:$MDMDOC_PORT` — set `MDMDOC_PORT` in `.env`
+when 8766 is already taken on the host, e.g. by a bare-metal instance).
 
 Key environment (all set in `compose.full.yaml`):
 
