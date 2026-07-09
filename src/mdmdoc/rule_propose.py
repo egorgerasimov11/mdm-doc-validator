@@ -92,6 +92,24 @@ def _block_text(rule: dict) -> str:
     return "\n".join(("  " + ln).rstrip() for ln in dumped.splitlines())
 
 
+def _carry_metadata(text: str, rid: str, rule: dict) -> dict:
+    """Preserve governance metadata (tier/source) from the existing rule when an
+    edit proposal omits it (the model never sees those keys)."""
+    try:
+        cfg = yaml.safe_load(text) or {}
+        old = next((r for r in cfg.get("rules", [])
+                    if isinstance(r, dict) and str(r.get("id")) == str(rid)), None)
+    except Exception:
+        old = None
+    if not old:
+        return rule
+    merged = dict(rule)
+    for k in ("tier", "source"):
+        if k not in merged and k in old:
+            merged[k] = old[k]
+    return merged
+
+
 def apply_change(text: str, action: str, rule: dict, rule_id: str = "") -> str:
     """Deterministically splice a proposed change into the rule file TEXT.
     Preserves the rest of the file (header, comments, other rules) verbatim."""
@@ -103,13 +121,19 @@ def apply_change(text: str, action: str, rule: dict, rule_id: str = "") -> str:
             raise ValueError(f"rule {rid} not found to remove")
         del lines[span[0]:span[1]]
         return "".join(lines)
-    block = _block_text(rule).rstrip("\n") + "\n"
     if action == "edit":
         span = _rule_block_span(text, rid)
         if not span:
             raise ValueError(f"rule {rid} not found to edit")
+        # governance metadata (tier/source) is invisible to the model's proposal
+        # — carry it over from the existing rule so an edit never silently drops
+        # it (the approval survives regardless via the denylist hash, but the
+        # annotation must not be lost).
+        rule = _carry_metadata(text, rid, rule)
+        block = _block_text(rule).rstrip("\n") + "\n"
         lines[span[0]:span[1]] = [block]
         return "".join(lines)
+    block = _block_text(rule).rstrip("\n") + "\n"
     if action == "add":
         # append after the last rule block (before any trailing top-level key)
         last = None

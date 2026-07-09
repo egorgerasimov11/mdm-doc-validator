@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import config, model_client as mc
-from .fields import Extraction, _norm_id, _norm_name, to_iso2
+from .fields import Extraction, _norm_id, _norm_name, names_materially_equal, to_iso2
 from .privacy import FIELD_KIND, mask
 from .rules.engine import Finding
 
@@ -105,8 +105,19 @@ def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Fi
     def warn(rule_id: str, msg: str) -> None:
         findings.append(Finding(rule_id, "WARNING", "WARNING", msg))
 
-    # IBAN — strict char-by-char
+    # SAP frequently stores a DECOMPOSED IBAN (BANKL = bank code + BANKN = account
+    # number, IBAN column itself empty — the normal BUT0BK table-export shape).
+    # Detect when the document IBAN is consistent with that decomposition so we
+    # confirm the fields instead of warning about a "missing" SAP IBAN.
     d_iban, s_iban = _norm_id(f.get("iban")), _norm_id(sap.get("iban"))
+    s_key0, s_acc0 = _norm_id(sap.get("bank_key")), _norm_id(sap.get("bank_account"))
+    key_in_doc_iban = bool(d_iban and s_key0
+                           and s_key0 in d_iban[4:4 + len(s_key0) + 2])
+    acc_in_doc_iban = bool(d_iban and s_acc0 and s_acc0.lstrip("0")
+                           and d_iban.endswith(s_acc0.lstrip("0")))
+    iban_decomposed = (not s_iban) and (key_in_doc_iban or acc_in_doc_iban)
+
+    # IBAN — strict char-by-char
     if d_iban and s_iban:
         if d_iban == s_iban:
             rows.append(_row_p("IBAN", d_iban, s_iban, "match", kind="iban"))
@@ -117,6 +128,10 @@ def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Fi
             crit("SAP-001", f"IBAN mismatch: document {_dv('iban', d_iban)} vs "
                             f"SAP {_dv('iban', s_iban)} (differs from position {pos}). "
                             "Do not process — request corrected form or banking support.")
+    elif d_iban and iban_decomposed:
+        rows.append(_row_p("IBAN", d_iban, "", "match",
+                         "SAP stores the IBAN decomposed (bank key + account) — consistent",
+                         kind="iban"))
     elif d_iban or s_iban:
         rows.append(_row_p("IBAN", d_iban, s_iban, "only-one-side", kind="iban"))
         warn("SAP-002", "IBAN present on only one side (document vs SAP).")
@@ -138,6 +153,11 @@ def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Fi
                              f"differs from position {pos}", kind="account_number"))
             crit("SAP-003", f"Account number mismatch: document {_dv('account_number', d_acc)} "
                             f"vs SAP {_dv('account_number', s_acc)}. Do not process.")
+    elif s_acc and acc_in_doc_iban and not d_acc:
+        # SAP has the account, the document carries only the IBAN — the IBAN's
+        # account part IS the SAP account. Confirm rather than "only one side".
+        rows.append(_row_p("Bank Account", "from IBAN", s_acc, "match",
+                         "SAP stores the IBAN account part", kind="account_number"))
     elif d_acc or s_acc:
         rows.append(_row_p("Bank Account", d_acc, s_acc, "only-one-side", kind="account_number"))
 
@@ -168,7 +188,11 @@ def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Fi
     if s_key:
         d_routing = _norm_id(f.get("routing_aba"))
         d_wires = _norm_id(f.get("routing_aba_wires"))
-        in_doc_iban = bool(d_iban and s_key in d_iban[4:4 + max(len(s_key), 10)])
+        # window = country(2)+check(2)=4, then the bank code; +2 tolerates the
+        # IT CIN letter that sits between the check digits and the ABI/CAB code
+        # (IT ABI+CAB is iban[5:15], not iban[4:14] — the old max(...,10) window
+        # dropped the last CAB digit and flagged every correct Italian row).
+        in_doc_iban = bool(d_iban and s_key in d_iban[4:4 + len(s_key) + 2])
         eq_routing = bool((d_routing and d_routing == s_key)
                           or (d_wires and d_wires == s_key))
         if in_doc_iban or eq_routing:
@@ -201,7 +225,11 @@ def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Fi
     d_h = _norm_name(f.get("account_holder"))
     s_h = _norm_name(sap.get("account_holder") or sap.get("account_name"))
     if d_h and s_h:
-        eq = d_h in s_h or s_h in d_h
+        # containment OR materially-equal (legal-suffix/word-order tolerant:
+        # 'ACME S.p.A.' vs 'ACME SpA', 'Snaco GmbH' vs 'Snaco')
+        eq = (d_h in s_h or s_h in d_h
+              or names_materially_equal(f.get("account_holder"),
+                                        sap.get("account_holder") or sap.get("account_name")))
         rows.append(_row_p("Account Holder", f.get("account_holder", ""),
                          sap.get("account_holder") or sap.get("account_name", ""),
                          "match" if eq else "MISMATCH"))

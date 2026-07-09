@@ -30,14 +30,24 @@ from . import config
 
 APPROVED, REJECTED, PENDING = "approved", "rejected", "pending"
 
+# Keys that are governance METADATA, not verdict behaviour. They are excluded
+# from the content hash so annotating a rule with tier/source does NOT invalidate
+# an existing human approval (a denylist keeps the hash byte-identical for every
+# rule that predates the metadata — zero migration of the mini's approvals.json).
+_METADATA_KEYS = ("tier", "source")
+
 
 def _path():
     return config.RULES_DIR / "approvals.json"
 
 
 def rule_hash(rule: dict) -> str:
-    """Stable content hash of a rule block — approval is bound to exact content."""
-    blob = json.dumps(rule, sort_keys=True, ensure_ascii=False)
+    """Stable content hash of a rule block — approval is bound to exact VERDICT
+    content, not to governance metadata (tier/source). Adding/changing metadata
+    leaves the hash unchanged; changing id/when/severity/verdict_effect/message
+    (anything that alters what the rule DOES) re-invalidates the approval."""
+    verdict_body = {k: v for k, v in rule.items() if k not in _METADATA_KEYS}
+    blob = json.dumps(verdict_body, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 

@@ -51,7 +51,7 @@ def _cmd_check(args, doc_class: str) -> int:
     if getattr(args, "sap", None):
         sap_image = Path(_clean_path(args.sap)).expanduser()
         if not sap_image.exists():
-            print(f"SAP screenshot not found: {sap_image}", file=sys.stderr)
+            print(f"SAP data not found: {sap_image}", file=sys.stderr)
             return config.EXIT_UNREADABLE
     from .estimate import estimate_seconds, human, sniff_text_layer
     est = estimate_seconds(doc_class, sniff_text_layer(Path(path)),
@@ -63,7 +63,8 @@ def _cmd_check(args, doc_class: str) -> int:
         res = run_check(Path(path), doc_class, use_vision=not args.no_vision,
                         keep_renders=args.keep_renders, lang=args.lang,
                         sap_image=sap_image, quality=args.quality,
-                        web_evidence=web_evidence, engine=engine or None)
+                        web_evidence=web_evidence, engine=engine or None,
+                        sap_bp=getattr(args, "sap_bp", "") or "")
     except FileNotFoundError as e:
         print(f"file not found: {e}", file=sys.stderr)
         return config.EXIT_UNREADABLE
@@ -266,9 +267,14 @@ def main(argv: list[str] | None = None) -> int:
                        help="corroborate PUBLIC ids (routing/SWIFT/bank & company names) "
                             "against external registries — advisory NOTE hints, never a "
                             "verdict; also enabled by MDMDOC_WEB_EVIDENCE=1")
-        if doc_class in ("bank", "auto"):
-            p.add_argument("--sap", help="screenshot of the SAP Bank Details screen — "
-                                         "compares document vs SAP char-by-char")
+        # SAP comparison: a Bank Details SCREENSHOT (bank docs) OR a table export
+        # .xlsx (BUT0BK bank details / BUT000 BP general data — works for w9 too).
+        p.add_argument("--sap", help="SAP data to compare against: a Bank Details "
+                                     "screenshot (.png/.jpg) or a BUT0BK/BUT000 "
+                                     "table export (.xlsx)")
+        p.add_argument("--sap-bp", default="", help="SAP Business Partner number — "
+                                                    "selects the row in a table export "
+                                                    "(else reverse-lookup by the document)")
         p.set_defaults(func=lambda a, dc=doc_class: _cmd_check(a, dc))
 
     p = sub.add_parser("review", help="interactively correct a run -> labeled example")

@@ -39,9 +39,10 @@
   <div class="drop" id="drop">Drop a PDF, image, .eml or .zip here — or click to choose a file</div>
   <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.eml,.zip" hidden>
   <div class="actions" id="sap-row">
-    <button type="button" id="sap-attach">+ SAP screenshot (optional)</button>
+    <button type="button" id="sap-attach">+ SAP data (screenshot or table export, optional)</button>
+    <input type="text" id="sap-bp" placeholder="BP # (optional)" style="width:9em" hidden>
     <span class="meta" id="sap-name"></span>
-    <input type="file" id="sap-file" accept=".png,.jpg,.jpeg,.pdf" hidden>
+    <input type="file" id="sap-file" accept=".png,.jpg,.jpeg,.pdf,.xlsx,.xlsm" hidden>
   </div>
   <pre id="job-log" hidden></pre>
 </section>

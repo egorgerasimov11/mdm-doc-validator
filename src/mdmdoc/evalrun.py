@@ -86,6 +86,63 @@ def _leak_sweep() -> int:
     return hits
 
 
+# verdict severity rank — the cost of being WRONG is ASYMMETRIC: predicting a
+# SOFTER verdict than the truth (letting a bad doc through) is the dangerous
+# error; predicting a stricter one just costs an extra manual review.
+_VERDICT_RANK = {"ACCEPT": 0, "WARNING": 1, "NEED_MANUAL_REVIEW": 2, "REJECT": 3}
+
+
+def _wilson(hits: int, n: int, z: float = 1.96) -> list[float]:
+    """Wilson score 95% CI for a proportion (meaningful on a tiny corpus where
+    raw accuracy swings ~5pp per document)."""
+    if n == 0:
+        return [0.0, 0.0]
+    p = hits / n
+    d = 1 + z * z / n
+    centre = p + z * z / (2 * n)
+    half = z * ((p * (1 - p) + z * z / (4 * n)) / n) ** 0.5
+    return [round(max(0.0, (centre - half) / d), 3), round(min(1.0, (centre + half) / d), 3)]
+
+
+def verdict_direction(pred: str, gold: str) -> str:
+    """'unsafe' when the machine is SOFTER than the gold (dangerous), 'safe' when
+    stricter, '' when equal or unrankable."""
+    if pred not in _VERDICT_RANK or gold not in _VERDICT_RANK or pred == gold:
+        return ""
+    return "unsafe" if _VERDICT_RANK[pred] < _VERDICT_RANK[gold] else "safe"
+
+
+def verdict_metrics(pairs: list[tuple[str, str]]) -> dict:
+    """Cost-weighted verdict metrics from (pred, gold) pairs. UNSAFE (pred softer
+    than gold) is weighted 3x; SAFE (stricter) 1x — so a system that gets more
+    conservative scores BETTER on verdict_cost even if raw accuracy dips."""
+    n = len(pairs)
+    if not n:
+        return {"verdict_accuracy": 0, "verdict_accuracy_ci": [0.0, 0.0],
+                "unsafe_error_rate": 0, "safe_disagreement_rate": 0, "verdict_cost": 0}
+    hits = unsafe = safe = cost = 0
+    for pred, gold in pairs:
+        if pred == gold:
+            hits += 1
+            continue
+        d = verdict_direction(pred, gold)
+        if pred in _VERDICT_RANK and gold in _VERDICT_RANK:
+            gap = abs(_VERDICT_RANK[pred] - _VERDICT_RANK[gold])
+            if d == "unsafe":
+                unsafe += 1
+                cost += 3 * gap
+            else:
+                safe += 1
+                cost += 1 * gap
+    return {
+        "verdict_accuracy": round(hits / n, 3),
+        "verdict_accuracy_ci": _wilson(hits, n),
+        "unsafe_error_rate": round(unsafe / n, 3),
+        "safe_disagreement_rate": round(safe / n, 3),
+        "verdict_cost": round(cost / n, 3),
+    }
+
+
 def scenario_slices(rows: list[dict]) -> dict:
     """Per-scenario regression buckets from scored rows (pure, unit-testable).
     A row counts toward every scenario tag on its label."""
@@ -175,6 +232,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
                      "doc_class": lab["doc_class"],
                      "doc_type": f"{pred_type}/{gold_type}",
                      "verdict": f"{res.verdict}/{lab.get('verdict_gold')}",
+                     "verdict_direction": verdict_direction(res.verdict,
+                                                            lab.get("verdict_gold", "")),
                      "tier": res.pub.get("tier", "fast"),
                      "type_ok": pred_type == gold_type,
                      "verdict_ok": res.verdict == lab.get("verdict_gold"),
@@ -189,10 +248,21 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
 
     n = sum(1 for r in rows if "error" not in r)
     leaks = _leak_sweep()
+    scored_rows = [r for r in rows if "error" not in r]
+    vpairs = [tuple(r["verdict"].split("/", 1)) for r in scored_rows if "/" in r.get("verdict", "")]
+    vm = verdict_metrics(vpairs)
+    # gold-review queue: the machine was STRICTER than the gold — often the gold
+    # label is stale (the machine improved past it), so re-review the LABEL.
+    gold_review = [r["file"] for r in scored_rows if r.get("verdict_direction") == "safe"]
     metrics = {
         "n": n,
         "doc_type_accuracy": round(type_hits / n, 3) if n else 0,
+        "doc_type_accuracy_ci": _wilson(type_hits, n),
         "verdict_accuracy": round(verdict_hits / n, 3) if n else 0,
+        "verdict_accuracy_ci": vm["verdict_accuracy_ci"],
+        "unsafe_error_rate": vm["unsafe_error_rate"],
+        "safe_disagreement_rate": vm["safe_disagreement_rate"],
+        "verdict_cost": vm["verdict_cost"],
         "json_valid_first_try": round(json_ok / n, 3) if n else 0,
         "invoice_false_accept_rate": (round(invoice_false_accept / invoice_total, 3)
                                       if invoice_total else None),
@@ -231,7 +301,7 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
             diff["unchanged_wrong"].append(r["file"])
     results_path.write_text(json.dumps(
         {"ts": runstore.now_iso(), "tag": tag, "scenario": scenario, "rows": rows,
-         "diff": diff, "metrics": metrics},
+         "diff": diff, "metrics": metrics, "gold_review": gold_review},
         ensure_ascii=False, indent=1))
 
     # history + delta
@@ -253,7 +323,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
     lines.append("")
     lines.append("| metric | value |" + (" previous |" if prev else ""))
     lines.append("|---|---|" + ("---|" if prev else ""))
-    for k in ("doc_type_accuracy", "verdict_accuracy", "json_valid_first_try",
+    for k in ("doc_type_accuracy", "verdict_accuracy", "unsafe_error_rate",
+              "safe_disagreement_rate", "verdict_cost", "json_valid_first_try",
               "invoice_false_accept_rate", "leakage_count"):
         pv = f" {prev['metrics'].get(k)} |" if prev else ""
         lines.append(f"| {k} | {metrics.get(k)} |{pv}")
@@ -342,10 +413,17 @@ def run_rescore(tag: str = "", record: bool = False) -> int:
     fields = {k: round(v[0] / v[1], 3) for k, v in sorted(field_stats.items())}
     fields_len = {k: round(v[2] / v[1], 3) for k, v in sorted(field_stats.items())
                   if k.split(".", 1)[1] in _LENIENT_NAME_FIELDS}
+    # verdict cost metrics from the stored (pred/gold) pairs — same asymmetric
+    # scorer as the full eval, computed with zero model calls
+    vpairs = [tuple(r["verdict"].split("/", 1)) for r in data.get("rows", [])
+              if isinstance(r, dict) and "error" not in r and "/" in r.get("verdict", "")]
+    vm = verdict_metrics(vpairs)
     print(f"rescored {scored_rows} stored prediction(s) from "
           f"{data.get('tag') or data.get('ts', 'last eval')}")
     print("fidelity (strict == recorded): "
           + ("OK" if not fidelity_bad else f"MISMATCH on {fidelity_bad}"))
+    print(f"verdict: acc={vm['verdict_accuracy']} unsafe={vm['unsafe_error_rate']} "
+          f"cost={vm['verdict_cost']}")
     print("\n| field | strict | lenient |")
     print("|---|---|---|")
     for k, v in fields.items():
@@ -353,7 +431,7 @@ def run_rescore(tag: str = "", record: bool = False) -> int:
     if record:
         entry = {"ts": runstore.now_iso(), "tag": tag, "rescore": True,
                  "metrics": {"n": scored_rows, "fields": fields,
-                             "fields_lenient": fields_len,
+                             "fields_lenient": fields_len, **vm,
                              "rescored_from": data.get("tag") or data.get("ts")}}
         with open(config.EVAL_DIR / "history.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")

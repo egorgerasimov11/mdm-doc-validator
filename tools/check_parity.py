@@ -87,13 +87,19 @@ def abap_check_names(abap_root: Path = ABAP_ROOT) -> set[str]:
     return labels - _ABAP_WHEN_OPERATORS
 
 
+# governance metadata is deliberately NON-portable: gen_rules_abap drops these
+# keys, so they must not count as a Python↔ABAP data difference.
+_RULE_METADATA_KEYS = ("tier", "source")
+
+
 def yaml_rules(path: Path) -> dict:
-    """{rule_id: rule_dict} for semantic comparison (ignores formatting)."""
+    """{rule_id: rule_dict} for semantic comparison (ignores formatting and the
+    non-portable tier/source metadata)."""
     data = yaml.safe_load(path.read_text()) or {}
     out = {}
     for r in data.get("rules", []):
         if isinstance(r, dict) and r.get("id"):
-            out[r["id"]] = r
+            out[r["id"]] = {k: v for k, v in r.items() if k not in _RULE_METADATA_KEYS}
     # the iban_length table is behaviour too — fold it in under a sentinel key
     if data.get("tables"):
         out["__tables__"] = data["tables"]

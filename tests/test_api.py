@@ -97,7 +97,7 @@ def test_check_async_job_lifecycle(isolated, monkeypatch):
     from mdmdoc.server import api as api_mod
 
     def fake_pipeline(path, doc_class, lang, use_vision, sap_image=None, quality=False,
-                      web=False, engine=""):
+                      web=False, engine="", sap_bp=""):
         return {"run_id": "deadbeef00000000", "verdict": "ACCEPT",
                 "report": {"schema": "mdmdoc.v1"}, "report_md": "[BANK DOC VERDICT]"}
 

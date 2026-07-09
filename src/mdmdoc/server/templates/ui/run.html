@@ -26,13 +26,13 @@
   <button type="button" id="btn-copy" data-run="{{ run_id }}">Copy report</button>
   <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.md" download="{{ meta.file_name }}.report.md">Export .md</a>
   <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.json" download="{{ meta.file_name }}.report.json">Export .json</a>
-  {% if doc_class == 'bank' %}
-  <button type="button" id="btn-sap">Compare with SAP…</button>
-  <input type="file" id="sap-input" accept=".png,.jpg,.jpeg,.pdf" hidden>
-  <span class="hint">re-runs this document together with an SAP Bank Details screenshot</span>
+  <button type="button" id="btn-sap" data-class="{{ doc_class }}">Compare with SAP…</button>
+  <input type="file" id="sap-input"
+         accept="{{ '.png,.jpg,.jpeg,.pdf,.xlsx,.xlsm' if doc_class == 'bank' else '.xlsx,.xlsm' }}" hidden>
+  <input type="text" id="sap-bp-input" placeholder="BP # (optional)" style="width:9em" hidden>
+  <span class="hint">re-runs this document against SAP data — a Bank Details screenshot{{ ' or' if doc_class == 'bank' else ':' }} a BUT0BK/BUT000 table export (.xlsx)</span>
   <button type="button" id="btn-web" data-class="{{ doc_class }}">Verify externally 🌐</button>
   <span class="hint">checks routing/SWIFT/bank &amp; company names against public registries — advisory only, the web never decides the verdict</span>
-  {% endif %}
 </div>
 <pre id="job-log" hidden></pre>
 

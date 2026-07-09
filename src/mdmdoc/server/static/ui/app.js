@@ -45,23 +45,20 @@ window.mdmdoc = (() => {
     const docClass = () => seg.querySelector(".active").dataset.v;
     const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
 
-    // optional SAP screenshot (bank only)
+    // optional SAP data: a Bank Details screenshot (bank docs) OR a BUT0BK/BUT000
+    // table export (.xlsx — works for w9 too). The API validates the pairing.
     let sapFile = null;
     const sapBtn = document.getElementById("sap-attach");
     const sapInput = document.getElementById("sap-file");
     const sapName = document.getElementById("sap-name");
-    const sapRow = document.getElementById("sap-row");
-    // SAP compare applies to anything that may be a bank doc — Auto included
-    // (the API only rejects sap_file for explicit w9)
-    const syncSapRow = () => { if (sapRow) sapRow.style.display = docClass() !== "w9" ? "" : "none"; };
+    const sapBp = document.getElementById("sap-bp");
     if (sapBtn) {
       sapBtn.onclick = () => sapInput.click();
       sapInput.onchange = () => {
         sapFile = sapInput.files[0] || null;
         sapName.textContent = sapFile ? sapFile.name + " ✓ (will be compared)" : "";
+        if (sapBp) sapBp.hidden = !sapFile;
       };
-      seg.querySelectorAll("button").forEach(b => b.addEventListener("click", syncSapRow));
-      syncSapRow();
     }
 
     async function send(file) {
@@ -76,7 +73,10 @@ window.mdmdoc = (() => {
       if (q && q.checked) fd.append("quality", "true");
       const eng = document.getElementById("engine");
       if (eng && eng.value) fd.append("engine", eng.value);
-      if (sapFile && docClass() !== "w9") fd.append("sap_file", sapFile);
+      if (sapFile) {
+        fd.append("sap_file", sapFile);
+        if (sapBp && sapBp.value.trim()) fd.append("sap_bp", sapBp.value.trim());
+      }
       try {
         const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
         pollJob(job_id, say,
@@ -130,20 +130,23 @@ window.mdmdoc = (() => {
     const btn = document.getElementById("btn-sap");
     if (!btn) return;
     const input = document.getElementById("sap-input");
+    const bp = document.getElementById("sap-bp-input");
     const log = document.getElementById("job-log");
     const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
     btn.onclick = () => input.click();
     input.onchange = async () => {
       const f = input.files[0];
       if (!f) return;
+      if (bp && /\.xlsx?$/i.test(f.name)) { bp.hidden = false; }
       btn.disabled = true;
       log.textContent = "";
-      say(`re-running with SAP screenshot ${f.name}… (full pipeline — 1-3 min)`);
+      say(`re-running with SAP data ${f.name}… (full pipeline — 1-3 min)`);
       const fd = new FormData();
-      fd.append("doc_class", "bank");
+      fd.append("doc_class", btn.dataset.class || "bank");
       fd.append("wait", "false");
       fd.append("rerun_run_id", location.pathname.split("/")[3]);
       fd.append("sap_file", f);
+      if (bp && bp.value.trim()) fd.append("sap_bp", bp.value.trim());
       try {
         const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
         pollJob(job_id, say,

@@ -29,7 +29,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
               lang: str = "en", sap_image: Path | None = None,
               apply_precedent: bool = True, quality: bool = False,
               web_evidence: bool | None = None, enforce_approvals: bool = True,
-              engine: str | None = None) -> CheckResult:
+              engine: str | None = None, sap_bp: str = "") -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
     not the operator's stored answers. quality=True forces the strong tier.
     web_evidence: None -> honour the MDMDOC_WEB_EVIDENCE env flag; True/False
@@ -116,18 +116,68 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                 f"dual-engine comparison: {len(ext.engine_compare)} ID field(s) "
                 f"checked, the two engines agree"))
     sap_rows: list = []
-    if sap_image is not None and doc_class == "bank":
-        from . import sap_compare
+    sap_kind = None
+    if sap_image is not None:
         sap_image = sap_image.expanduser().resolve()
-        sap_fields = sap_compare.read_sap_screen(sap_image, ext.vault)
-        if sap_fields:
-            sap_findings, sap_rows = sap_compare.compare(ext, sap_fields, policy=policy)
-            findings += sap_findings
+        suffix = sap_image.suffix.lower()
+        if suffix in (".xlsx", ".xlsm"):
+            # SAP TABLE EXPORT (BUT0BK bank details / BUT000 BP general data) —
+            # local, deterministic, no vision. BUT0BK↔bank docs, BUT000↔w9 docs.
+            from . import sap_compare, sap_tables
+            sap_kind = "table"
+            try:
+                kind, trows = sap_tables.load(sap_image)
+            except sap_tables.SapTableError as e:
+                ext.warnings.append(f"SAP table export not usable — comparison skipped ({e})")
+                kind, trows = None, []
+            if kind == "BUT0BK" and doc_class == "bank":
+                row, sel_findings, _others = sap_tables.select_row(trows, ext, sap_bp)
+                findings += sel_findings
+                if row is not None:
+                    sfields = sap_tables.to_sap_fields(row)
+                    sap_tables.register_secrets(ext, sfields)
+                    sap_findings, sap_rows = sap_compare.compare(ext, sfields, policy=policy)
+                    findings += sap_findings
+            elif kind == "BUT000" and doc_class == "w9":
+                row = sap_tables.select_bp(trows, sap_bp)
+                if row is not None:
+                    sap_findings, sap_rows = sap_tables.compare_bp(ext, row, policy=policy)
+                    findings += sap_findings
+                else:
+                    ext.warnings.append("SAP BUT000 export: no matching partner "
+                                        "(pass the partner number) — comparison skipped")
+            elif kind:
+                ext.warnings.append(
+                    f"SAP export kind {kind} does not match the {doc_class} document "
+                    "— comparison skipped")
+        elif doc_class == "bank":
+            # SAP SCREENSHOT (bank only) — vision read
+            from . import sap_compare
+            sap_kind = "image"
+            sap_fields = sap_compare.read_sap_screen(sap_image, ext.vault)
+            if sap_fields:
+                sap_findings, sap_rows = sap_compare.compare(ext, sap_fields, policy=policy)
+                findings += sap_findings
+            else:
+                from . import model_client as _mc
+                _verr = getattr(_mc, "LAST_VISION_ERROR", "")
+                ext.warnings.append("SAP screenshot could not be read — comparison skipped"
+                                    + (f" (vision: {_verr[:160]})" if _verr else ""))
         else:
-            from . import model_client as _mc
-            _verr = getattr(_mc, "LAST_VISION_ERROR", "")
-            ext.warnings.append("SAP screenshot could not be read — comparison skipped"
-                                + (f" (vision: {_verr[:160]})" if _verr else ""))
+            ext.warnings.append("SAP screenshot comparison applies to bank documents; "
+                                "for W-9 attach a BUT000 table export instead")
+
+    # confidence gate: fold the already-recorded read signals into a level, and
+    # if the document would otherwise ACCEPT on a LOW-confidence read, abstain to
+    # manual review (CONF-001). This ONLY ever escalates ACCEPT->NMR — the verdict
+    # still comes from the rules (decide() is a pure precedence fold).
+    from . import confidence as _conf
+    conf = _conf.assess(ext, raw)
+    if conf["level"] == "low" and decide(findings) == "ACCEPT":
+        from .rules.engine import Finding as _F
+        findings.insert(0, _F("CONF-001", "WARNING", "NEED_MANUAL_REVIEW",
+            "low-confidence read — held for manual review: "
+            + "; ".join(conf["reasons"][:4])))
     verdict = decide(findings)
     # AFTER sap compare — its values are secrets too. Under the tin-only gate the
     # run artifacts legitimately carry full banking values, so only TIN secrets
@@ -189,7 +239,9 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
             "signature_pass": bool(raw.signature_probe), "web_evidence": bool(do_web),
             "shape_key": shape_key(doc_class, raw.has_text_layer, use_vision,
                                    sap_image is not None, quality),
-            "sap_path": str(sap_image) if sap_image is not None else None}
+            "sap_path": str(sap_image) if sap_image is not None else None,
+            "sap_kind": sap_kind,
+            "confidence": conf["level"], "confidence_reasons": conf["reasons"]}
     report_json = rpt.build_json(pub, findings, verdict, meta)
 
     runstore.write(run_id, "meta.json", meta, secrets, policy=gate)

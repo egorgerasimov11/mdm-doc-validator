@@ -1,5 +1,9 @@
 # W-9 / W-8 document rules — explicit and editable. Sources: mdm-w9-checker skill
 # (+ its rules.md / dynamic_rules.md).
+#
+# Governance metadata (per rule, hash-immune — never invalidates an approval):
+#   tier:   corp | experimental | learned   (only tier:corp ships to SAP v1)
+#   source: skill | policy | operator        (where the rule came from)
 version: 1
 
 doc_types: [w9, w8, other_tax, unknown]
@@ -9,6 +13,8 @@ tables: {}
 rules:
   - id: W9-030
     name: w8_detected
+    tier: corp
+    source: skill
     applies_to: [w8]
     when: {always: true}
     severity: WARNING
@@ -18,6 +24,8 @@ rules:
 
   - id: W9-031
     name: unknown_tax_doc
+    tier: corp
+    source: skill
     applies_to: [unknown, other_tax]
     when: {always: true}
     severity: WARNING
@@ -26,6 +34,8 @@ rules:
 
   - id: W9-001
     name: line1_missing
+    tier: corp
+    source: skill
     applies_to: [w9]
     when: {field_missing: line1_name}
     severity: CRITICAL
@@ -34,6 +44,8 @@ rules:
 
   - id: W9-002
     name: tin_unreadable
+    tier: corp
+    source: skill
     applies_to: [w9]
     when: {field_missing: tin_raw}
     severity: WARNING
@@ -42,6 +54,8 @@ rules:
 
   - id: W9-003
     name: classification_missing
+    tier: corp
+    source: skill
     applies_to: [w9]
     when: {field_missing: line3_classification}
     severity: WARNING
@@ -50,6 +64,8 @@ rules:
 
   - id: W9-010
     name: ein_9_digits
+    tier: corp
+    source: skill
     applies_to: [w9]
     when: {check: ein_shape, field: tin_raw, args: {digits: 9}}
     severity: CRITICAL
@@ -58,6 +74,8 @@ rules:
 
   - id: W9-011
     name: tin_type_vs_classification
+    tier: corp
+    source: skill
     applies_to: [w9]
     when: {check: tin_type_vs_classification, field: tin_raw}
     severity: CRITICAL
@@ -66,6 +84,8 @@ rules:
 
   - id: W9-012
     name: individual_llc_ein_mix
+    tier: corp
+    source: policy
     applies_to: [w9]
     when: {check: individual_with_business_name_and_ein}
     severity: CRITICAL
@@ -74,6 +94,8 @@ rules:
 
   - id: W9-013
     name: line_swap_suspect
+    tier: corp
+    source: skill
     applies_to: [w9]
     when: {check: line_swap_suspect}
     severity: WARNING
@@ -82,6 +104,8 @@ rules:
 
   - id: W9-020
     name: unsigned
+    tier: corp
+    source: skill
     applies_to: [w9]
     when: {flag_false: signed}
     severity: WARNING

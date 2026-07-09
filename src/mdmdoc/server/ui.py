@@ -141,7 +141,7 @@ def run_page(request: Request, run_id: str, flash: str = ""):
         page="runs", run_id=rid, meta=meta, pub=pub, findings=findings,
         report=rep, data_rows=data_rows, labeled=rid in _labeled_ids(), flash=flash,
         preview_pages=preview_pages, total_pages=stage_a_pub.get("pages") or 1,
-        has_sap_shot=bool(meta.get("sap_path")),
+        has_sap_shot=bool(meta.get("sap_path")) and meta.get("sap_kind") != "table",
         sap_rows=sap_rows, web_rows=web_rows, web_banner=web_banner,
         doc_class=meta.get("doc_class", "bank"), label=label,
         trace=_learning_trace(label, pub, rep) if label else None,

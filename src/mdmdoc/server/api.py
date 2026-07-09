@@ -174,7 +174,7 @@ def set_settings(body: dict) -> dict:
 # ---------------------------------------------------------------- check -------
 def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                   sap_image: Path | None = None, quality: bool = False,
-                  web: bool = False, engine: str = "") -> dict:
+                  web: bool = False, engine: str = "", sap_bp: str = "") -> dict:
     mc.reset_host()
     # HARD GATE default ON (Egor's choice); MDMDOC_RULE_GATE=0 is the instant
     # off-switch (no redeploy) if the "everything held for approval" phase is
@@ -184,7 +184,7 @@ def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
         res = run_check(path, doc_class, use_vision=use_vision, lang=lang,
                         sap_image=sap_image, quality=quality,
                         web_evidence=True if web else None, enforce_approvals=gate,
-                        engine=engine or None)
+                        engine=engine or None, sap_bp=sap_bp)
     report = json.loads(res.report_json)
     return {"run_id": res.run_id, "verdict": res.verdict, "report": report,
             "report_md": res.report_md}
@@ -195,7 +195,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
           lang: str = Form("en"), use_vision: bool = Form(True),
           wait: bool = Form(True), sap_file: UploadFile | None = File(None),
           rerun_run_id: str = Form(""), quality: bool = Form(False),
-          web: bool = Form(False), engine: str = Form("")):
+          web: bool = Form(False), engine: str = Form(""), sap_bp: str = Form("")):
     if doc_class not in ("bank", "w9", "auto"):
         raise api_error(400, "bad_request", "doc_class must be 'bank', 'w9' or 'auto'")
     engine = engine.strip().lower()
@@ -223,17 +223,23 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
         raise api_error(400, "bad_request", "provide a file or rerun_run_id")
     sap_path = None
     if sap_file is not None:
-        if doc_class == "w9":
-            raise api_error(400, "bad_request", "SAP comparison applies to bank documents")
-        sap_path = save_upload("sap__" + (sap_file.filename or "screen.png"),
-                               sap_file.file.read())
+        # a table export (.xlsx BUT0BK/BUT000) works for BOTH bank and w9; a
+        # screenshot image is bank-only (the vision reader targets the Bank
+        # Details screen). doc_class=auto is resolved inside the pipeline.
+        sap_name = sap_file.filename or "screen.png"
+        is_table = Path(sap_name).suffix.lower() in (".xlsx", ".xlsm")
+        if doc_class == "w9" and not is_table:
+            raise api_error(400, "bad_request",
+                            "for a W-9 attach a BUT000 table export (.xlsx); "
+                            "SAP screenshots apply to bank documents")
+        sap_path = save_upload("sap__" + sap_name, sap_file.file.read())
     from ..estimate import estimate_seconds, human, sniff_text_layer
     est = estimate_seconds("bank" if doc_class == "auto" else doc_class,
                            sniff_text_layer(path), use_vision=use_vision,
                            sap=sap_path is not None, quality=quality)
     if wait:
         try:
-            out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web, engine)
+            out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web, engine, sap_bp)
             out["estimate_s"] = est
             return out
         except UnreadableDocument as e:
@@ -248,7 +254,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
             log(f"SAP screenshot: {sap_path.name}")
         log(f"running {doc_class} pipeline{' (thorough tier)' if quality else ''}"
             f"{' + external web evidence' if web else ''}…")
-        out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web, engine)
+        out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web, engine, sap_bp)
         out["estimate_s"] = est
         log(f"verdict: {out['verdict']} (run {out['run_id']})")
         return out

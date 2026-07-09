@@ -425,35 +425,70 @@ def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
         else:
             png = raw.images[0] if raw.images else None
         obj = None
+        votes = {"band": "not-run", "page": "not-run", "text": _text_signature_vote(raw)}
+
+        def _v(o):
+            return "pos" if (isinstance(o, dict) and (o.get("handwritten_signature")
+                                                      or o.get("stamp"))) else "neg"
+
         if band_png:
             obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [band_png])
-            band_neg = not (isinstance(obj, dict)
-                            and (obj.get("handwritten_signature") or obj.get("stamp")))
-            if band_neg:
-                # fall back to the whole page (today's behavior) — keep the
-                # positive read if either fires; overwrite sig.png so the
-                # evidence thumbnail shows what was decisive
+            votes["band"] = _v(obj)
+            if votes["band"] == "neg":
+                # fall back to the whole page (never-worse: both live misses were
+                # false negatives, so band-first can only ADD positives). Keep the
+                # positive read if either fires; overwrite sig.png so the evidence
+                # thumbnail shows what was decisive.
                 doc = fitz.open(path)
                 png = _render_page(doc, idx, render_dir, config.VISION_DPI,
                                    raw.rotations.get(idx, 0), False, "sig")
                 doc.close()
                 obj2, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [png]) \
                     if png else (None, False)
-                if isinstance(obj2, dict) and (obj2.get("handwritten_signature")
-                                               or obj2.get("stamp")):
+                votes["page"] = _v(obj2)
+                if votes["page"] == "pos":
                     obj = obj2
         elif png:
             obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [png])
+            votes["page"] = _v(obj)
         if isinstance(obj, dict):
+            # Uncertainty is METADATA, not a verdict flip: the visual verdict
+            # still wins (see _apply_signature_probe). We only FLAG low
+            # confidence so the confidence gate (confidence.py) can hold back a
+            # blind ACCEPT — when the two vision reads disagreed, or the vision
+            # verdict contradicts the deterministic text signal.
+            visual_pos = bool(obj.get("handwritten_signature") or obj.get("stamp"))
+            uncertain = ((votes["band"] != "not-run" and votes["page"] != "not-run"
+                          and votes["band"] != votes["page"])
+                         or (votes["text"] != "none"
+                             and (votes["text"] == "esign") != visual_pos))
             raw.signature_probe = {
                 "handwritten_signature": bool(obj.get("handwritten_signature")),
                 "stamp": bool(obj.get("stamp")),
                 "date_near_signature": str(obj.get("date_near_signature") or "")[:40],
                 "evidence": str(obj.get("evidence") or "")[:200],
-                "page": idx,
+                "page": idx, "votes": votes, "uncertain": bool(uncertain),
             }
     except Exception as e:  # noqa: BLE001 — probe is best-effort
         raw.warnings.append(f"signature probe failed ({e.__class__.__name__})")
+
+
+_ESIGN_TOKENS = ("docusign envelope", "docusigned by", "adobe sign",
+                 "firmado digitalmente", "electronically signed", "digitally signed")
+_TYPED_SYSTEM_TOKENS = ("computer-generated", "computer generated",
+                        "system-generated", "this is a computer")
+
+
+def _text_signature_vote(raw: RawDoc) -> str:
+    """Deterministic signature signal from the PRE-hunt document text:
+    'esign' (an e-signature envelope is a signature), 'typed-system' (a
+    computer-generated notice that states it needs no signature), or 'none'."""
+    low = (raw.raw_text or "").lower()
+    if any(t in low for t in _ESIGN_TOKENS):
+        return "esign"
+    if any(t in low for t in _TYPED_SYSTEM_TOKENS):
+        return "typed-system"
+    return "none"
 
 
 def _render_zone(path: Path, page_idx: int, zone: tuple, render_dir: Path,
@@ -530,6 +565,21 @@ def _merged(raw: RawDoc) -> str:
     return "\n".join(x for x in (raw.raw_text, raw.tesseract_text, raw.vision_text) if x)
 
 
+def _append_hunt_text(raw: RawDoc, label: str, text: str) -> None:
+    """Make a targeted-hunt reply VISIBLE to the extraction model: append it to
+    raw_text (Stage B's DOCUMENT TEXT), not only to vision_text/candidates —
+    before this fix a hunt's 'Account holder: X' line never reached the model.
+    The block must SURVIVE Stage B's raw_text[:STAGE_B_TEXT_LIMIT] cut, so on
+    overflow the BASE text is trimmed and the hunt block keeps the tail.
+    Type signals (type_hint) are computed from the PRE-hunt text on purpose —
+    a hunt reply must never flip the document classification between runs."""
+    block = f"\n\n[{label}]\n{text}".rstrip()
+    budget = config.STAGE_B_TEXT_LIMIT
+    if len(raw.raw_text) + len(block) > budget:
+        raw.raw_text = raw.raw_text[:max(0, budget - len(block))]
+    raw.raw_text = (raw.raw_text + block).strip()
+
+
 # --- main entry ----------------------------------------------------------------
 def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = True) -> RawDoc:
     ext = path.suffix.lower()
@@ -592,6 +642,12 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
 
     raw.regex_candidates = ocr.regex_fields(_merged(raw))
 
+    # type signals are frozen HERE, on the pre-hunt text: (a) probe gates below
+    # can rely on them (the invoice guard was dead — type_hint used to be
+    # assigned only at the END of perceive), (b) a vision hunt's reply can never
+    # flip the document classification between otherwise-identical runs.
+    raw.type_hint = fields.type_hint(path.name, raw.raw_text, ext, doc_class)
+
     # escalation: a bank doc with no account identifiers gets a targeted vision hunt
     if (doc_class == "bank" and use_vision and raw.images
             and not any(k in raw.regex_candidates
@@ -600,6 +656,7 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
                         options={"temperature": 0, "seed": 7})
         if not vt2.startswith("[vision"):
             raw.vision_text = (raw.vision_text + "\n\n[targeted search]\n" + vt2).strip()
+            _append_hunt_text(raw, "targeted search", vt2)
             raw.regex_candidates = ocr.regex_fields(_merged(raw))
             raw.warnings.append("targeted vision pass used (no IDs found on first read)")
     # holder hunt: IDs were found but the text carries NO holder-label tokens —
@@ -613,6 +670,7 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
                         options={"temperature": 0, "seed": 7})
         if not vt3.startswith("[vision"):
             raw.vision_text = (raw.vision_text + "\n\n[holder search]\n" + vt3).strip()
+            _append_hunt_text(raw, "holder search", vt3)
             raw.regex_candidates = ocr.regex_fields(_merged(raw))
             raw.warnings.append("targeted holder pass used (no holder labels in text)")
     # signature probe — ALWAYS for bank/w9 (quality first), even for text-layer
@@ -634,7 +692,7 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             raw.regex_candidates["tin_boxed"] = boxed
             if boxed_type:
                 raw.regex_candidates["tin_boxed_type"] = boxed_type
-    raw.type_hint = fields.type_hint(path.name, raw.raw_text, ext, doc_class)
+    # type_hint is computed BEFORE the hunts/probes (see above) — stable input
     # single-page docs: everything read (incl. vision text) belongs to that page —
     # gives provenance a page even when per-page capture missed (in-memory only)
     if len(raw.pages_used) == 1:

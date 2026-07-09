@@ -590,7 +590,18 @@ def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
     evidence = scrub_text(str(probe.get("evidence") or ""), ext.vault)
     ext.signature_probe = {"handwritten_signature": bool(probe.get("handwritten_signature")),
                            "stamp": bool(probe.get("stamp")), "evidence": evidence,
-                           "page": probe_page}
+                           "page": probe_page,
+                           "votes": probe.get("votes") or {},
+                           "uncertain": bool(probe.get("uncertain"))}
+    # low-confidence vision read (band vs page disagreed, or vision contradicts
+    # the deterministic text signal): a plain WARNING so the confidence gate can
+    # hold back a blind ACCEPT. Kept OUT of signature_evidence — that field feeds
+    # BNK-021/026 evidence tokens and must not be polluted with vote strings.
+    if probe.get("uncertain"):
+        v = probe.get("votes") or {}
+        ext.warnings.append(
+            f"signature vision uncertain (band={v.get('band', '?')}, "
+            f"page={v.get('page', '?')}, text={v.get('text', '?')}) — verify by eye")
     if ext.doc_class == "bank" and not visual and evidence:
         ext.fields["signature_evidence"] = evidence
         ext.provenance["signature_evidence"] = {"source": "vision-crop", "page": probe_page}
