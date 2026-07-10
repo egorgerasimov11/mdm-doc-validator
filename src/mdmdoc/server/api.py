@@ -274,6 +274,58 @@ def edit_rule(doc_class: str, body: dict) -> dict:
     return {"ok": True, **out}
 
 
+@router_teach.post("/rules/{doc_class}/draft", tags=["rules"])
+def draft_rule(doc_class: str, body: dict):
+    """F2b: the rule wizard's model step — free operator text -> a drafted
+    rule + the deterministic questionnaire (one question, three buttons).
+    Runs as a job (the strong model is slow); nothing is written here."""
+    from .. import rule_wizard
+    if doc_class not in ("bank", "w9"):
+        raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
+    text = str(body.get("text") or "").strip()
+    if len(text) < 8:
+        raise api_error(400, "bad_request", "describe the rule in a sentence")
+
+    def work(log):
+        log("drafting the rule from your words (strong model)…")
+        mc.reset_host()
+        with jobs.PIPELINE_LOCK:
+            out = rule_wizard.draft(text, doc_class)
+        if out.get("ok"):
+            log(f"draft ready — {len(out.get('questions') or [])} question(s) to settle")
+        else:
+            log(out.get("rationale") or "draft failed")
+        return out
+
+    job = jobs.REGISTRY.submit("propose", work)
+    return JSONResponse({"job_id": job.id}, status_code=202)
+
+
+@router_teach.post("/rules/{doc_class}/create", tags=["rules"])
+def create_rule(doc_class: str, body: dict) -> dict:
+    """F2b: finish the wizard — merge the questionnaire answers into the
+    draft, validate, append PENDING. The approval panel stays the gate."""
+    from .. import oplog, rule_wizard
+    if doc_class not in ("bank", "w9"):
+        raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
+    rule = body.get("rule")
+    if not isinstance(rule, dict):
+        raise api_error(400, "bad_request", "rule (the wizard draft) required")
+    answers = body.get("answers") if isinstance(body.get("answers"), dict) else {}
+    merged = rule_wizard.apply_answers(rule, answers, doc_class)
+    out = rule_wizard.create(merged, doc_class)
+    if not out["ok"]:
+        raise api_error(400, "bad_request",
+                        "; ".join(out["issues"]) or "rule failed validation")
+    detail = "wizard: " + "; ".join(f"{k}={v}" for k, v in answers.items())[:150]
+    oplog.log("rule-create", rule_id=out["rule_id"], doc_class=doc_class,
+              detail=detail or "wizard")
+    if body.get("regen_abap"):
+        from .. import rules_io
+        out["regenerate"] = rules_io.regenerate_abap()
+    return {"ok": True, **out}
+
+
 @router_teach.post("/rules/{doc_class}/challenges/dismiss", tags=["rules"])
 def dismiss_challenges(doc_class: str, body: dict) -> dict:
     """E5: the operator looked at a challenged rule and decided it STANDS —

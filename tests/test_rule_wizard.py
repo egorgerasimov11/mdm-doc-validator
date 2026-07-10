@@ -139,3 +139,30 @@ def test_draft_happy_path_builds_questions(env, monkeypatch):
     assert out["ok"] and out["rule"]["tier"] == "experimental"
     keys = [q["key"] for q in out["questions"]]
     assert keys == ["applies_to", "strictness", "countries"]
+
+
+def test_create_endpoint_appends_and_logs(env, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from mdmdoc import oplog
+    from mdmdoc.server.app import create_app
+    monkeypatch.setattr(config, "DATASET_DIR", tmp_path / "dataset")
+    monkeypatch.setattr(config, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config, "SETTINGS_PATH", tmp_path / "settings.json")
+    client = TestClient(create_app("full"))
+    r = client.post("/api/v1/rules/bank/create", json={
+        "rule": {"name": "reject_de_statements", "when": {"always": True},
+                 "countries": ["DE"], "message": "no statements for DE",
+                 "message_ru": "выписки для DE не принимаются"},
+        "answers": {"applies_to": "bank_statement",
+                    "strictness": "REJECT — refuse the document"}})
+    assert r.status_code == 200, r.text
+    assert r.json()["rule_id"] == "BNK-048"
+    assert "BNK-048" in rules_io.rules_text("bank")
+    rows = oplog.recent(actions=("rule-create",))
+    assert rows and rows[0]["rule_id"] == "BNK-048"
+    # invalid draft -> 400, nothing written
+    r = client.post("/api/v1/rules/bank/create", json={
+        "rule": {"name": "x", "when": {"check": "no_such_predicate"},
+                 "message": "m", "message_ru": "м"}})
+    assert r.status_code == 400

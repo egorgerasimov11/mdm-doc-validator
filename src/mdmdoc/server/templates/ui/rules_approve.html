@@ -17,6 +17,21 @@
     rejected {{ counts.rejected }}</span>
   <button type="button" id="approve-all" data-class="{{ doc_class }}">Approve all pending</button>
 </div>
+
+<section id="wizard" data-class="{{ doc_class }}">
+  <h2>Create a rule <span class="meta">write it in your own words — the local model drafts,
+    a few one-tap questions settle the scope, the rule lands PENDING for your approval</span></h2>
+  <div class="actions">
+    <input type="text" id="wiz-text" style="flex:1;min-width:22em" autocomplete="off"
+           placeholder="e.g. do not accept bank statements for Germany / письма без подписи — на ручную проверку">
+    <button type="button" id="wiz-go"><strong>Create…</strong></button>
+  </div>
+  <div id="wiz-box" hidden>
+    <p class="meta" id="wiz-rationale"></p>
+    <div id="wiz-q" class="actions" style="flex-wrap:wrap"></div>
+    <pre id="wiz-preview" class="meta" style="margin-top:6px" hidden></pre>
+  </div>
+</section>
 <pre id="job-log" hidden></pre>
 
 {% if proposals %}
@@ -255,5 +270,72 @@
       location.reload();
     } catch (e) { say("ERROR: " + e.message); all.disabled = false; }
   };
+
+  /* --- F2b: the rule wizard — one sentence, a live questionnaire, PENDING --- */
+  (function () {
+    const cls = document.getElementById("wizard").dataset.class;
+    const goBtn = document.getElementById("wiz-go");
+    const textIn = document.getElementById("wiz-text");
+    const box = document.getElementById("wiz-box");
+    const rat = document.getElementById("wiz-rationale");
+    const qBox = document.getElementById("wiz-q");
+    const preview = document.getElementById("wiz-preview");
+    if (!goBtn) return;
+
+    function askOne(qs, i, answers, done) {
+      qBox.innerHTML = "";
+      if (i >= qs.length) return done(answers);
+      const q = qs[i];
+      const lbl = document.createElement("span");
+      lbl.className = "grow";
+      lbl.innerHTML = `<strong>${q.question}</strong> <span class="meta">(${i + 1}/${qs.length})</span>`;
+      qBox.appendChild(lbl);
+      q.options.forEach(opt => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = opt;
+        b.onclick = () => { answers[q.key] = opt; askOne(qs, i + 1, answers, done); };
+        qBox.appendChild(b);
+      });
+    }
+
+    goBtn.onclick = async () => {
+      const text = textIn.value.trim();
+      if (text.length < 8) { textIn.focus(); return; }
+      goBtn.disabled = true;
+      box.hidden = false;
+      rat.textContent = "drafting the rule from your words (local model — takes a moment)…";
+      qBox.innerHTML = ""; preview.hidden = true;
+      try {
+        const start = await api(`/api/v1/rules/${cls}/draft`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }) });
+        mdmdoc.pollJob(start.job_id, () => {}, (draft) => {
+          if (!draft || draft.ok === false) {
+            rat.textContent = (draft && draft.rationale) || "draft failed — rephrase and retry";
+            goBtn.disabled = false;
+            return;
+          }
+          rat.textContent = draft.rationale || "draft ready — settle the scope:";
+          preview.textContent = JSON.stringify(draft.rule, null, 1);
+          preview.hidden = false;
+          askOne(draft.questions || [], 0, {}, async (answers) => {
+            qBox.innerHTML = "";
+            rat.textContent = "creating the rule…";
+            try {
+              const r = await api(`/api/v1/rules/${cls}/create`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ rule: draft.rule, answers }) });
+              say(`${r.rule_id} created — PENDING, approve it below. Reloading…`);
+              setTimeout(() => location.reload(), 900);
+            } catch (e) {
+              rat.textContent = "ERROR: " + e.message;
+              goBtn.disabled = false;
+            }
+          });
+        }, (err) => { rat.textContent = "ERROR: " + err; goBtn.disabled = false; });
+      } catch (e) { rat.textContent = "ERROR: " + e.message; goBtn.disabled = false; }
+    };
+  })();
 })();
 </script>{% endblock %}

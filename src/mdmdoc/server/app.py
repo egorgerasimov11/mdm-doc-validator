@@ -33,6 +33,8 @@ _AUDIT_ROUTES = (
     (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/delete$"), None, ()),   # handler logs (rule_id)
     (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/approve$"), None, ()),  # handler logs (rule_id)
     (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/tier$"), None, ()),     # handler logs (rule_id)
+    (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/create$"), None, ()),   # handler logs (rule-create)
+    (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/draft$"), None, ()),    # job rows cover the draft
     (_re.compile(r"^/api/v1/settings$"), "settings", ()),
     (_re.compile(r"^/api/v1/check$"), "check", ()),
     (_re.compile(r"^/api/v1/check-routing$"), "check", ()),
