@@ -172,6 +172,45 @@ def time_budget_s() -> float:
     return float(_env_int("MDMDOC_TIME_BUDGET_S", 240))
 
 
+# --- effort slider (D4) ---------------------------------------------------------
+# The ONE user-facing depth control: 1 = instant no-LLM, 3 = today's auto
+# (byte-identical), 5 = maximum scrutiny. Each level resolves to an engine, the
+# strong-tier flag and per-run knob overrides carried via runctl (thread-local,
+# never env). Replaces the thorough checkbox + per-run engine select in the UI.
+EFFORT_DEFAULT = 3
+
+_EFFORT_PROFILES = {
+    1: {"engine": "deterministic", "quality": False,
+        "overrides": {"ladder_enabled": False}},
+    2: {"engine": "auto", "quality": False,
+        "overrides": {"strong_enabled": False, "ladder_vision_cap": 0}},
+    3: {"engine": "auto", "quality": False, "overrides": {}},
+    4: {"engine": "auto", "quality": True, "overrides": {"ladder_pages": 3}},
+    5: {"engine": "llm-first", "quality": True,
+        "overrides": {"sig_vision_cap": 6, "ladder_vision_cap": 2,
+                      "ladder_pages": 3, "time_budget_s": 420,
+                      "strong_model_options": {"num_predict": 4096},
+                      "strong_think": True}},
+}
+
+
+def effort_profile(level: int) -> dict:
+    """-> {'engine', 'quality', 'overrides'} for a clamped 1..5 level."""
+    lvl = min(5, max(1, int(level)))
+    p = _EFFORT_PROFILES[lvl]
+    return {"engine": p["engine"], "quality": p["quality"],
+            "overrides": dict(p["overrides"])}
+
+
+def default_effort() -> int:
+    """Operator-panel default for the slider (settings.json), clamped."""
+    try:
+        return min(5, max(1, int(load_settings().get("default_effort",
+                                                     EFFORT_DEFAULT))))
+    except (TypeError, ValueError):
+        return EFFORT_DEFAULT
+
+
 def doctype_rescue_enabled() -> bool:
     """П3 evidence-rescue kill switch: MDMDOC_DOCTYPE_RESCUE=0 reverts to the
     blunt payment_instructions->other->NMR grounding. Default ON."""

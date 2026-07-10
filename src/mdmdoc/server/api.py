@@ -184,25 +184,38 @@ def get_settings() -> dict:
     return {"engine": config.engine_mode(),
             "engine_saved": str(config.load_settings().get("engine", "")) or "auto",
             "engine_env_override": env if env in config.ENGINE_MODES else "",
-            "engine_modes": list(config.ENGINE_MODES)}
+            "engine_modes": list(config.ENGINE_MODES),
+            "default_effort": config.default_effort()}
 
 
 @router_teach.post("/settings", tags=["system"])
 def set_settings(body: dict) -> dict:
-    eng = str(body.get("engine", "")).strip().lower()
-    if eng not in config.ENGINE_MODES:
-        raise api_error(400, "bad_request",
-                        f"engine must be one of {', '.join(config.ENGINE_MODES)}")
-    config.save_setting("engine", eng)
-    return {"ok": True, "engine": config.engine_mode(),
-            "engine_env_override": os.environ.get("MDMDOC_ENGINE", "").strip().lower()}
+    out = {"ok": True}
+    if "engine" in body:
+        eng = str(body.get("engine", "")).strip().lower()
+        if eng not in config.ENGINE_MODES:
+            raise api_error(400, "bad_request",
+                            f"engine must be one of {', '.join(config.ENGINE_MODES)}")
+        config.save_setting("engine", eng)
+    if "default_effort" in body:
+        try:
+            lvl = int(body["default_effort"])
+        except (TypeError, ValueError):
+            raise api_error(400, "bad_request", "default_effort must be 1..5")
+        if lvl not in (1, 2, 3, 4, 5):
+            raise api_error(400, "bad_request", "default_effort must be 1..5")
+        config.save_setting("default_effort", lvl)
+    out.update({"engine": config.engine_mode(),
+                "default_effort": config.default_effort(),
+                "engine_env_override": os.environ.get("MDMDOC_ENGINE", "").strip().lower()})
+    return out
 
 
 # ---------------------------------------------------------------- check -------
 def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                   sap_image: Path | None = None, quality: bool = False,
                   web: bool = False, engine: str = "", sap_bp: str = "",
-                  job=None) -> dict:
+                  job=None, effort: int = 0) -> dict:
     mc.reset_host()
     # HARD GATE default ON (Egor's choice); MDMDOC_RULE_GATE=0 is the instant
     # off-switch (no redeploy) if the "everything held for approval" phase is
@@ -222,7 +235,7 @@ def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                         web_evidence=True if web else None, enforce_approvals=gate,
                         engine=engine or None, sap_bp=sap_bp,
                         cancel=(job.cancel if job is not None else None),
-                        on_stage=on_stage)
+                        on_stage=on_stage, effort=effort or None)
     report = json.loads(res.report_json)
     return {"run_id": res.run_id, "verdict": res.verdict, "report": report,
             "report_md": res.report_md}
@@ -233,7 +246,8 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
           lang: str = Form("en"), use_vision: bool = Form(True),
           wait: bool = Form(True), sap_file: UploadFile | None = File(None),
           rerun_run_id: str = Form(""), quality: bool = Form(False),
-          web: bool = Form(False), engine: str = Form(""), sap_bp: str = Form("")):
+          web: bool = Form(False), engine: str = Form(""), sap_bp: str = Form(""),
+          effort: int = Form(0)):
     if doc_class not in ("bank", "w9", "auto"):
         raise api_error(400, "bad_request", "doc_class must be 'bank', 'w9' or 'auto'")
     engine = engine.strip().lower()
@@ -247,6 +261,8 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
                         "external web evidence is disabled in the api-only deployment")
     if lang not in ("en", "ru"):
         raise api_error(400, "bad_request", "lang must be 'en' or 'ru'")
+    if effort and effort not in (1, 2, 3, 4, 5):
+        raise api_error(400, "bad_request", "effort must be 1..5 (or 0 for legacy params)")
     if file is not None:
         path = save_upload(file.filename or "document", file.file.read())
     elif rerun_run_id:
@@ -274,10 +290,12 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
     from ..estimate import estimate_seconds, human, sniff_text_layer
     est = estimate_seconds("bank" if doc_class == "auto" else doc_class,
                            sniff_text_layer(path), use_vision=use_vision,
-                           sap=sap_path is not None, quality=quality)
+                           sap=sap_path is not None, quality=quality,
+                           effort=effort or None)
     if wait:
         try:
-            out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web, engine, sap_bp)
+            out = _run_pipeline(path, doc_class, lang, use_vision, sap_path,
+                                quality, web, engine, sap_bp, effort=effort)
             out["estimate_s"] = est
             return out
         except UnreadableDocument as e:
@@ -295,7 +313,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
         log(f"running {doc_class} pipeline{' (thorough tier)' if quality else ''}"
             f"{' + external web evidence' if web else ''}…")
         out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality,
-                            web, engine, sap_bp, job=job)
+                            web, engine, sap_bp, job=job, effort=effort)
         out["estimate_s"] = est
         log(f"verdict: {out['verdict']} (run {out['run_id']})")
         return out

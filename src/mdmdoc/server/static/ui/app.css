@@ -167,3 +167,7 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 .queue-row progress { width: 140px; }
 .queue-cancel { margin-left: auto; }
 #progress-row progress { height: 10px; }
+
+/* D4: effort slider */
+.effort-box { display: inline-flex; align-items: center; gap: 6px; }
+.effort-box input[type="range"] { width: 130px; }

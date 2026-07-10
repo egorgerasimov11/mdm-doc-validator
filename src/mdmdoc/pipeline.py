@@ -30,15 +30,25 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
               apply_precedent: bool = True, quality: bool = False,
               web_evidence: bool | None = None, enforce_approvals: bool = True,
               engine: str | None = None, sap_bp: str = "",
-              cancel=None, on_stage=None, overrides: dict | None = None) -> CheckResult:
+              cancel=None, on_stage=None, overrides: dict | None = None,
+              effort: int | None = None) -> CheckResult:
     """Thin control-plane wrapper (D1): binds a RunControl (cooperative cancel
     event, stage-progress callback, per-run config overrides) to THIS thread's
     context for the duration of the run, then delegates. A canceled run raises
     runctl.CheckCanceled from the next checkpoint and writes NO artifacts
-    (every runstore.write sits after the last checkpoint)."""
+    (every runstore.write sits after the last checkpoint).
+    effort (D4): 1..5 resolves an effort profile — it supplies the ENGINE, the
+    strong-tier flag and knob overrides, and beats the legacy quality/engine
+    params. None/0 keeps legacy behavior exactly (level 3 == today's auto)."""
     from . import runctl
+    eff_overrides: dict = {}
+    if effort:
+        prof = config.effort_profile(effort)
+        engine = prof["engine"]
+        quality = prof["quality"]
+        eff_overrides = prof["overrides"]
     ctl = runctl.RunControl(cancel=cancel, on_stage=on_stage,
-                            overrides=dict(overrides or {}))
+                            overrides={**eff_overrides, **(overrides or {})})
     token = runctl.activate(ctl)
     try:
         return _run_check_impl(path, doc_class, use_vision=use_vision,
@@ -46,7 +56,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                                sap_image=sap_image, apply_precedent=apply_precedent,
                                quality=quality, web_evidence=web_evidence,
                                enforce_approvals=enforce_approvals, engine=engine,
-                               sap_bp=sap_bp)
+                               sap_bp=sap_bp, effort=effort)
     finally:
         runctl.deactivate(token)
 
@@ -56,7 +66,8 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
                     lang: str = "en", sap_image: Path | None = None,
                     apply_precedent: bool = True, quality: bool = False,
                     web_evidence: bool | None = None, enforce_approvals: bool = True,
-                    engine: str | None = None, sap_bp: str = "") -> CheckResult:
+                    engine: str | None = None, sap_bp: str = "",
+                    effort: int | None = None) -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
     not the operator's stored answers. quality=True forces the strong tier.
     web_evidence: None -> honour the MDMDOC_WEB_EVIDENCE env flag; True/False
@@ -322,7 +333,7 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
             "sap_path": str(sap_image) if sap_image is not None else None,
             "sap_kind": sap_kind,
             "confidence": conf["level"], "confidence_reasons": conf["reasons"],
-            "ladder": ladder_meta}
+            "ladder": ladder_meta, "effort": effort}
     report_json = rpt.build_json(pub, findings, verdict, meta)
 
     runstore.write(run_id, "meta.json", meta, secrets, policy=gate)

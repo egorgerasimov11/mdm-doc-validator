@@ -71,10 +71,8 @@ window.mdmdoc = (() => {
       fd.append("doc_class", docClass());
       fd.append("lang", document.getElementById("lang").value);
       fd.append("wait", "false");
-      const q = document.getElementById("quality");
-      if (q && q.checked) fd.append("quality", "true");
-      const eng = document.getElementById("engine");
-      if (eng && eng.value) fd.append("engine", eng.value);
+      const eff = document.getElementById("effort");
+      if (eff) fd.append("effort", eff.value);
       if (sapFile) {
         fd.append("sap_file", sapFile);
         if (sapBp && sapBp.value.trim()) fd.append("sap_bp", sapBp.value.trim());
@@ -167,6 +165,26 @@ window.mdmdoc = (() => {
       const fs = [...e.dataTransfer.files];
       if (fs.length) sendAll(fs);
     };
+
+    // effort slider (D4): live label + persisted default
+    const eff = document.getElementById("effort");
+    const effLabel = document.getElementById("effort-label");
+    const EFFORT_NAMES = { 1: "1 · instant (no LLM)", 2: "2 · fast", 3: "3 · standard",
+                           4: "4 · thorough", 5: "5 · maximum (~slow)" };
+    if (eff && effLabel) {
+      const paint = () => effLabel.textContent = EFFORT_NAMES[eff.value] || eff.value;
+      paint();
+      eff.oninput = paint;
+      eff.onchange = async () => {
+        paint();
+        try {
+          await api("/api/v1/settings", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ default_effort: parseInt(eff.value, 10) }),
+          });
+        } catch (e) { /* non-fatal */ }
+      };
+    }
 
     // default-engine setting (persists on the server; env pin disables it)
     const defSel = document.getElementById("engine-default");

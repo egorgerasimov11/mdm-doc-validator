@@ -323,6 +323,8 @@ def _deep_read_pages(path: Path, picks: list, render_dir: Path, raw: RawDoc,
         step = max(1, mc.VISION_MAX_IMAGES_PER_CALL)
         parts = []
         for i in range(0, len(raw.images), step):
+            from . import runctl
+            runctl.checkpoint("perception")   # cancel point between transcribe chunks
             vt = mc.vision("VISION", VISION_TRANSCRIBE_PROMPT, raw.images[i:i + step],
                            options={"temperature": 0, "seed": 7})
             if not vt.startswith("[vision"):
@@ -641,6 +643,8 @@ def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
             nonlocal calls
             if not image or calls >= cap:
                 return "not-run"
+            from . import runctl
+            runctl.checkpoint("signature")   # cancel point between vision probes
             calls += 1
             obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [image])
             v = _sig_vote(obj)

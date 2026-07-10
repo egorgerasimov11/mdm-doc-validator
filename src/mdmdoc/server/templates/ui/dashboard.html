@@ -20,15 +20,11 @@
     <select id="lang" style="width:auto">
       <option value="en">en</option><option value="ru">ru</option>
     </select>
-    <label class="meta"><input type="checkbox" id="quality"> thorough (strong model, slower)</label>
-    <select id="engine" style="width:auto"
-            title="analysis engine: auto = deterministic + LLM with escalation; deterministic = OCR/patterns only (no LLM); llm-first = strong model from the start; dual = auto + side-by-side engine comparison">
-      <option value="">engine: default ({{ engine_default }})</option>
-      <option value="auto">auto</option>
-      <option value="deterministic">deterministic (no LLM)</option>
-      <option value="llm-first">llm-first (thorough)</option>
-      <option value="dual">dual (compare engines)</option>
-    </select>
+    <span class="effort-box" title="how hard the model thinks: 1 = instant, no LLM (patterns only); 2 = fast model only; 3 = standard (fast + escalation); 4 = thorough (strong tier, deeper page ladder); 5 = maximum scrutiny (strong-first, extended thinking, all signature probes)">
+      <label class="meta" for="effort">effort</label>
+      <input type="range" id="effort" min="1" max="5" step="1" value="{{ default_effort }}">
+      <span class="meta" id="effort-label"></span>
+    </span>
     <span class="meta">default engine:
       <select id="engine-default" style="width:auto" {% if engine_env_override %}disabled title="pinned by MDMDOC_ENGINE={{ engine_env_override }} in the service env"{% endif %}>
         {% for m in engine_modes %}<option value="{{ m }}" {% if m == engine_default %}selected{% endif %}>{{ m }}</option>{% endfor %}

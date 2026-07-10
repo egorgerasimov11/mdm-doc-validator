@@ -29,10 +29,16 @@ def sniff_text_layer(path: Path) -> bool:
 
 
 def shape_key(doc_class: str, text_layer: bool, use_vision: bool,
-              sap: bool, quality: bool) -> str:
-    return f"{doc_class}|{'text' if text_layer else 'scan'}|" \
+              sap: bool, quality: bool, effort: int | None = None) -> str:
+    """effort joins the key ONLY for non-default levels — effort-3 (and the
+    effort-less legacy path) keep byte-identical keys so existing run history
+    keeps matching."""
+    base = f"{doc_class}|{'text' if text_layer else 'scan'}|" \
            f"{'v' if use_vision else 'nv'}|{'sap' if sap else '-'}|" \
            f"{'q' if quality else '-'}"
+    if effort and effort != 3:
+        base += f"|e{effort}"
+    return base
 
 
 def _history_mean(key: str, n: int = 5) -> float | None:
@@ -54,8 +60,12 @@ def _history_mean(key: str, n: int = 5) -> float | None:
 
 
 def estimate_seconds(doc_class: str, text_layer: bool, use_vision: bool = True,
-                     sap: bool = False, quality: bool = False) -> int:
-    key = shape_key(doc_class, text_layer, use_vision, sap, quality)
+                     sap: bool = False, quality: bool = False,
+                     effort: int | None = None) -> int:
+    if effort:   # the profile decides the strong tier / vision depth (D4)
+        quality = quality or effort >= 4
+        use_vision = use_vision and effort > 1
+    key = shape_key(doc_class, text_layer, use_vision, sap, quality, effort)
     hist = _history_mean(key)
     if hist is not None:
         return int(round(hist / 5) * 5) or 5
@@ -66,6 +76,10 @@ def estimate_seconds(doc_class: str, text_layer: bool, use_vision: bool = True,
         base += config.TIME_MODIFIERS_S["strong"]
     if sap:
         base += config.TIME_MODIFIERS_S["sap"]
+    if effort == 5:
+        base += config.TIME_MODIFIERS_S["strong"]   # thinking + extra probes
+    if effort == 1:
+        base = max(5, base - config.TIME_MODIFIERS_S["signature"])
     return base
 
 

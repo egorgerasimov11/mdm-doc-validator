@@ -78,6 +78,7 @@ def dashboard(request: Request):
     env_eng = os.environ.get("MDMDOC_ENGINE", "").strip().lower()
     return templates.TemplateResponse(request, "dashboard.html",
                                       _ctx(doctor=doc, runs=rows[:40], page="dashboard",
+                                           default_effort=config.default_effort(),
                                            engine_default=config.engine_mode(),
                                            engine_modes=list(config.ENGINE_MODES),
                                            engine_env_override=(env_eng if env_eng in config.ENGINE_MODES else ""),
