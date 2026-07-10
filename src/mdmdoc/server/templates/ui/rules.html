@@ -23,6 +23,22 @@ Edit, save, and (optionally) push to the SAP/ABAP side.</p>
   </div>
   <pre id="regen-out" class="meta" style="margin-top:8px"></pre>
 </section>
+
+<section>
+  <h2>Skill sources <span class="meta">attach any checking skill — its rules import as PENDING and wait for your approval</span></h2>
+  <div class="actions">
+    <input type="text" id="skill-name" placeholder="skill name (optional)" style="width:14em">
+    <select id="skill-class" style="width:auto">
+      <option value="bank">bank rules</option>
+      <option value="w9">W-9/W-8 rules</option>
+    </select>
+    <button type="button" class="btn" id="skill-upload-btn">+ Attach skill (.md / .zip)</button>
+    <input type="file" id="skill-file" accept=".md,.zip,.txt" hidden>
+    <span class="meta" id="skill-flash"></span>
+  </div>
+  <pre id="skill-log" class="meta" hidden></pre>
+  <ul class="timeline" id="skill-list"></ul>
+</section>
 {% endblock %}
 
 {% block script %}
@@ -60,6 +76,57 @@ Edit, save, and (optionally) push to the SAP/ABAP side.</p>
           [j.stdout, j.stderr].filter(Boolean).join('\n');
       }).catch(function (e) { say('regenerate failed: ' + e, true); });
   });
+  /* --- skill sources (D10) --- */
+  var sBtn = document.getElementById('skill-upload-btn');
+  var sFile = document.getElementById('skill-file');
+  var sFlash = document.getElementById('skill-flash');
+  var sLog = document.getElementById('skill-log');
+  function skillHeaders() {
+    var h = {};
+    if (tokenMeta && tokenMeta.content) h['Authorization'] = 'Bearer ' + tokenMeta.content;
+    return h;
+  }
+  function refreshSkills() {
+    fetch('/api/v1/rules/skills', { headers: skillHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (rows) {
+        var ul = document.getElementById('skill-list');
+        ul.innerHTML = '';
+        (rows || []).forEach(function (row) {
+          var li = document.createElement('li');
+          li.innerHTML = '<span class="grow"><strong>' + row.name + '</strong> — ' +
+            row.rule_count + ' rule(s) live</span>';
+          ul.appendChild(li);
+        });
+      }).catch(function () {});
+  }
+  if (sBtn) {
+    sBtn.addEventListener('click', function () { sFile.click(); });
+    sFile.addEventListener('change', function () {
+      var f = sFile.files[0];
+      if (!f) return;
+      sFlash.textContent = 'uploading…';
+      var fd = new FormData();
+      fd.append('file', f);
+      fd.append('name', document.getElementById('skill-name').value || '');
+      fd.append('doc_class', document.getElementById('skill-class').value);
+      fetch('/api/v1/rules/skill-upload', { method: 'POST', headers: skillHeaders(), body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.job_id) { sFlash.textContent = (j.detail && j.detail.message) || 'upload failed'; return; }
+          sFlash.textContent = 'extracting rules… (job ' + j.job_id + ')';
+          sLog.hidden = false; sLog.textContent = '';
+          window.mdmdoc.pollJob(j.job_id,
+            function (line) { sLog.textContent += line + '\n'; },
+            function (res) {
+              sFlash.textContent = 'imported ' + (res.imported || 0) + ' rule(s) as PENDING — approve them in Approvals';
+              refreshSkills();
+            },
+            function (err) { sFlash.textContent = 'ERROR: ' + err; });
+        }).catch(function (e) { sFlash.textContent = 'ERROR: ' + e; });
+    });
+    refreshSkills();
+  }
 })();
 </script>
 {% endblock %}

@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .. import config, dataset, model_client as mc, review_core, runstore
 from ..pipeline import UnreadableDocument, run_check
@@ -97,6 +97,43 @@ def get_rules_raw(doc_class: str = "bank") -> str:
     if not text:
         raise api_error(404, "not_found", f"rules for {doc_class} not found")
     return text
+
+
+@router_teach.get("/rules/skills", tags=["teach"])
+def list_skills() -> list[dict]:
+    """Skill sources attached as rule feeds (D10) + live rule counts."""
+    from .. import skill_import
+    return skill_import.list_imported()
+
+
+@router_teach.post("/rules/skill-upload", tags=["teach"])
+def skill_upload(file: UploadFile = File(...), name: str = Form(""),
+                 doc_class: str = Form("bank")):
+    """Attach a SKILL as a rule source: store it under rules/skills/<name>/,
+    then extract rule candidates in a background job — checker skills parse
+    deterministically, arbitrary text goes through the strong model. Every
+    imported rule lands PENDING (source skill:<name>) — nothing fires until
+    it is approved in the panel."""
+    from .. import skill_import
+    if doc_class not in ("bank", "w9"):
+        raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
+    fname = file.filename or "SKILL.md"
+    if Path(fname).suffix.lower() not in (".md", ".zip", ".txt"):
+        raise api_error(400, "bad_request", "upload a SKILL.md / .md / .txt or a .zip of the skill folder")
+    skill_name = skill_import._safe_name(name or Path(fname).stem)
+    try:
+        skill_import.store_upload(skill_name, fname, file.file.read())
+    except Exception as e:  # noqa: BLE001
+        raise api_error(400, "bad_request", f"could not store the skill: {e}")
+
+    def work(log):
+        log(f"skill '{skill_name}' stored — extracting rule candidates ({doc_class})…")
+        mc.reset_host()
+        with jobs.PIPELINE_LOCK:
+            return skill_import.import_skill(skill_name, doc_class, log=log)
+
+    job = jobs.REGISTRY.submit("skill-import", work)
+    return JSONResponse({"job_id": job.id, "skill": skill_name}, status_code=202)
 
 
 @router_teach.get("/rules/unified", response_class=PlainTextResponse, tags=["teach"])
