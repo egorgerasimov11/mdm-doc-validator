@@ -29,7 +29,34 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
               lang: str = "en", sap_image: Path | None = None,
               apply_precedent: bool = True, quality: bool = False,
               web_evidence: bool | None = None, enforce_approvals: bool = True,
-              engine: str | None = None, sap_bp: str = "") -> CheckResult:
+              engine: str | None = None, sap_bp: str = "",
+              cancel=None, on_stage=None, overrides: dict | None = None) -> CheckResult:
+    """Thin control-plane wrapper (D1): binds a RunControl (cooperative cancel
+    event, stage-progress callback, per-run config overrides) to THIS thread's
+    context for the duration of the run, then delegates. A canceled run raises
+    runctl.CheckCanceled from the next checkpoint and writes NO artifacts
+    (every runstore.write sits after the last checkpoint)."""
+    from . import runctl
+    ctl = runctl.RunControl(cancel=cancel, on_stage=on_stage,
+                            overrides=dict(overrides or {}))
+    token = runctl.activate(ctl)
+    try:
+        return _run_check_impl(path, doc_class, use_vision=use_vision,
+                               keep_renders=keep_renders, lang=lang,
+                               sap_image=sap_image, apply_precedent=apply_precedent,
+                               quality=quality, web_evidence=web_evidence,
+                               enforce_approvals=enforce_approvals, engine=engine,
+                               sap_bp=sap_bp)
+    finally:
+        runctl.deactivate(token)
+
+
+def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
+                    keep_renders: bool = False,
+                    lang: str = "en", sap_image: Path | None = None,
+                    apply_precedent: bool = True, quality: bool = False,
+                    web_evidence: bool | None = None, enforce_approvals: bool = True,
+                    engine: str | None = None, sap_bp: str = "") -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
     not the operator's stored answers. quality=True forces the strong tier.
     web_evidence: None -> honour the MDMDOC_WEB_EVIDENCE env flag; True/False
@@ -40,6 +67,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     one of config.ENGINE_MODES. A mode that needs the LLM auto-degrades to
     'deterministic' (with a WARNING finding) when the model host is down —
     a check NEVER fails because Ollama is unreachable."""
+    from . import runctl
     t0 = time.time()
     config.ensure_dirs()
     path = path.expanduser().resolve()
@@ -73,11 +101,13 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     rdir = runstore.render_dir(run_id)
 
     container_note = ""
+    runctl.checkpoint("resolve", 2)
     if path.suffix.lower() == ".zip" or path.suffix.lower() in (".eml", ".msg"):
         path, container_note = _resolve_container(path, run_id)
     if doc_class in ("auto", ""):
         doc_class = stage_a.sniff_doc_class(path)
 
+    runctl.checkpoint("perception", 8)
     raw = stage_a.perceive(path, doc_class, rdir, use_vision=use_vision)
     if raw.locked:
         runstore.write(run_id, "meta.json", {"path": str(path), "doc_class": doc_class,
@@ -90,11 +120,13 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
     gate = config.gate_policy()
 
     # Stage B (trainable extraction, two tiers)
+    runctl.checkpoint("extraction", 40)
     ext = stage_b.extract(raw, quality=quality, policy=policy, engine=engine_eff)
     # evidence ladder (P6): a bounded SECOND perception pass when critical
     # fields are still missing and unread pages show deterministic evidence
     # they can close the gap (the controller loop lives here, not in stage_b)
     from . import ladder
+    runctl.checkpoint("ladder", 62)
     ext, ladder_meta = ladder.climb(path, raw, ext, rdir, t0=t0, quality=quality,
                                     policy=policy, engine=engine_eff,
                                     use_vision=use_vision)
@@ -102,6 +134,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
         ext.warnings.insert(0, container_note)
 
     # rules -> verdict (+ optional SAP comparison as extra findings)
+    runctl.checkpoint("rules", 76)
     findings = run_rules(ext, lang=lang, policy=policy, enforce_approvals=enforce_approvals)
     from .rules.engine import Finding as _Finding
     if engine_req != "deterministic" and not llm_ok:
@@ -124,6 +157,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                 f"checked, the two engines agree"))
     sap_rows: list = []
     sap_kind = None
+    runctl.checkpoint("sap-compare", 84)
     if sap_image is not None:
         sap_image = sap_image.expanduser().resolve()
         suffix = sap_image.suffix.lower()
@@ -273,6 +307,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
         pub["sap_compare"] = sap_rows
 
     from .estimate import shape_key
+    runctl.checkpoint("report", 94)
     report_md = rpt.render_report(pub, findings, verdict, lang=lang)
     meta = {"path": str(path), "file_name": path.name, "doc_class": doc_class,
             "run_id": run_id, "ts": runstore.now_iso(), "model": ext.model_id,

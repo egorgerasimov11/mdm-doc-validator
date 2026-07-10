@@ -84,6 +84,8 @@ def climb(path: Path, raw, ext, render_dir: Path, *, t0: float, quality: bool,
     if not picks:
         return ext, meta
 
+    from . import runctl
+    runctl.checkpoint("ladder")
     stats = stage_a.deep_read_extra_pages(path, raw, render_dir, picks,
                                           use_vision=use_vision,
                                           vision_cap=config.ladder_vision_cap())

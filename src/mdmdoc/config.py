@@ -111,9 +111,20 @@ def save_setting(key: str, value) -> None:
                       json.dumps(s, ensure_ascii=False, indent=1) + "\n")
 
 
+def _run_override(key: str):
+    """Per-run override from the active RunControl (D1/effort): run > env >
+    default. Lazy import — config must stay import-light (runctl imports none
+    of config, so no cycle either way, but keep the seam cheap)."""
+    from . import runctl
+    return runctl.override(key)
+
+
 def sig_vision_cap() -> int:
     """S2 signature-ensemble budget: every vision probe inside signature_probe
     counts against this cap. 2 == the pre-ensemble behavior (no escalation)."""
+    ov = _run_override("sig_vision_cap")
+    if ov is not None:
+        return max(0, int(ov))
     try:
         return max(0, int(os.environ.get("MDMDOC_SIG_VISION_CAP", "4")))
     except ValueError:
@@ -131,21 +142,33 @@ def ladder_enabled() -> bool:
     """P6 evidence-ladder kill switch: MDMDOC_LADDER=0 disables the bounded
     second perception pass entirely. Default ON — clean documents never
     trigger it (no critical gaps -> zero extra cost)."""
+    ov = _run_override("ladder_enabled")
+    if ov is not None:
+        return bool(ov)
     return os.environ.get("MDMDOC_LADDER", "1").strip() != "0"
 
 
 def ladder_pages() -> int:
     """Max extra pages one ladder climb may deep-read."""
+    ov = _run_override("ladder_pages")
+    if ov is not None:
+        return max(0, int(ov))
     return _env_int("MDMDOC_LADDER_PAGES", 2)
 
 
 def ladder_vision_cap() -> int:
     """Max vision transcribe calls per ladder climb (0 = OCR-only)."""
+    ov = _run_override("ladder_vision_cap")
+    if ov is not None:
+        return max(0, int(ov))
     return _env_int("MDMDOC_LADDER_VISION_CAP", 1)
 
 
 def time_budget_s() -> float:
     """Whole-run soft budget: the ladder refuses to start past this point."""
+    ov = _run_override("time_budget_s")
+    if ov is not None:
+        return float(ov)
     return float(_env_int("MDMDOC_TIME_BUDGET_S", 240))
 
 
