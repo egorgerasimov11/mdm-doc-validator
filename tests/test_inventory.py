@@ -72,3 +72,16 @@ def test_inventory_persists_masked_in_public_view():
     assert inv, "inventory must reach the public artifact"
     joined = " ".join(i["value"] for i in inv)
     assert "91110105674299999" not in joined
+
+
+def test_scan_path_prefers_cjk_vision_text():
+    """Scans: tesseract mangles hanzi into latin junk that wins the realword
+    count — the inventory must read the vision transcription instead."""
+    ext = Extraction(doc_class="bank", doc_type="bank_letter")
+    ext.fields = {"account_number": "35310188000049999"}
+    raw = RawDoc(path="scan.pdf", sha256="1" * 16, ext=".pdf", doc_class="bank")
+    raw.raw_text = "meRARIS: 91110105674299999T mS: 35310188000049999 RTS: 303100000999"
+    raw.vision_text = CN_DOC
+    stage_b._collect_inventory(ext, raw)
+    fams = {i["family"] for i in ext.inventory}
+    assert "tax_id" in fams and "clearing" in fams

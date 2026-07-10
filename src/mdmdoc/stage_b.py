@@ -638,7 +638,19 @@ def _collect_inventory(ext: Extraction, raw: RawDoc) -> None:
     from . import inventory as inv
     from .fields import _norm_id
     from .privacy import TIN_KINDS, display_value, mask
-    items = inv.collect(raw.raw_text or "")
+    # source pick: on scans tesseract mangles CJK into latin junk that WINS the
+    # realword count, while the vision transcription keeps the hanzi labels —
+    # the inventory needs the text where the LABELS survived (single source,
+    # never merged: cross-engine digit noise must not fake 'two accounts')
+    text = raw.raw_text or ""
+    vt = getattr(raw, "vision_text", "") or ""
+
+    def _cjk(t: str) -> int:
+        return sum(1 for ch in t if "\u4e00" <= ch <= "\u9fff")
+
+    if vt and _cjk(vt) > 2 * max(1, _cjk(text)):
+        text = vt
+    items = inv.collect(text)
     if not items:
         return
     pub_items: list[dict] = []
