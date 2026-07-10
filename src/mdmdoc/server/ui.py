@@ -145,6 +145,7 @@ def run_page(request: Request, run_id: str, flash: str = ""):
         preview_pages=preview_pages, total_pages=stage_a_pub.get("pages") or 1,
         has_sap_shot=bool(meta.get("sap_path")) and meta.get("sap_kind") != "table",
         sap_rows=sap_rows, tpl_rows=tpl_rows, web_rows=web_rows, web_banner=web_banner,
+        rating=__import__("mdmdoc.ratings", fromlist=["of"]).of(rid),
         doc_class=meta.get("doc_class", "bank"), label=label,
         trace=_learning_trace(label, pub, rep) if label else None,
         artifacts=["meta.json", "stage_a.json", "extraction.json", "reasoning.md", "findings.json",

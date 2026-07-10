@@ -285,6 +285,24 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
     # still comes from the rules (decide() is a pure precedence fold).
     from . import confidence as _conf
     conf = _conf.assess(ext, raw)
+    # pattern memory (D11d): >=3 distinct documents of EXACTLY this shape were
+    # marked VALID by the operator -> informational NOTE + damp ONE weak
+    # confidence signal (medium -> high). HARD signals and the verdict are
+    # never touched — rules alone decide.
+    try:
+        from . import patterns as _patterns
+        _pat_n = _patterns.match_count(ext, findings)
+    except Exception:
+        _pat_n = 0
+    if _pat_n >= 3:
+        findings.append(_Finding(
+            "PATTERN-1", "NOTE", None,
+            f"document shape matches a known-good operator pattern (marked valid "
+            f"{_pat_n}x: same doc_type, same finding set, same filled fields)"))
+        if conf["level"] == "medium":
+            conf = {"level": "high",
+                    "reasons": conf["reasons"]
+                    + [f"one weak signal damped by a known-good pattern x{_pat_n}"]}
     if conf["level"] == "low" and decide(findings) == "ACCEPT":
         from .rules.engine import Finding as _F
         findings.insert(0, _F("CONF-001", "WARNING", "NEED_MANUAL_REVIEW",

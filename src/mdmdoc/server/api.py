@@ -565,6 +565,19 @@ def submit_label(run_id: str, sub: ReviewSubmission) -> dict:
         raise api_error(404, "not_found", f"run {run_id} not found")
     except ValueError as e:   # leak gate — never echo details beyond scrubbed text
         raise api_error(400, "bad_request", str(e))
+    # note-to-rule channel (D11b): a substantial note (or error_source=rule_wrong)
+    # is classified async; a clean ADDITIVE rule proposal lands as PENDING
+    note = (sub.notes or "").strip()
+    if len(note) >= 12 or (sub.error_source == "rule_wrong" and note):
+        from .. import learning
+
+        def note_work(log, _note=note, _rid=run_id):
+            mc.reset_host()
+            with jobs.PIPELINE_LOCK:
+                return learning.note_to_rule(_rid, _note, log=log)
+
+        nj = jobs.REGISTRY.submit("note-rule", note_work)
+        result["note_rule_job_id"] = nj.id
     if not sub.retrain:
         return result
 
@@ -594,6 +607,39 @@ def submit_label(run_id: str, sub: ReviewSubmission) -> dict:
 
     job = jobs.REGISTRY.submit("retrain", work, capture_stdout=True)
     return {**result, "retrain_job_id": job.id}
+
+
+@router_teach.post("/runs/{run_id}/mark-valid", tags=["teach"])
+def mark_valid(run_id: str) -> dict:
+    """One-click 'this document is VALID' (D11c): a confirmed ACCEPT label —
+    the precedent makes it stick for this document (C11 relax gate satisfied
+    by verdict_confirmed) and the pattern memory learns the shape for others.
+    No model call, no retrain."""
+    sub = ReviewSubmission(verdict_gold="ACCEPT", verdict_confirmed=True,
+                           retrain=False, notes="", scenarios=[])
+    try:
+        result = review_core.submit_review(run_id, sub.model_dump())
+    except review_core.RunNotFound:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    return {**result, "marked_valid": True}
+
+
+@router_teach.post("/runs/{run_id}/rating", tags=["teach"])
+def rate_run(run_id: str, body: dict) -> dict:
+    """Thumbs up/down (D11e): a one-tap operator quality signal. Down-votes
+    boost the run in the training queue and flag it on the page; up-votes are
+    a lightweight confirmation. Structure only — never values, never a model."""
+    rating = str(body.get("rating", "")).strip().lower()
+    if rating not in ("up", "down"):
+        raise api_error(400, "bad_request", "rating must be 'up' or 'down'")
+    rid = runstore.resolve_run(run_id)
+    if not rid or not runstore.load(rid, "meta.json"):
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    from .. import ratings
+    row = ratings.record(rid, rating)
+    return {"ok": True, **row}
 
 
 @router_teach.post("/runs/{run_id}/propose-fix", tags=["teach"])

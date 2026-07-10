@@ -87,7 +87,10 @@ def test_label_stores_scenarios_and_error_source(run_env):
     label, _ = review_core.build_label(run_env, {
         "fields": {}, "scenarios": ["W9 Boxed-TIN", "w9_image_only"],
         "error_source": "ocr_missed"})
-    assert label["scenarios"] == ["w9_boxed_tin", "w9_image_only"]
+    # err_<source> tag is auto-appended since D11f (error_source finally consumed)
+    assert label["scenarios"] == ["err_ocr_missed", "w9_boxed_tin", "w9_image_only"] \
+        or sorted(label["scenarios"]) == sorted(["w9_boxed_tin", "w9_image_only",
+                                                 "err_ocr_missed"])
     assert label["error_source"] == "ocr_missed"
 
 

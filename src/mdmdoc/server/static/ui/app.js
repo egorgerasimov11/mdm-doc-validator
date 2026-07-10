@@ -217,6 +217,44 @@ window.mdmdoc = (() => {
     }
   }
 
+  /* ---------- run page: mark valid + thumbs (D11) ------------------------ */
+  function initValidRate() {
+    const validBtn = document.getElementById("btn-valid");
+    if (validBtn) {
+      validBtn.onclick = async () => {
+        validBtn.disabled = true;
+        try {
+          await api(`/api/v1/runs/${validBtn.dataset.run}/mark-valid`, { method: "POST" });
+          validBtn.textContent = "Marked valid ✓";
+        } catch (e) { validBtn.textContent = "ERROR: " + e.message; validBtn.disabled = false; }
+      };
+    }
+    const seg = document.getElementById("rate-seg");
+    if (seg) {
+      seg.querySelectorAll("button").forEach(b => b.onclick = async () => {
+        try {
+          await api(`/api/v1/runs/${seg.dataset.run}/rating`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rating: b.dataset.r }),
+          });
+          seg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+          b.classList.add("active");
+        } catch (e) { /* non-fatal */ }
+      });
+    }
+    // dispute-box "document is VALID" checkbox: fires mark-valid on propose
+    const fbValid = document.getElementById("fb-valid");
+    const fbGo = document.getElementById("fb-go");
+    if (fbValid && fbGo) {
+      fbGo.addEventListener("click", async () => {
+        if (fbValid.checked) {
+          try { await api(`/api/v1/runs/${fbGo.dataset.run}/mark-valid`, { method: "POST" }); }
+          catch (e) { /* non-fatal */ }
+        }
+      });
+    }
+  }
+
   /* ---------- run page: compare with template (D8) ----------------------- */
   function initTplCompare() {
     const btn = document.getElementById("btn-tpl");
@@ -777,7 +815,7 @@ window.mdmdoc = (() => {
   initRunFilters();
   initCopyReport();
 
-  return { api, pollJob, initDropZone, initTplCompare, initArtifacts, initReview, initTraining,
+  return { api, pollJob, initDropZone, initTplCompare, initValidRate, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
            initRetrainWatch };
 })();

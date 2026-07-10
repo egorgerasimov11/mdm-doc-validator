@@ -129,7 +129,7 @@ def test_ground_payment_instructions_guard():
 # --- Batch 2: holder recovery ------------------------------------------------
 def test_fast_prompt_byte_identical_without_focus(monkeypatch):
     import mdmdoc.stage_b as sb
-    monkeypatch.setattr(sb, "_load_fewshot", lambda dc: [])
+    monkeypatch.setattr(sb, "_load_fewshot", lambda dc, w8=False: [])
     monkeypatch.setattr(sb.mc, "resolve", lambda role: "mdmdoc-extract")
     raw = RawDoc(path="/x/d.pdf", sha256="1" * 64, ext=".pdf", doc_class="bank")
     raw.raw_text = "some text"
@@ -142,7 +142,7 @@ def test_fast_prompt_byte_identical_without_focus(monkeypatch):
 
 def test_focus_hint_lands_in_strong_prompt(monkeypatch):
     import mdmdoc.stage_b as sb
-    monkeypatch.setattr(sb, "_load_fewshot", lambda dc: [])
+    monkeypatch.setattr(sb, "_load_fewshot", lambda dc, w8=False: [])
     monkeypatch.setattr(sb.mc, "resolve", lambda role: "mdmdoc-extract")
     raw = RawDoc(path="/x/d.pdf", sha256="2" * 64, ext=".pdf", doc_class="bank")
     raw.raw_text = "some text"

@@ -94,11 +94,25 @@ def build_prompt(raw: RawDoc, role: str = "TEXT", focus: list[str] | None = None
     keys = BANK_KEYS if doc_class == "bank" else (W8_KEYS if is_w8 else W9_KEYS)
     types = BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES
     parts = []
-    # our custom model has the exemplars baked in via MESSAGE pairs; any stock
-    # model (incl. the strong tier) gets them injected at runtime. W-8 exemplars
-    # are NOT baked into mdmdoc-extract — inject them unconditionally.
-    if is_w8 or not mc.resolve(role).startswith("mdmdoc-extract"):
-        for ex in _load_fewshot(doc_class, is_w8):
+    # Fresh few-shot exemplars are injected at runtime for EVERY model (D11a):
+    # before this, the production mdmdoc-extract ran only on exemplars BAKED at
+    # build time, so an operator correction never reached the next document
+    # until a manual candidate-build + Adopt. For the baked model, exemplars
+    # whose values are already in the bake snapshot are skipped (no duplicates
+    # after a rebuild); ~1-2KB of prompt at 16k ctx — a conscious, tested
+    # extension of the trainable contract.
+    shots = _load_fewshot(doc_class, is_w8)
+    if not is_w8 and mc.resolve(role).startswith("mdmdoc-extract"):
+        baked = _baked_exemplar_values()
+        if baked:
+            def _is_baked(ex):
+                vals = [str(v).casefold() for v in (ex.get("output", {}).get("fields")
+                                                    or {}).values()
+                        if not isinstance(v, bool) and len(str(v or "").strip()) >= 4]
+                return bool(vals) and all(v in baked for v in vals)
+            shots = [ex for ex in shots if not _is_baked(ex)]
+    if shots:
+        for ex in shots:
             parts.append("EXAMPLE INPUT:\n" + ex.get("input", "")
                          + "\nEXAMPLE OUTPUT:\n" + json.dumps(ex.get("output", {}), ensure_ascii=False))
     packet_note = ""

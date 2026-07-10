@@ -40,6 +40,9 @@ def build_queue(limit: int = 12) -> list[dict]:
         except Exception:
             pass
 
+    from . import ratings as _ratings
+    thumb = _ratings.latest()
+
     out: list[dict] = []
     for row in runstore.list_runs():
         rid = row["run_id"]
@@ -50,6 +53,9 @@ def build_queue(limit: int = 12) -> list[dict]:
         labeled = rid in labeled_ids
         score = 0
         reasons: list[str] = []
+        if thumb.get(rid) == "down":
+            score += 4
+            reasons.append("operator flagged the analysis 👎 — label this first")
 
         if labeled:
             # labeled runs only surface when the last eval says the gold went stale

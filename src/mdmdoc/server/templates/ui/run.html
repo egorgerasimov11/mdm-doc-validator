@@ -23,6 +23,13 @@
 
 <div class="actions">
   <a class="btn" href="/ui/runs/{{ run_id }}/review"><strong>Correct</strong> — teach the model</a>
+  <button type="button" id="btn-valid" data-run="{{ run_id }}"
+          title="record a confirmed ACCEPT for this document: the precedent sticks and the pattern memory learns this shape">Mark valid ✓</button>
+  <span class="seg" id="rate-seg" data-run="{{ run_id }}" title="rate this analysis — 👎 pushes the run to the top of the training queue">
+    <button type="button" data-r="up" class="{{ 'active' if rating == 'up' }}">👍</button>
+    <button type="button" data-r="down" class="{{ 'active' if rating == 'down' }}">👎</button>
+  </span>
+  {% if rating == 'down' %}<span class="chip chip--WARNING" id="flag-bad">operator flagged this analysis</span>{% endif %}
   <button type="button" id="btn-copy" data-run="{{ run_id }}">Copy report</button>
   <a class="btn" href="/api/v1/runs/{{ run_id }}/document" download="{{ meta.file_name }}">Download document</a>
   <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.md" download="{{ meta.file_name }}.report.md">Export .md</a>
@@ -264,7 +271,10 @@
   <p id="fb-target" class="meta" hidden></p>
   <div class="actions">
     <button type="button" id="fb-go" data-run="{{ run_id }}" data-class="{{ doc_class }}">Propose a fix</button>
-    <span class="hint">the model only PROPOSES — the verdict still comes from the explicit rules</span>
+    <label class="meta"><input type="checkbox" id="fb-valid"> this document is VALID —
+      record a confirmed ACCEPT alongside the note</label>
+    <span class="hint">the model only PROPOSES — the verdict still comes from the explicit rules;
+      a saved note is ALSO auto-classified: an additive rule lands in Approvals as PENDING</span>
   </div>
 
   <div id="fb-proposal" hidden>
@@ -317,6 +327,6 @@
 {% endblock %}
 {% block script %}<script>
   /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest */
-  ["initArtifacts","initSapCompare","initTplCompare","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch"]
+  ["initArtifacts","initSapCompare","initTplCompare","initValidRate","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch"]
     .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
 </script>{% endblock %}

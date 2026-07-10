@@ -235,7 +235,10 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
         "sensitive_map": vault.sensitive_map() + smap_extra,
         "reviewer": str(sub.get("reviewer") or "egor"),
         "notes": str(sub.get("notes") or ""),
-        "scenarios": scenarios.normalize_tags(sub.get("scenarios")),
+        "scenarios": scenarios.normalize_tags(
+            list(sub.get("scenarios") or [])
+            + ([f"err_{sub.get('error_source')}"]
+               if str(sub.get("error_source") or "") in scenarios.ERROR_SOURCES else [])),
         "error_source": (str(sub.get("error_source") or "")
                          if str(sub.get("error_source") or "") in scenarios.ERROR_SOURCES else ""),
         "confirmed": True,
@@ -254,6 +257,16 @@ def submit_review(spec: str, sub: dict) -> dict:
         raise RunNotFound(spec)
     label, secrets = build_label(run_id, sub)
     append_label(label, secrets)
+    # pattern memory (D11d): a PII-free shape fingerprint of every label /
+    # valid-mark — structure only, zero model calls
+    try:
+        from . import patterns
+        run_findings = runstore.load(run_id, "findings.json") or []
+        run_meta = runstore.load(run_id, "meta.json") or {}
+        machine_v = (runstore.load(run_id, "report.json") or {}).get("verdict", "")
+        patterns.record(label, run_findings, machine_v or run_meta.get("verdict", ""))
+    except Exception:
+        pass   # pattern memory must never block a label
     return {"label_id": label["label_id"], "doc_sha256": run_id,
             "labels_count": count_labels(),
             "model_diff": label["model_predicted"]["fields_diff"]}
