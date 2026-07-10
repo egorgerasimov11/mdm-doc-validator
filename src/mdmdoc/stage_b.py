@@ -773,6 +773,37 @@ def _officer_block_guard(ext: Extraction, raw: RawDoc) -> None:
         ext.officer_snippet = snippet
 
 
+def _ground_doc_country(ext: Extraction, raw: RawDoc) -> None:
+    """The document's COUNTRY as a derived field (F3): the rules engine scopes
+    country rules (`countries: [DE]`) on fields.doc_country. Deterministic and
+    PORTABLE sources only — both sides read the same extracted fields:
+    bank_country -> IBAN prefix -> SWIFT country code; a W-9 is a US form by
+    definition, a W-8's country is its country of incorporation. Never
+    overwrites an existing value; never guesses from free text (the inventory
+    address is Python-only and deliberately NOT a source — parity)."""
+    if str(ext.fields.get("doc_country") or "").strip():
+        return
+    from .fields import to_iso2
+    cc = ""
+    if ext.doc_class == "bank":
+        cc = to_iso2(str(ext.fields.get("bank_country") or ""))
+        if not cc:
+            iban = str(ext.fields.get("iban") or "").strip().upper()
+            if len(iban) >= 2 and iban[:2].isalpha():
+                cc = iban[:2]
+        if not cc:
+            sw = str(ext.fields.get("swift_bic") or "").strip().upper()
+            if len(sw) >= 6 and sw[4:6].isalpha():
+                cc = sw[4:6]
+    else:
+        if ext.doc_type == "w9":
+            cc = "US"
+        elif ext.doc_type == "w8":
+            cc = to_iso2(str(ext.fields.get("country_incorporation") or ""))
+    if cc:
+        ext.fields["doc_country"] = cc
+
+
 def _ground_payment_instructions(ext: Extraction, raw: RawDoc) -> None:
     """A payment_instructions classification must be GROUNDED: the document has
     to carry at least one deterministic payment-instruction marker (see
@@ -1378,6 +1409,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     _officer_block_guard(ext_res, raw)
     _resolve_signature(ext_res, raw)
     _record_settlement_issuer(ext_res, raw)   # needs the officer_block flag
+    _ground_doc_country(ext_res, raw)         # F3: country scope for the rules
     _collect_inventory(ext_res, raw)
     _corroborate_across_pages(ext_res, raw)
     _finalize_provenance(ext_res, raw)

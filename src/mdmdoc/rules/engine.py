@@ -108,6 +108,7 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
     tables = cfg.get("tables", {}) or {}
     findings: list[Finding] = []
     approvals, pending_applicable = {}, []
+    country_skips: list[str] = []
     if enforce_approvals:
         from .. import rule_approvals
         approvals = rule_approvals.load()
@@ -128,6 +129,24 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
                 _trace(rid, rname, "not-applicable",
                        f"applies_to {applies}, doc_type {ext.doc_type}")
                 continue
+            # F3 country scope — BEFORE the approval gate: a rule scoped to a
+            # different country does not apply, so it must not hold RULE-GATE
+            # either. Unknown document country -> skip + one COUNTRY-1 NOTE
+            # (operator decision: inform, do not block).
+            countries = rule.get("countries")
+            if countries:
+                cc = str(ext.fields.get("doc_country") or "").strip().upper()
+                allowed = [str(c).strip().upper() for c in countries
+                           if str(c).strip()]
+                if not cc:
+                    country_skips.append(rid)
+                    _trace(rid, rname, "skipped-country-unknown",
+                           f"countries {allowed}, document country undetected")
+                    continue
+                if cc not in allowed:
+                    _trace(rid, rname, "not-applicable-country",
+                           f"countries {allowed}, doc_country {cc}")
+                    continue
             if enforce_approvals:
                 from .. import rule_approvals
                 st = rule_approvals.status(approvals, ext.doc_class, rule)
@@ -175,6 +194,12 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
                 "ENGINE-GUARD", "WARNING", "NEED_MANUAL_REVIEW",
                 f"engine_error: rule {rid} failed ({e.__class__.__name__}: {e}) "
                 "— fail-closed: held for manual review"))
+    if country_skips:
+        findings.append(Finding(
+            "COUNTRY-1", "NOTE", None,
+            f"document country undetected — {len(country_skips)} country-scoped "
+            f"rule(s) not evaluated ({', '.join(country_skips[:6])}"
+            + ("…" if len(country_skips) > 6 else "") + ")"))
     if pending_applicable:
         if pending_out is not None:
             pending_out.extend(pending_applicable)

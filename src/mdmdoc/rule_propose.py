@@ -204,6 +204,14 @@ def validate_rule(rule: dict, doc_class: str,
         bad = [t for t in at if known and t not in known]
         if bad:
             issues.append(f"applies_to has unknown doc_type(s): {bad}")
+    countries = rule.get("countries")
+    if countries is not None:
+        ok = (isinstance(countries, list) and countries
+              and all(isinstance(c, str) and re.fullmatch(r"[A-Za-z]{2}", c.strip())
+                      for c in countries))
+        if not ok:
+            issues.append("countries must be a non-empty list of 2-letter ISO codes "
+                          "(e.g. [DE, US]) — or omit the key for all countries")
     for k in ("message", "message_ru"):
         msg = str(rule.get(k, "") or "")
         # privacy: a rule message must never carry a document value (account/IBAN).

@@ -56,6 +56,7 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 - corroborate_across_pages — n/a (needs per-page perception texts; ABAP receives one flat text and has no page structure)
 - fix_zh_form — ported
 - ground_account_holder — ported
+- ground_doc_country — ported (F3: derived document country for `countries:`-scoped rules; sources bank_country → IBAN prefix → SWIFT cc → W-9⇒US / W-8⇒country_incorporation; the Python inventory-address fallback deliberately does NOT exist on either side)
 - ground_national_clearing — ported
 - collect_inventory — n/a (report/UI inventory layer + vault registration; pure
   label-anchored text regexes — portable later if the ABAP result gains an
