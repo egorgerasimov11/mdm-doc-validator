@@ -36,30 +36,31 @@
       <span id="engine-default-state"></span>
     </span>
   </div>
-  <div class="drop" id="drop">Drop a PDF, image, .eml or .zip here — or click to choose a file</div>
-  <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.eml,.zip" hidden>
+  <div class="drop" id="drop">Drop PDFs, images, .eml or .zip here (several files = analysis queue) — or click to choose</div>
+  <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.eml,.zip" multiple hidden>
   <div class="actions" id="sap-row">
     <button type="button" id="sap-attach">+ SAP data (screenshot or table export, optional)</button>
     <input type="text" id="sap-bp" placeholder="BP # (optional)" style="width:9em" hidden>
     <span class="meta" id="sap-name"></span>
     <input type="file" id="sap-file" accept=".png,.jpg,.jpeg,.pdf,.xlsx,.xlsm" hidden>
   </div>
+  <div class="actions" id="progress-row" hidden>
+    <progress id="job-progress" max="100" value="0" style="flex:1"></progress>
+    <span class="meta" id="job-stage"></span>
+  </div>
   <pre id="job-log" hidden></pre>
 </section>
 
-{% if active_jobs %}
-<section>
-  <h2>Background jobs</h2>
-  <ul class="timeline">
+<section id="queue-panel" {% if not active_jobs %}hidden{% endif %}>
+  <h2>Analysis queue <span class="meta">position · stage · cancel</span></h2>
+  <ul class="timeline" id="queue-list">
     {% for j in active_jobs %}
-    <li><span class="dot dot--WARNING"></span>
-        <span class="meta">{{ j.kind }}</span>
-        <span class="grow"><code>{{ j.id }}</code> — {{ j.status }}{% if j.progress %} · {{ j.progress[-1] }}{% endif %}</span>
+    <li class="queue-row"><span class="dot dot--WARNING"></span>
+        <span class="grow"><strong>{{ j.label or j.kind }}</strong> — {{ j.status }}{% if j.progress %} · {{ j.progress[-1] }}{% endif %}</span>
         <a class="meta" href="/ui/debug">log →</a></li>
     {% endfor %}
   </ul>
 </section>
-{% endif %}
 
 <section>
   <h2>Recent runs</h2>

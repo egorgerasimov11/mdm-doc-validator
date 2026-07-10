@@ -161,3 +161,9 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 .copy-field:hover { border-color: var(--secondary); }
 .copy-field.copied, #btn-copy-fields.copied { color: var(--accept); border-color: var(--accept); }
 #btn-copy-fields { font-size: 12px; padding: 1px 8px; vertical-align: middle; }
+
+/* D3: analysis queue */
+.queue-row { display: flex; align-items: center; gap: 8px; }
+.queue-row progress { width: 140px; }
+.queue-cancel { margin-left: auto; }
+#progress-row progress { height: 10px; }

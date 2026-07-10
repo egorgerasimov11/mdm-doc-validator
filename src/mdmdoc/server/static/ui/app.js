@@ -16,14 +16,16 @@ window.mdmdoc = (() => {
     return body;
   }
 
-  function pollJob(jobId, onLine, onDone, onError) {
+  function pollJob(jobId, onLine, onDone, onError, onTick) {
     let offset = 0;
     const tick = async () => {
       try {
         const j = await api(`/api/v1/jobs/${jobId}?after=${offset}`);
         (j.progress || []).forEach(onLine);
         offset = j.progress_len;
+        if (onTick) onTick(j);
         if (j.status === "done") return onDone(j.result || {});
+        if (j.status === "canceled") return onError("canceled by operator");
         if (j.status === "error") return onError(j.error || "job failed");
         setTimeout(tick, 2000);
       } catch (e) { onError(String(e.message || e)); }
@@ -79,19 +81,91 @@ window.mdmdoc = (() => {
       }
       try {
         const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
+        trackJob(job_id);
         pollJob(job_id, say,
-          (res) => { say("opening run page…"); location = `/ui/runs/${res.run_id}`; },
-          (err) => say("ERROR: " + err));
+          (res) => {
+            if (tracked.size === 1) { say("opening run page…"); location = `/ui/runs/${res.run_id}`; }
+            else say(`done: ${file.name} -> run ${res.run_id}`);
+          },
+          (err) => say("ERROR: " + err),
+          (j) => updateProgress(j));
       } catch (e) { say("ERROR: " + e.message); }
     }
+
+    /* queue panel (D3): tracked check jobs, live positions, cancel buttons */
+    const tracked = new Set();
+    let queueTimer = null;
+    const bar = document.getElementById("job-progress");
+    const stageEl = document.getElementById("job-stage");
+    const progRow = document.getElementById("progress-row");
+
+    function updateProgress(j) {
+      if (!bar || j.status !== "running") return;
+      progRow.hidden = false;
+      let pct = j.percent || 0;
+      if (j.estimate_s && j.started) {
+        const elapsed = (Date.now() - Date.parse(j.started + "Z")) / 1000;
+        const eta = Math.min(96, Math.round(100 * elapsed / j.estimate_s));
+        pct = Math.max(pct, Math.min(pct + 12, eta));   // ETA glide, capped near the next stage
+      }
+      bar.value = pct;
+      stageEl.textContent = (j.stage || "starting") + " · " + pct + "%";
+    }
+
+    function trackJob(id) {
+      tracked.add(id);
+      renderQueue();
+      if (!queueTimer) queueTimer = setInterval(renderQueue, 1500);
+    }
+
+    async function renderQueue() {
+      const panel = document.getElementById("queue-panel");
+      const list = document.getElementById("queue-list");
+      if (!panel || !list) return;
+      let all = [];
+      try { all = await api("/api/v1/jobs"); } catch (e) { return; }
+      const rows = all.filter(j => tracked.has(j.id) ||
+                                   (j.kind === "check" && (j.status === "queued" || j.status === "running")));
+      if (!rows.length) { panel.hidden = true; clearInterval(queueTimer); queueTimer = null; return; }
+      panel.hidden = false;
+      list.innerHTML = "";
+      rows.forEach(j => {
+        const li = document.createElement("li");
+        li.className = "queue-row";
+        const state = j.status === "running" ? (j.stage ? `running · ${j.stage} ${j.percent || 0}%` : "running")
+                    : j.status === "queued" ? (j.queue_pos > 0 ? `waiting #${j.queue_pos}` : "starting…")
+                    : j.status;
+        const runId = j.result && j.result.run_id;
+        li.innerHTML = `<span class="dot ${j.status === "running" ? "dot--WARNING" : j.status === "done" ? "dot--ok" : j.status === "error" ? "dot--down" : ""}"></span>
+          <span class="grow"><strong>${(j.label || j.kind)}</strong> — ${state}</span>` +
+          (j.status === "running" ? `<progress max="100" value="${j.percent || 0}"></progress>` : "") +
+          (runId ? ` <a href="/ui/runs/${runId}">open run →</a>` : "");
+        if (j.cancelable) {
+          const btn = document.createElement("button");
+          btn.type = "button"; btn.textContent = "Cancel"; btn.className = "queue-cancel";
+          btn.onclick = async () => {
+            btn.disabled = true;
+            try { await api(`/api/v1/jobs/${j.id}/cancel`, { method: "POST" }); }
+            catch (e) { btn.textContent = "…"; }
+          };
+          li.appendChild(btn);
+        }
+        list.appendChild(li);
+      });
+    }
+    renderQueue();
+
+    async function sendAll(files) {
+      for (const f of files) await send(f);
+    }
     drop.onclick = () => input.click();
-    input.onchange = () => input.files[0] && send(input.files[0]);
+    input.onchange = () => input.files.length && sendAll([...input.files]);
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("hover"); };
     drop.ondragleave = () => drop.classList.remove("hover");
     drop.ondrop = (e) => {
       e.preventDefault(); drop.classList.remove("hover");
-      const f = e.dataTransfer.files[0];
-      if (f) send(f);
+      const fs = [...e.dataTransfer.files];
+      if (fs.length) sendAll(fs);
     };
 
     // default-engine setting (persists on the server; env pin disables it)
