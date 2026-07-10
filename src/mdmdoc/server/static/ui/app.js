@@ -905,6 +905,14 @@ window.mdmdoc = (() => {
       const ok = d.model_host && d.model_host.reachable;
       chip.innerHTML = `<span class="dot ${ok ? "dot--ok" : "dot--down"}"></span>` +
         (ok ? d.model_host.source : "model host down");
+      // the dashboard used to repeat this in its own strip; it lives here now
+      const roles = d.roles || {};
+      chip.title = [
+        ok ? "model host: " + d.model_host.source : "model host unreachable",
+        roles.TEXT ? "TEXT " + roles.TEXT.resolved : "",
+        roles.VISION ? "VISION " + roles.VISION.resolved : "",
+        "tesseract " + ((d.tesseract && d.tesseract.path) ? "ok" : "missing"),
+      ].filter(Boolean).join(" · ");
     } catch (e) { chip.textContent = ""; }
   }
   refreshChip();

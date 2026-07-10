@@ -78,10 +78,14 @@ def create_app(mode: str | None = None) -> FastAPI:
         from .ui import router_ui
         app.include_router(router_ui)
 
-        # optional address-validator tab (separate project; same URL when installed)
+        # optional address-validator tab (separate project; same URL when installed).
+        # app.state.addr_enabled drives the nav entry — a link to an unmounted
+        # sub-app is a dead link, so the tab only exists when the mount succeeded.
+        app.state.addr_enabled = False
         try:
             from addrval.server import create_address_app
             app.mount("/address", create_address_app())
+            app.state.addr_enabled = True
         except ImportError:
             logging.getLogger("mdmdoc").info("addrval not installed — /address tab disabled")
 

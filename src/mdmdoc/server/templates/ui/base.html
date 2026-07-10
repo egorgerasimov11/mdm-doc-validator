@@ -11,19 +11,28 @@
 <header>
   <div class="wrap header-row">
     <span class="wordmark">mdmdoc</span>
-    <nav>
-      <a href="/ui" class="{{ 'current' if page == 'dashboard' }}">Dashboard</a>
-      <a href="/ui/training" class="{{ 'current' if page == 'training' }}">Training</a>
+    <nav class="tabbar">
+      <a href="/ui" class="{{ 'current' if page == 'documents' }}">Documents</a>
       <a href="/ui/rules" class="{{ 'current' if page == 'rules' }}">Rules</a>
-      <a href="/ui/rules/approve">Approvals</a>
+      <a href="/ui/training" class="{{ 'current' if page == 'training' }}">Training</a>
       <a href="/ui/bulk" class="{{ 'current' if page == 'bulk' }}">Bulk</a>
       <a href="/ui/debug" class="{{ 'current' if page == 'debug' }}">Debug</a>
-      <a href="/address/">Address</a>
-      <a href="/ui/tax" class="{{ 'current' if page == 'tax' }}">Tax</a>
+      {% if request.app.state.addr_enabled %}<a href="/address/">Address</a>{% endif %}
     </nav>
     <span id="host-chip" class="meta host-chip">…</span>
   </div>
 </header>
+{% if page == 'rules' %}
+<div class="wrap"><nav class="subtabs">
+  <a href="/ui/rules" class="{{ 'current' if subpage == 'editor' }}">Rule editor</a>
+  <a href="/ui/rules/approve" class="{{ 'current' if subpage == 'approvals' }}">Approvals</a>
+</nav></div>
+{% elif page == 'bulk' %}
+<div class="wrap"><nav class="subtabs">
+  <a href="/ui/bulk" class="{{ 'current' if subpage == 'bulk' }}">Documents &amp; tables</a>
+  <a href="/ui/tax" class="{{ 'current' if subpage == 'tax' }}">US tax numbers</a>
+</nav></div>
+{% endif %}
 <main class="wrap">
 {% block content %}{% endblock %}
 </main>

@@ -175,3 +175,15 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 /* the hidden attribute must always win over class display rules
    (.actions{display:flex} was overriding [hidden] on the progress rows) */
 [hidden] { display: none !important; }
+
+/* N1: one window — grouped tabs + sub-tabs. The primary tab bar reuses the
+   existing nav/nav a.current rules; only the sub-tab row is new. */
+.subtabs { display: flex; gap: 16px; padding: 8px 0 0; border-bottom: 1px solid var(--divider); }
+.subtabs a { font-size: 13px; color: var(--secondary); text-decoration: none; padding: 4px 0 8px; }
+.subtabs a.current { color: var(--ink); font-weight: 600; box-shadow: inset 0 -1px 0 var(--ink); }
+
+/* classes the markup already used but the stylesheet never defined */
+.bulk-cards { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
+.card { flex: 1 1 220px; border: 1px solid var(--divider); border-radius: 8px; padding: 14px 16px; }
+.cmp-table th, .cmp-table td { padding: 4px 10px 4px 0; }
+.ok { color: var(--accept); }

@@ -35,9 +35,14 @@ def _asset_version() -> str:
 
 
 def _ctx(**kw) -> dict:
+    """Globals every page gets. `page` is the primary NAV GROUP (documents /
+    rules / training / bulk / debug) and `subpage` the optional sub-tab — one
+    route family can span several routes (a run page still lights 'Documents',
+    approvals still lights 'Rules'). Template-only; nothing in Python reads them."""
     return {"token": os.environ.get("MDMDOC_API_TOKEN", ""),
             "labels_count": dataset.count_labels(),
             "asset_v": _asset_version(),
+            "subpage": "",
             **kw}
 
 
@@ -69,7 +74,8 @@ def _doctor_safe() -> dict:
 
 @router_ui.get("/ui", response_class=HTMLResponse)
 def dashboard(request: Request):
-    doc = _doctor_safe()
+    # no doctor probe here any more: the header chip fetches /doctor async
+    # (refreshChip), so the page no longer blocks on the model host
     rows = runstore.list_runs()
     labeled = _labeled_ids()
     rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
@@ -77,7 +83,7 @@ def dashboard(request: Request):
         r["labeled"] = r["run_id"] in labeled
     env_eng = os.environ.get("MDMDOC_ENGINE", "").strip().lower()
     return templates.TemplateResponse(request, "dashboard.html",
-                                      _ctx(doctor=doc, runs=rows[:40], page="dashboard",
+                                      _ctx(runs=rows[:40], page="documents",
                                            default_effort=config.default_effort(),
                                            engine_default=config.engine_mode(),
                                            engine_modes=list(config.ENGINE_MODES),
@@ -140,7 +146,7 @@ def run_page(request: Request, run_id: str, flash: str = ""):
     from ..web_enrichment import BANNER as web_banner
     label = next((l for l in dataset.load_labels() if l.get("doc_sha256") == rid), None)
     return templates.TemplateResponse(request, "run.html", _ctx(
-        page="runs", run_id=rid, meta=meta, pub=pub, findings=findings,
+        page="documents", run_id=rid, meta=meta, pub=pub, findings=findings,
         report=rep, data_rows=data_rows, labeled=rid in _labeled_ids(), flash=flash,
         preview_pages=preview_pages, total_pages=stage_a_pub.get("pages") or 1,
         has_sap_shot=bool(meta.get("sap_path")) and meta.get("sap_kind") != "table",
@@ -221,7 +227,7 @@ def review_page(request: Request, run_id: str):
     meta = runstore.load(form["run_id"], "meta.json") or {}
     stage_a_pub = runstore.load(form["run_id"], "stage_a.json") or {}
     return templates.TemplateResponse(request, "review.html", _ctx(
-        page="runs", form=form, preview_pages=_preview_pages(meta, stage_a_pub)))
+        page="documents", form=form, preview_pages=_preview_pages(meta, stage_a_pub)))
 
 
 @router_ui.get("/ui/training", response_class=HTMLResponse)
@@ -337,7 +343,7 @@ def rules_page(request: Request, doc_class: str = "bank"):
     except Exception:  # rendering must never fail on bad YAML
         pass
     return templates.TemplateResponse(request, "rules.html", _ctx(
-        page="rules", doc_class=doc_class, yaml_text=text, rule_count=n,
+        page="rules", subpage="editor", doc_class=doc_class, yaml_text=text, rule_count=n,
         unified=unified))
 
 
@@ -372,7 +378,7 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
     except Exception:  # the approvals page must never fail on stats
         proposals = []
     return templates.TemplateResponse(request, "rules_approve.html", _ctx(
-        page="rules", doc_class=doc_class, rows=rows, counts=counts,
+        page="rules", subpage="approvals", doc_class=doc_class, rows=rows, counts=counts,
         proposals=proposals))
 
 
@@ -396,13 +402,13 @@ def _tax_history() -> list[dict]:
 
 @router_ui.get("/ui/bulk", response_class=HTMLResponse)
 def bulk_page(request: Request):
-    return templates.TemplateResponse(request, "bulk.html", _ctx(page="bulk"))
+    return templates.TemplateResponse(request, "bulk.html", _ctx(page="bulk", subpage="bulk"))
 
 
 @router_ui.get("/ui/tax", response_class=HTMLResponse)
 def tax_page(request: Request):
     return templates.TemplateResponse(request, "tax.html", _ctx(
-        page="tax", result=None, error=None, history=_tax_history()))
+        page="bulk", subpage="tax", result=None, error=None, history=_tax_history()))
 
 
 @router_ui.post("/ui/tax/validate", response_class=HTMLResponse)
@@ -415,7 +421,7 @@ async def tax_validate(request: Request):
     up = form.get("file")
     if up is None or not getattr(up, "filename", ""):
         return templates.TemplateResponse(request, "tax.html", _ctx(
-            page="tax", result=None, error="no file uploaded", history=_tax_history()))
+            page="bulk", subpage="tax", result=None, error="no file uploaded", history=_tax_history()))
     stem = re.sub(r"[^\w.\-]+", "_", Path(up.filename).stem)[:60] or "export"
     fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{stem}_VALIDATED.xlsx"
     _TAX_DIR.mkdir(parents=True, exist_ok=True)
@@ -431,12 +437,12 @@ async def tax_validate(request: Request):
                 cat_col=str(form.get("cat_col") or "").strip() or None)
     except Exception as exc:  # surface as a page error, never a 500
         return templates.TemplateResponse(request, "tax.html", _ctx(
-            page="tax", result=None,
+            page="bulk", subpage="tax", result=None,
             error=f"validation failed: {exc.__class__.__name__}: {exc}",
             history=_tax_history()))
     summary["fname"] = fname
     return templates.TemplateResponse(request, "tax.html", _ctx(
-        page="tax", result=summary, error=None, history=_tax_history()))
+        page="bulk", subpage="tax", result=summary, error=None, history=_tax_history()))
 
 
 @router_ui.get("/ui/tax/download/{name}")

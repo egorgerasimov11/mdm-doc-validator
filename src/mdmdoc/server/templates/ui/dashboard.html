@@ -1,14 +1,8 @@
 {% extends "base.html" %}
 {% block title %}mdmdoc — dashboard{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
-<p class="meta" id="doctor-strip">
-  {% set mh = doctor.model_host %}
-  <span class="dot {{ 'dot--ok' if mh.reachable else 'dot--down' }}"></span>
-  {% if mh.reachable %}{{ mh.source }} · TEXT {{ doctor.roles.TEXT.resolved if doctor.roles.TEXT }} · VISION {{ doctor.roles.VISION.resolved if doctor.roles.VISION }}{% else %}model host unreachable{% endif %}
-  · tesseract {{ 'ok' if doctor.tesseract.path else 'missing' }}
-  · {{ labels_count }} labels
-</p>
+<h1>Documents</h1>
+<p class="meta">{{ labels_count }} labels · model host and tesseract status in the header chip (hover for details); full doctor on <a href="/ui/debug">Debug</a></p>
 
 <section>
   <div class="actions">
