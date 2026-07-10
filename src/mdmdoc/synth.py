@@ -223,15 +223,41 @@ def _spec_list(rng: random.Random) -> list[dict]:
     ):
         specs.append({"template": "w9", **spec})
         i += 1
+    # --- v3 quality-wave additions (APPENDED: earlier docs stay byte-stable) ---
+    specs.append({"template": "letter_role", "lang": "en", "cc": "GB",
+                  "holder": _COMPANIES[i % len(_COMPANIES)],
+                  "validity": "valid", "sig": "unsigned"}); i += 1
+    specs.append({"template": "letter_officer", "lang": "en", "cc": "DE",
+                  "holder": _COMPANIES[i % len(_COMPANIES)],
+                  "validity": "valid", "sig": "unsigned"}); i += 1
+    specs.append({"template": "w9_esig", "tin": "EIN", "boxed": False,
+                  "cls": "Limited liability company", "signed": True}); i += 1
+    specs.append({"template": "w8bene", "signed": True}); i += 1
+    specs.append({"template": "w8bene", "signed": False}); i += 1
+    specs.append({"template": "packet3", "lang": "en", "cc": "NL",
+                  "holder": _COMPANIES[i % len(_COMPANIES)],
+                  "validity": "valid", "sig": "unsigned"}); i += 1
+    specs.append({"template": "ssi_letter", "lang": "en", "cc": "FR",
+                  "holder": _COMPANIES[i % len(_COMPANIES)],
+                  "validity": "valid", "sig": "unsigned"}); i += 1
+    specs.append({"template": "zh_notice", "lang": "zh", "cc": "DE",
+                  "holder": "假冒贸易有限公司",
+                  "validity": "valid", "sig": "unsigned"}); i += 1
     return specs
 
 
 def _render_pdf(path: Path, text: str) -> None:
+    """\f (form feed) in the text forces an explicit page break — multi-page
+    templates (W-8, packets) control their page layout with it."""
     import fitz
     doc = fitz.open()
     page = doc.new_page()
     y = 80
     for line in text.splitlines():
+        if line == "\f":
+            page = doc.new_page()
+            y = 80
+            continue
         page.insert_text((72, y), line, fontsize=10)
         y += 16
         if y > 780:
@@ -276,7 +302,59 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
     """-> label row (schema-compatible with dataset/labels.jsonl)."""
     from .privacy import mask
     tpl = spec["template"]
-    if tpl == "w9":
+    if tpl == "w9_esig":
+        doc_class = "w9"
+        holder = _COMPANIES[idx % len(_COMPANIES)]
+        person = _PEOPLE[idx % len(_PEOPLE)]
+        text, truth = _w9_text(rng, holder, spec["tin"], spec["boxed"],
+                               spec["cls"], signed=False)
+        text += f"\n{person}\nDigitally signed by {person}\nDate 2026.01.27"
+        truth["signed"] = True
+        truth["sign_date"] = "2026.01.27"
+        doc_type = "w9"
+        scen = ["synth_w9", "synth_w9_esig"]
+        fname = f"w9_esig_{idx:03d}.pdf"
+    elif tpl == "w8bene":
+        doc_class = "w9"
+        company = "Nordwind Maschinenbau GmbH"
+        person = _PEOPLE[idx % len(_PEOPLE)]
+        ftin = "DE 29/815/" + "".join(rng.choice("0123456789") for _ in range(5))
+        signed = bool(spec.get("signed"))
+        pages = [
+            "Form W-8BEN-E Certificate of Status of Beneficial Owner for United "
+            "States Tax Withholding and Reporting (Entities)\n"
+            "Part I  Identification of Beneficial Owner\n"
+            f"1 Name of organization that is the beneficial owner: {company}\n"
+            "2 Country of incorporation or organization: Germany\n"
+            "4 Chapter 3 Status: Corporation\n"
+            "5 Chapter 4 Status (FATCA status): Active NFFE. Complete Part XXV.\n"
+            "6 Permanent residence address: Musterstrasse 12\n"
+            "City or town, state or province, country: 28195 Bremen, Germany\n"
+            f"9b Foreign TIN: {ftin}",
+            "Part XXV  Active NFFE\n"
+            "39 I certify that the entity identified in Part I is a foreign "
+            "entity that is an active NFFE.",
+            "Part XXX  Certification"
+            + (f"\nSign Here  (signature) {person}\nPrint Name of individual "
+               f"authorized to sign: {person}\nDate (MM-DD-YYYY): 02-03-2026\n"
+               "I certify that I have the capacity to sign for the entity "
+               "identified on line 1 of this form." if signed else ""),
+        ]
+        text = "\n\f\n".join(pages)
+        truth = {"form_variant": "W-8BEN-E", "legal_name": company,
+                 "country_incorporation": "Germany",
+                 "chapter3_status": "Corporation", "chapter4_status": "Active NFFE",
+                 "chapter4_cert_section": "Part XXV", "foreign_tin": ftin,
+                 "us_tin": "", "address_street": "Musterstrasse 12",
+                 "address_city_country": "28195 Bremen, Germany",
+                 "treaty_country": "", "signed": signed,
+                 "sign_date": "02-03-2026" if signed else "",
+                 "signer_name": person if signed else "",
+                 "capacity_checked": signed}
+        doc_type = "w8"
+        scen = ["synth_w8", "synth_w8_signed" if signed else "synth_w8_unsigned"]
+        fname = f"w8bene_{idx:03d}.pdf"
+    elif tpl == "w9":
         doc_class = "w9"
         holder = _PEOPLE[idx % len(_PEOPLE)] if "Individual" in spec["cls"] \
             else _COMPANIES[idx % len(_COMPANIES)]
@@ -336,6 +414,47 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
             text = "\n".join(_VOIDED).format(holder=holder, bank="First Meridian Bank",
                                              acct=acct)
             doc_type = "voided_check"
+        elif tpl == "letter_role":
+            text = "\n".join([
+                bank, "Bank confirmation letter", f"Date: {date}",
+                f"This letter is to verify that {holder} is a customer of {bank}.",
+                f"IBAN: {iban}", f"BIC: {bic}",
+                "Account signatory", person, signoff])
+            doc_type = "bank_letter"
+        elif tpl == "letter_officer":
+            text = "\n".join([
+                bank, "Bank confirmation letter", f"Date: {date}",
+                "To whom it may concern,",
+                f"We confirm that {holder} holds the following account with our bank:",
+                f"IBAN: {iban}", f"BIC: {bic}",
+                "Sincerely,", person, "Vice President", "Tel: +49 69 555 0000", bank])
+            doc_type = "bank_letter"
+        elif tpl == "packet3":
+            letter = "\n".join(_LETTER["en"]).format(
+                bank=bank, holder=holder, iban=iban, bic=bic, date=date,
+                signoff=_SIGNOFF["esig"].format(tag=f"SYN-{idx:04d}",
+                                                person=person, bank=bank))
+            text = "\n\f\n".join([
+                f"{holder}\nSupplier banking sheet\nBeneficiary: {holder}\nIBAN {iban}",
+                "General terms and conditions.\nNothing of interest on this page.",
+                letter])
+            doc_type = "bank_letter"
+        elif tpl == "ssi_letter":
+            text = "\n".join([
+                bank, "Standard Settlement Instructions", f"Date: {date}",
+                f"Account held with {bank}.", f"Beneficiary: {holder}",
+                f"IBAN: {iban}", f"BIC: {bic}",
+                "Please use these settlement instructions for all future payments.",
+                "Sincerely,", person, "Vice President", "Tel: +33 1 55 00 00 00", bank])
+            doc_type = "payment_instructions"
+        elif tpl == "zh_notice":
+            zh_acct = "6222" + "".join(rng.choice("0123456789") for _ in range(15))
+            grouped = " ".join(zh_acct[j:j + 4] for j in range(0, len(zh_acct), 4))
+            text = "\n".join([
+                "会议通知", "开户银行: 某某银行北京分行",
+                f"收款账号: {grouped}", f"户名: {holder}",
+                "联系人: 王伟  电话: 13712346060", "会务组"])
+            doc_type = "other"
         else:
             raise ValueError(tpl)
         signed_truth = sig in ("esig",)
@@ -350,8 +469,31 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
                  "routing_aba": "021000021" if tpl == "voided" else "",
                  "signed": signed_truth,
                  "signature_evidence": evidence}
+        if tpl == "letter_role":
+            truth["account_signatory"] = person
+            truth["signature_evidence"] = ""
+        elif tpl == "letter_officer":
+            truth["signature_evidence"] = "typed officer block"
+        elif tpl == "packet3":
+            truth["signed"] = True
+            truth["signature_evidence"] = "DocuSign envelope present"
+        elif tpl == "ssi_letter":
+            truth["signature_evidence"] = "typed officer block"
+            truth["officer_block"] = True
+            truth["settlement_issuer_strong"] = True
+        elif tpl == "zh_notice":
+            truth.update({"bank_name": "某某银行北京分行", "bank_country": "CN",
+                          "swift_bic": "", "iban": "", "account_number": zh_acct})
         scen = [f"synth_{doc_type}", f"synth_lang_{spec.get('lang', 'en')}",
                 f"synth_iban_{spec['validity']}", f"synth_sig_{sig}"]
+        if tpl in ("letter_role", "packet3"):
+            scen.append(f"synth_{tpl}")
+        elif tpl == "letter_officer":
+            scen.append("synth_officer_block")
+        elif tpl == "ssi_letter":
+            scen.append("synth_ssi_issuer")
+        elif tpl == "zh_notice":
+            scen.append("synth_zh")
         if not holder and tpl != "invoice":
             scen.append("synth_no_holder")
         fname = f"{doc_type}_{idx:03d}.pdf"
@@ -370,10 +512,11 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
     det = _det_expected(pdf, doc_class)
 
     sens = []
-    for k in ("iban", "account_number", "routing_aba", "tin_raw"):
+    for k in ("iban", "account_number", "routing_aba", "tin_raw", "foreign_tin"):
         v = str(truth.get(k) or "")
         if v:
-            kind = "tin" if k == "tin_raw" else ("iban" if k == "iban" else "account_number")
+            kind = ("tin" if k in ("tin_raw", "foreign_tin")
+                    else "iban" if k == "iban" else "account_number")
             sens.append({"kind": kind, "masked": mask(kind, v), "fake": v})
 
     return {"label_id": f"synth-{GENERATOR_VERSION}-{idx:03d}",
