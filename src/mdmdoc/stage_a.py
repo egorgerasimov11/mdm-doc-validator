@@ -307,12 +307,20 @@ def _deep_read_pages(path: Path, picks: list, render_dir: Path, raw: RawDoc,
     doc.close()
     raw.tesseract_text = "\n".join(tess_parts).strip()
     if use_vision and raw.images:
-        vt = mc.vision("VISION", VISION_TRANSCRIBE_PROMPT, raw.images,
-                       options={"temperature": 0, "seed": 7})
-        if not vt.startswith("[vision"):
-            raw.vision_text = vt
-        else:
-            raw.warnings.append(vt)
+        # chunked transcribe (P1): several full-page renders in ONE call
+        # overflow the vision context (real 400 on an 8-page W-8 scan)
+        step = max(1, mc.VISION_MAX_IMAGES_PER_CALL)
+        parts = []
+        for i in range(0, len(raw.images), step):
+            vt = mc.vision("VISION", VISION_TRANSCRIBE_PROMPT, raw.images[i:i + step],
+                           options={"temperature": 0, "seed": 7})
+            if not vt.startswith("[vision"):
+                parts.append(vt)
+            else:
+                raw.warnings.append(vt)
+            if mc.LAST_VISION_NOTE:
+                raw.warnings.append(mc.LAST_VISION_NOTE)
+        raw.vision_text = "\n".join(parts).strip()
 
 
 def _read_image_file(path: Path, render_dir: Path, raw: RawDoc, use_vision: bool) -> None:

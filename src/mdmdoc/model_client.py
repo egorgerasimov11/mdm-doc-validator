@@ -241,36 +241,97 @@ def generate_json(role_or_model: str, prompt: str, system: str | None = None,
 # JSON result can still surface WHY the read failed (runs are serialized under
 # PIPELINE_LOCK, so a module-level slot is safe enough for the operator console)
 LAST_VISION_ERROR = ""
+# last payload-guard action (trimmed image count / downscale) — informational
+LAST_VISION_NOTE = ""
+
+# Payload guards (P1, quality wave): image tokens count against num_ctx, and
+# several full-page renders in ONE /api/generate overflow it (real case: an
+# 8-page W-8 scan -> 3 pages @170dpi in one transcribe -> HTTP 400). Caps are
+# env-tunable; the degrade path drops to 1 image on a context-shaped 400.
+VISION_MAX_IMAGES_PER_CALL = int(os.environ.get("MDMDOC_VISION_MAX_IMAGES", "2"))
+VISION_MAX_IMAGE_BYTES = int(os.environ.get("MDMDOC_VISION_MAX_IMG_BYTES", "1500000"))
+
+
+def _load_image_capped(path: str) -> bytes | None:
+    """Read an image file; if it exceeds VISION_MAX_IMAGE_BYTES, downscale
+    in memory (JPEG q85, shrinking iterations). NEVER returns more bytes
+    than the original — for JPEG-hostile content the original wins."""
+    try:
+        data = open(path, "rb").read()
+    except Exception:
+        return None
+    if len(data) <= VISION_MAX_IMAGE_BYTES:
+        return data
+    try:
+        import io
+
+        from PIL import Image
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        best = data
+        factor = (VISION_MAX_IMAGE_BYTES / len(data)) ** 0.5
+        for _ in range(3):
+            w = max(640, int(img.width * factor))
+            h = max(640, int(img.height * factor))
+            out = io.BytesIO()
+            img.resize((w, h)).save(out, format="JPEG", quality=85)
+            enc = out.getvalue()
+            if len(enc) < len(best):
+                best = enc
+            if len(enc) <= VISION_MAX_IMAGE_BYTES or (w, h) == (640, 640):
+                break
+            factor *= 0.7
+        return best
+    except Exception:
+        return data   # better an oversized attempt than none
 
 
 def vision(role_or_model: str, prompt: str, images: list[str], system: str | None = None,
            options: dict | None = None, keep_alive=0, timeout: int = 420, retries: int = 2,
            fmt: str | None = None) -> str:
-    global LAST_VISION_ERROR
+    global LAST_VISION_ERROR, LAST_VISION_NOTE
+    LAST_VISION_NOTE = ""
     model = resolve(role_or_model) if role_or_model in ROLES else role_or_model
     b64 = []
+    downscaled = 0
     for p in images:
-        try:
-            b64.append(base64.b64encode(open(p, "rb").read()).decode("ascii"))
-        except Exception:
+        raw_bytes = _load_image_capped(p)
+        if raw_bytes is None:
             continue
+        try:
+            if len(raw_bytes) < os.path.getsize(p):
+                downscaled += 1
+        except OSError:
+            pass
+        b64.append(base64.b64encode(raw_bytes).decode("ascii"))
     if not b64:
         return "[vision: no readable images]"
-    body = {"model": model, "prompt": prompt, "images": b64, "stream": False,
-            "keep_alive": keep_alive,
-            # num_ctx: image tokens count against the context window; a large
-            # screenshot alone can exceed Ollama's 4096 default (real case: a 2x
-            # SAP capture = ~4k image tokens -> HTTP 400 exceed_context_size)
-            "options": {"temperature": 0.1, "num_ctx": 16384, "num_predict": 2048,
-                        **(options or {})}}
-    if system:
-        body["system"] = system
-    if fmt:
-        body["format"] = fmt
+    notes = []
+    if len(b64) > VISION_MAX_IMAGES_PER_CALL:
+        notes.append(f"vision payload trimmed to {VISION_MAX_IMAGES_PER_CALL} "
+                     f"of {len(b64)} images")
+        b64 = b64[:VISION_MAX_IMAGES_PER_CALL]
+    if downscaled:
+        notes.append(f"{downscaled} image(s) downscaled to fit the payload cap")
+    LAST_VISION_NOTE = "; ".join(notes)
+
+    def _body(imgs: list[str]) -> dict:
+        body = {"model": model, "prompt": prompt, "images": imgs, "stream": False,
+                "keep_alive": keep_alive,
+                # num_ctx: image tokens count against the context window; a large
+                # screenshot alone can exceed Ollama's 4096 default (real case: a 2x
+                # SAP capture = ~4k image tokens -> HTTP 400 exceed_context_size)
+                "options": {"temperature": 0.1, "num_ctx": 16384, "num_predict": 2048,
+                            **(options or {})}}
+        if system:
+            body["system"] = system
+        if fmt:
+            body["format"] = fmt
+        return body
+
     last = ""
     for attempt in range(retries + 1):
         try:
-            r = _SESSION.post(f"{host()}/api/generate", json=body, timeout=timeout)
+            r = _SESSION.post(f"{host()}/api/generate", json=_body(b64), timeout=timeout)
             r.raise_for_status()
             resp = r.json().get("response", "")
             if resp.strip():
@@ -284,9 +345,17 @@ def vision(role_or_model: str, prompt: str, images: list[str], system: str | Non
             body_txt = getattr(getattr(e, "response", None), "text", "") or ""
             if body_txt:
                 last += f" — {body_txt[:200]}"
+            # context-shaped failure with a multi-image payload: degrade once
+            # to a single image before the next attempt (P1)
+            low = last.lower()
+            if len(b64) > 1 and ("context" in low or "400" in low):
+                b64 = b64[:1]
+                LAST_VISION_NOTE = (LAST_VISION_NOTE + "; " if LAST_VISION_NOTE else "") \
+                    + "degraded to 1 image after context-overflow error"
         time.sleep(2 * (attempt + 1))
-    LAST_VISION_ERROR = last
-    return f"[vision error: {last}]"
+    LAST_VISION_ERROR = (f"{last} — {len(b64)} image(s), "
+                         f"{sum(map(len, b64)) // 1024} KB b64")
+    return f"[vision error: {LAST_VISION_ERROR}]"
 
 
 def generate_json_vision(prompt: str, images: list[str], retries: int = 2):
