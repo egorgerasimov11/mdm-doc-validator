@@ -219,6 +219,61 @@ def approve_rule(doc_class: str, body: dict) -> dict:
     return {"ok": True, "updated": n, "decision": decision}
 
 
+@router_teach.get("/rules/deleted", tags=["rules"])
+def deleted_rules() -> list[dict]:
+    """F2a: the restore menu — every physically deleted rule's backup."""
+    from .. import rules_io
+    return rules_io.list_deleted()
+
+
+@router_teach.post("/rules/{doc_class}/restore", tags=["rules"])
+def restore_rule(doc_class: str, body: dict) -> dict:
+    """F2a: bring a deleted rule back from its rules/deleted/ backup. The block
+    returns verbatim and starts PENDING — the hard gate still holds."""
+    from .. import oplog, rules_io
+    if doc_class not in ("bank", "w9"):
+        raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
+    backup = str(body.get("backup") or "")
+    try:
+        out = rules_io.restore_rule(doc_class, backup)
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    oplog.log("rule-restore", rule_id=out["rule_id"], doc_class=doc_class,
+              detail=f"from {backup}")
+    return {"ok": True, **out}
+
+
+@router_teach.get("/rules/{doc_class}/block/{rule_id}", response_class=PlainTextResponse,
+                  tags=["rules"])
+def get_rule_block(doc_class: str, rule_id: str) -> str:
+    """F2a: ONE rule's verbatim block for the inline editor."""
+    from .. import rules_io
+    try:
+        return rules_io.rule_block(doc_class, rule_id)
+    except ValueError as e:
+        raise api_error(404, "not_found", str(e))
+
+
+@router_teach.post("/rules/{doc_class}/edit", tags=["rules"])
+def edit_rule(doc_class: str, body: dict) -> dict:
+    """F2a: inline single-rule edit. Full-file validation runs; the edited rule
+    re-pends automatically (content hash) — the approval gate is untouched."""
+    from .. import oplog, rules_io
+    if doc_class not in ("bank", "w9"):
+        raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
+    rid = str(body.get("rule_id") or "")
+    block = str(body.get("block") or "")
+    if not rid or not block.strip():
+        raise api_error(400, "bad_request", "rule_id and block required")
+    try:
+        out = rules_io.edit_rule(doc_class, rid, block)
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    oplog.log("rule-save", rule_id=rid, doc_class=doc_class,
+              detail=f"inline edit {rid}")
+    return {"ok": True, **out}
+
+
 @router_teach.post("/rules/{doc_class}/challenges/dismiss", tags=["rules"])
 def dismiss_challenges(doc_class: str, body: dict) -> dict:
     """E5: the operator looked at a challenged rule and decided it STANDS —

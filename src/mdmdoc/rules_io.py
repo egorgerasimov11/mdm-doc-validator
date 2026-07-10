@@ -240,13 +240,56 @@ def list_deleted() -> list[dict]:
     out = []
     for p in sorted(d.glob("*.yaml"), reverse=True):
         rule_id = p.name.rsplit("-", 1)[0]
-        header = ""
+        header, doc_class = "", ""
         try:
             header = p.read_text(encoding="utf-8").splitlines()[0].lstrip("# ")
+            m = re.search(r"doc_class (\w+)", header)
+            doc_class = m.group(1) if m else ""
         except Exception:
             pass
-        out.append({"backup": p.name, "rule_id": rule_id, "header": header})
+        out.append({"backup": p.name, "rule_id": rule_id, "doc_class": doc_class,
+                    "header": header})
     return out
+
+
+def rule_block(doc_class: str, rule_id: str) -> str:
+    """One rule's verbatim block text (inline editor read, F2a)."""
+    from .rule_propose import _rule_block_span
+    text = rules_text(doc_class)
+    span = _rule_block_span(text, rule_id)
+    if not span:
+        raise ValueError(f"rule {rule_id} not found in the {doc_class} rules")
+    return "".join(text.splitlines(keepends=True)[span[0]:span[1]])
+
+
+def edit_rule(doc_class: str, rule_id: str, block: str) -> dict:
+    """Replace ONE rule's block with operator-edited YAML (inline editor save).
+    The operator's text splices back VERBATIM — his comments and the file's
+    indentation style survive (the editor serves the block's exact bytes, so
+    round-trips are byte-stable). The block must parse to exactly that rule;
+    validation is the same the whole file gets. The edit changes the content
+    hash -> the rule re-pends by design."""
+    try:
+        parsed = yaml.safe_load(block)
+    except yaml.YAMLError as e:
+        raise ValueError(f"YAML parse error: {e}")
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if not (isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict)):
+        raise ValueError("the editor must contain exactly one rule block")
+    if str(parsed[0].get("id") or "") != rule_id:
+        raise ValueError(f"the block's id ({parsed[0].get('id')!r}) must stay {rule_id}")
+    from .rule_propose import _rule_block_span
+    text = rules_text(doc_class)
+    span = _rule_block_span(text, rule_id)
+    if not span:
+        raise ValueError(f"rule {rule_id} not found in the {doc_class} rules")
+    lines = text.splitlines(keepends=True)
+    new_text = "".join(lines[:span[0]]) + block.rstrip("\n") + "\n" \
+        + "".join(lines[span[1]:])
+    n = save_rules(doc_class, new_text)          # full validation + snapshot
+    return {"rule_id": rule_id, "doc_class": doc_class, "rules": n,
+            "note": "edited rules re-pend — approve it again in the panel"}
 
 
 def restore_rule(doc_class: str, backup_name: str) -> dict:

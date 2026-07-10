@@ -280,3 +280,58 @@ def test_rule_stats_compute_joins_live_challenge_counts(env):
     by_id = {s["rule_id"]: s for s in stats}
     assert by_id["BNK-T01"]["challenges"] == 1
     assert by_id["BNK-T02"]["challenges"] == 0
+
+
+# ---------------------------------------------------------------- F2a ---------
+def test_restore_deleted_rule_via_api(env):
+    from fastapi.testclient import TestClient
+
+    from mdmdoc.server.app import create_app
+    client = TestClient(create_app("full"))
+    r = client.post("/api/v1/rules/bank/delete", json={"rule_id": "BNK-T01"})
+    backup = r.json()["backup"].rsplit("/", 1)[-1]
+    r = client.get("/api/v1/rules/deleted")
+    assert r.status_code == 200
+    assert any(d["backup"] == backup and d["doc_class"] == "bank" for d in r.json())
+    r = client.post("/api/v1/rules/bank/restore", json={"backup": backup})
+    assert r.status_code == 200 and r.json()["rule_id"] == "BNK-T01"
+    assert "BNK-T01" in rules_io.rules_text("bank")
+    # restored rule is PENDING (approval cleared at delete)
+    cfg = yaml.safe_load(rules_io.rules_text("bank"))
+    rule = next(x for x in cfg["rules"] if x["id"] == "BNK-T01")
+    assert rule_approvals.status(rule_approvals.load(), "bank", rule) == "pending"
+    rows = oplog.recent(actions=("rule-restore",))
+    assert rows and rows[0]["rule_id"] == "BNK-T01"
+    # approvals page offers the backup for OTHER deleted rules
+    client.post("/api/v1/rules/bank/delete", json={"rule_id": "BNK-T02"})
+    html = client.get("/ui/rules/approve?doc_class=bank").text
+    assert "Deleted rules" in html and "rule-restore" in html
+
+
+def test_inline_edit_block_roundtrip(env):
+    from fastapi.testclient import TestClient
+
+    from mdmdoc.server.app import create_app
+    client = TestClient(create_app("full"))
+    # approve first so we can see the edit re-pend it
+    cfg = yaml.safe_load(rules_io.rules_text("bank"))
+    rule = next(x for x in cfg["rules"] if x["id"] == "BNK-T02")
+    rule_approvals.set_decision("bank", rule, "approved")
+    block = client.get("/api/v1/rules/bank/block/BNK-T02").text
+    assert "BNK-T02" in block and "always note" in block
+    edited = block.replace("test note", "edited note")
+    r = client.post("/api/v1/rules/bank/edit",
+                    json={"rule_id": "BNK-T02", "block": edited})
+    assert r.status_code == 200
+    text = rules_io.rules_text("bank")
+    assert "edited note" in text and "BNK-T01" in text     # neighbor untouched
+    cfg = yaml.safe_load(text)
+    rule = next(x for x in cfg["rules"] if x["id"] == "BNK-T02")
+    assert rule_approvals.status(rule_approvals.load(), "bank", rule) == "pending"
+    # id change and broken yaml refused
+    assert client.post("/api/v1/rules/bank/edit",
+                       json={"rule_id": "BNK-T02",
+                             "block": edited.replace("BNK-T02", "BNK-T99")}).status_code == 400
+    assert client.post("/api/v1/rules/bank/edit",
+                       json={"rule_id": "BNK-T02", "block": "not: [valid"}).status_code == 400
+    assert client.get("/api/v1/rules/bank/block/BNK-NOPE").status_code == 404

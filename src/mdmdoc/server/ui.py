@@ -497,9 +497,11 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
             challenged.append({**row,
                                "runs": [e.get("run_id", "") for e in examples if e.get("run_id")],
                                "kinds": sorted({e.get("kind", "") for e in examples})})
+    deleted = [d for d in rules_io.list_deleted()
+               if d.get("doc_class") in ("", doc_class)]
     return templates.TemplateResponse(request, "rules_approve.html", _ctx(
         page="rules", subpage="approvals", doc_class=doc_class, rows=rows, counts=counts,
-        proposals=proposals, challenged=challenged))
+        proposals=proposals, challenged=challenged, deleted=deleted))
 
 
 # --- /ui/tax — bulk US TIN validation tab (tin_bulk.py; tables shared with W9-040/041)

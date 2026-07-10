@@ -67,6 +67,22 @@
 </table>
 {% endif %}
 
+{% if deleted %}
+<details id="deleted-rules">
+  <summary><strong>Deleted rules</strong> <span class="meta">{{ deleted | length }} backup(s) — a deleted rule can come back (it returns PENDING)</span></summary>
+  <ul class="timeline">
+    {% for d in deleted %}
+    <li class="queue-row">
+      <code>{{ d.rule_id }}</code>
+      <span class="meta grow">{{ d.header }}</span>
+      <button type="button" class="rule-restore" data-backup="{{ d.backup }}"
+              data-class="{{ d.doc_class or doc_class }}">Restore ↩</button>
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
 <div class="filterbar" data-filter-root data-filter-list="rules-tbody">
   <input type="text" data-filter-search autocomplete="off" placeholder="filter by rule id, name or text…">
   <span class="seg" data-filter-key="status">
@@ -110,7 +126,18 @@
     <td style="white-space:nowrap">
       <button type="button" class="rule-approve" data-rule="{{ r.id }}" data-class="{{ doc_class }}">Approve ✓</button>
       <button type="button" class="rule-reject" data-rule="{{ r.id }}" data-class="{{ doc_class }}">Reject ✗</button>
-      <a class="btn" href="/ui/rules?doc_class={{ doc_class }}" title="edit this rule">Correct ✎</a>
+      <button type="button" class="rule-edit" data-rule="{{ r.id }}" data-class="{{ doc_class }}"
+              title="edit this rule right here — an edited rule re-pends for approval">Edit ✎</button>
+    </td>
+  </tr>
+  <tr class="rule-editor-row" data-editor-for="{{ r.id }}" hidden>
+    <td colspan="6">
+      <textarea class="rule-editor" spellcheck="false" rows="10" style="width:100%;font-family:ui-monospace,monospace"></textarea>
+      <div class="actions">
+        <button type="button" class="rule-edit-save" data-rule="{{ r.id }}" data-class="{{ doc_class }}"><strong>Save rule</strong></button>
+        <button type="button" class="rule-edit-cancel" data-rule="{{ r.id }}">Cancel</button>
+        <span class="meta rule-edit-flash"></span>
+      </div>
     </td>
   </tr>
   {% endfor %}
@@ -176,6 +203,46 @@
       const row = document.querySelector(`#challenged-table tr[data-rule="${b.dataset.rule}"]`);
       if (row) row.style.opacity = 0.45;
     } catch (e) { say("ERROR: " + e.message); b.disabled = false; }
+  });
+  document.querySelectorAll(".rule-restore").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const r = await api(`/api/v1/rules/${b.dataset.class}/restore`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backup: b.dataset.backup }) });
+      say(`${r.rule_id}: restored as PENDING — reloading…`);
+      setTimeout(() => location.reload(), 600);
+    } catch (e) { say("ERROR: " + e.message); b.disabled = false; }
+  });
+  document.querySelectorAll(".rule-edit").forEach(b => b.onclick = async () => {
+    const row = document.querySelector(`.rule-editor-row[data-editor-for="${b.dataset.rule}"]`);
+    if (!row.hidden) { row.hidden = true; return; }
+    const ta = row.querySelector(".rule-editor");
+    if (!ta.value) {
+      try {
+        ta.value = await api(`/api/v1/rules/${b.dataset.class}/block/${b.dataset.rule}`);
+      } catch (e) { say("ERROR loading rule block: " + e.message); return; }
+    }
+    row.hidden = false;
+    ta.focus();
+  });
+  document.querySelectorAll(".rule-edit-cancel").forEach(b => b.onclick = () => {
+    document.querySelector(`.rule-editor-row[data-editor-for="${b.dataset.rule}"]`).hidden = true;
+  });
+  document.querySelectorAll(".rule-edit-save").forEach(b => b.onclick = async () => {
+    const row = b.closest(".rule-editor-row");
+    const flash = row.querySelector(".rule-edit-flash");
+    b.disabled = true;
+    try {
+      const r = await api(`/api/v1/rules/${b.dataset.class}/edit`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_id: b.dataset.rule,
+                               block: row.querySelector(".rule-editor").value }) });
+      flash.textContent = r.note || "saved";
+      const mainRow = document.querySelector(`#rules-tbody tr[data-rule="${b.dataset.rule}"]`);
+      if (mainRow) paint(mainRow, "pending");     // edited rule re-pends
+      b.disabled = false;
+    } catch (e) { flash.textContent = "ERROR: " + e.message; b.disabled = false; }
   });
   const all = document.getElementById("approve-all");
   all.onclick = async () => {
