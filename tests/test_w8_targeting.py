@@ -103,3 +103,18 @@ def test_bank_scan_signature_prefers_non_w9_page(tmp_path):
                  survey_texts={0: "banking information sheet",
                                1: "Form W-9 ... Sign Here ... certification"})
     assert _signature_page(p, raw) == 0    # non-W9 page wins the fallback
+
+
+def test_cert_word_hit_in_first_half_falls_to_last_page():
+    """Real GVS scan: quick-OCR hit 'Certification' on page 2 while the true
+    Part XXX page 8 OCR'd too poorly to match — the probe then searched the
+    wrong page. A first-half word-hit on a long W-8 is noise; the cert page
+    falls back to the LAST page."""
+    from mdmdoc.stage_a import _select_w8_pages
+    scored = [(0, 0, "Part I Identification of Beneficial Owner", 0),
+              (0, 1, "certification of foreign status details", 0),
+              (0, 2, "", 0), (0, 3, "", 0), (0, 4, "", 0), (0, 5, "", 0),
+              (0, 6, "", 0), (0, 7, "barely readable scan text", 0)]
+    picks, cert = _select_w8_pages(scored, 3)
+    assert cert == 7
+    assert [i for _, i, _, _ in picks][:2] == [0, 7]

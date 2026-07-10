@@ -490,6 +490,12 @@ def _select_w8_pages(scored: list, max_pages: int) -> tuple[list, int]:
         cert = _first(_W8_SIGNHERE_RE)
     if cert is None:
         cert = _last(_W8_CERT_WORD_RE)
+        # the certification Part of every W-8 variant sits at the END of the
+        # form; a 'Certification' word-hit in the FIRST half is quick-OCR noise
+        # (real 8-page GVS scan: page 2 matched, page 8 — the true Part XXX —
+        # OCR'd too poorly to hit, and the signature probe searched page 2)
+        if cert is not None and len(idxs) >= 4 and cert < idxs[len(idxs) // 2]:
+            cert = None
     if cert is None:
         cert = idxs[-1]
     picks = [by_idx[part1]]
