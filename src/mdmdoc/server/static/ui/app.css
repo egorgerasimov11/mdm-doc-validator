@@ -192,3 +192,18 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 .filterbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
 .filterbar input[type=text] { width: 18em; flex: 0 1 auto; }
 .filterbar [data-filter-count] { margin-left: auto; white-space: nowrap; }
+
+/* N3: run-page section tabs + the two compact action menus */
+.run-tabs { position: sticky; top: 0; z-index: 5; background: var(--bg);
+            border-bottom: 1px solid var(--divider); padding: 10px 0; margin-bottom: 4px; }
+.run-tabs .seg button .meta { font-size: 11px; }
+[data-panel] > section:first-of-type { border-top: none; }
+
+.menu { position: relative; margin: 0; }
+.menu > summary { list-style: none; user-select: none; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu[open] > summary { border-color: var(--ink); font-weight: 600; }
+.menu-body { position: absolute; top: calc(100% + 6px); left: 0; z-index: 10;
+             background: var(--bg); border: 1px solid var(--divider); border-radius: 8px;
+             padding: 6px 12px; min-width: 420px; }
+.menu-body .actions { margin: 6px 0; }

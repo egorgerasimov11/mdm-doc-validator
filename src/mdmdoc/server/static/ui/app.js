@@ -217,6 +217,31 @@ window.mdmdoc = (() => {
     }
   }
 
+  /* ---------- run page: section tabs (N3) --------------------------------- */
+  function initRunTabs() {
+    const seg = document.getElementById("run-tabs");
+    if (!seg) return;
+    const panels = [...document.querySelectorAll("[data-panel]")];
+    const btns = [...seg.querySelectorAll("button")];
+    if (!btns.length) return;
+    const first = btns[0].dataset.panelTarget;
+
+    function show(name) {
+      const target = btns.some(b => b.dataset.panelTarget === name) ? name : first;
+      btns.forEach(b => b.classList.toggle("active", b.dataset.panelTarget === target));
+      panels.forEach(p => { p.hidden = p.dataset.panel !== target; });
+      return target;
+    }
+    btns.forEach(b => b.onclick = () => {
+      show(b.dataset.panelTarget);
+      history.replaceState(null, "", "#" + b.dataset.panelTarget);
+    });
+    // deep links: #findings, and #propose-box (the dispute anchor) -> Findings
+    const h = (location.hash || "").slice(1);
+    show(h === "propose-box" ? "findings" : (h || first));
+    mdmdoc.showRunPanel = show;
+  }
+
   /* ---------- run page: mark valid + thumbs (D11) ------------------------ */
   function initValidRate() {
     const validBtn = document.getElementById("btn-valid");
@@ -952,5 +977,5 @@ window.mdmdoc = (() => {
 
   return { api, pollJob, initDropZone, initTplCompare, initValidRate, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
-           initRetrainWatch, initBulk, initFilterBar, initRunFilters };
+           initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs };
 })();

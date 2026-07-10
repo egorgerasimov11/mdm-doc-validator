@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block title %}mdmdoc — {{ meta.file_name }}{% endblock %}
 {% block content %}
-<p class="meta" style="margin-top:16px"><a href="/ui">← Dashboard</a></p>
+{# N3: the verdict, the actions and the job log stay visible; everything else
+   lives in one of five panels. A panel's tab is only rendered when it has
+   content, so an empty tab can never be clicked. #}
+{% set has_data = data_rows or (label and trace) or pub.inventory or pub.crosscheck %}
+{% set has_cmp = sap_rows or tpl_rows or web_rows or pub.engine_compare %}
+{% set has_perc = preview_pages or pub.signature_probe %}
+
+<p class="meta" style="margin-top:16px"><a href="/ui">← Documents</a></p>
 {% if flash == 'labeled' %}<p class="flash">Saved — dataset now has {{ labels_count }} examples. <a href="/ui/training">Training →</a></p>{% endif %}
 {% if flash == 'retrained' %}<p class="flash">Retrained — the corrected verdict below is now permanent for this document. <a href="/ui/training">Training →</a></p>{% endif %}
 
@@ -15,6 +22,7 @@
     {% if overridden %}operator override (machine: {{ prec.model_verdict }}){% elif trace and trace.rows %}operator-corrected fields ✓{% else %}operator confirmed ✓{% endif %}
   </span>
   {% endif %}
+  {% if rating == 'down' %}<span class="chip chip--WARNING" id="flag-bad">operator flagged this analysis</span>{% endif %}
 </div>
 <p style="margin:0 0 4px">{{ report.next_step }}</p>
 <p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }}{% if pub.tier == 'strong' %} · <span class="tag" title="escalated: {{ pub.escalated_because | join(', ') }}">strong tier</span>{% endif %}{% if meta.engine_effective %} ·
@@ -29,304 +37,353 @@
     <button type="button" data-r="up" class="{{ 'active' if rating == 'up' }}">👍</button>
     <button type="button" data-r="down" class="{{ 'active' if rating == 'down' }}">👎</button>
   </span>
-  {% if rating == 'down' %}<span class="chip chip--WARNING" id="flag-bad">operator flagged this analysis</span>{% endif %}
   <button type="button" id="btn-copy" data-run="{{ run_id }}">Copy report</button>
-  <a class="btn" href="/api/v1/runs/{{ run_id }}/document" download="{{ meta.file_name }}">Download document</a>
-  <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.md" download="{{ meta.file_name }}.report.md">Export .md</a>
-  <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.json" download="{{ meta.file_name }}.report.json">Export .json</a>
-  <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/reasoning.md" download="{{ meta.file_name }}.reasoning.md"
-     title="the full decision trace — perception, every guard, every rule evaluated, the verdict fold; paste it into an external LLM for critique">Export reasoning</a>
-  <button type="button" id="btn-sap" data-class="{{ doc_class }}">Compare with SAP…</button>
-  <input type="file" id="sap-input"
-         accept="{{ '.png,.jpg,.jpeg,.pdf,.xlsx,.xlsm' if doc_class == 'bank' else '.xlsx,.xlsm' }}" hidden>
-  <input type="text" id="sap-bp-input" placeholder="BP # (optional)" style="width:9em" hidden>
-  <span class="hint">re-runs this document against SAP data — a Bank Details screenshot{{ ' or' if doc_class == 'bank' else ':' }} a BUT0BK/BUT000 table export (.xlsx)</span>
-  <button type="button" id="btn-web" data-class="{{ doc_class }}">Verify externally 🌐</button>
-  <span class="hint">checks routing/SWIFT/bank &amp; company names against public registries — advisory only, the web never decides the verdict</span>
+
+  <details class="menu">
+    <summary class="btn">Compare ▾</summary>
+    <div class="menu-body">
+      <div class="actions">
+        <button type="button" id="btn-sap" data-class="{{ doc_class }}">Compare with SAP…</button>
+        <input type="file" id="sap-input"
+               accept="{{ '.png,.jpg,.jpeg,.pdf,.xlsx,.xlsm' if doc_class == 'bank' else '.xlsx,.xlsm' }}" hidden>
+        <input type="text" id="sap-bp-input" placeholder="BP # (optional)" style="width:9em" hidden>
+        <span class="hint">re-runs this document against SAP data — a Bank Details screenshot{{ ' or' if doc_class == 'bank' else ':' }} a BUT0BK/BUT000 table export (.xlsx)</span>
+      </div>
+      <div class="actions">
+        <button type="button" id="btn-tpl" data-class="{{ doc_class }}">Compare with template…</button>
+        <input type="file" id="tpl-input" accept=".xlsx,.xlsm" hidden>
+        <span class="hint">re-runs this document against the values typed into a request-form workbook (.xlsx/.xlsm)</span>
+      </div>
+      <div class="actions">
+        <button type="button" id="btn-web" data-class="{{ doc_class }}">Verify externally 🌐</button>
+        <span class="hint">checks routing/SWIFT/bank &amp; company names against public registries — advisory only, the web never decides the verdict</span>
+      </div>
+    </div>
+  </details>
+
+  <details class="menu">
+    <summary class="btn">Export ▾</summary>
+    <div class="menu-body">
+      <div class="actions">
+        <a class="btn" href="/api/v1/runs/{{ run_id }}/document" download="{{ meta.file_name }}">Download document</a>
+        <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.md" download="{{ meta.file_name }}.report.md">Export .md</a>
+        <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.json" download="{{ meta.file_name }}.report.json">Export .json</a>
+        <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/reasoning.md" download="{{ meta.file_name }}.reasoning.md"
+           title="the full decision trace — perception, every guard, every rule evaluated, the verdict fold; paste it into an external LLM for critique">Export reasoning</a>
+      </div>
+    </div>
+  </details>
 </div>
 <pre id="job-log" hidden></pre>
 
-{% if label and trace %}
-<section>
-  <h2>Learning trace <span class="meta">(what the operator corrected → what the machine does now)</span></h2>
-  {% if trace.type_changed or trace.verdict_changed %}
-  <p>
-    {% if trace.type_changed %}doc_type: <code>{{ trace.type_before }}</code> → <code>{{ label.doc_type_gold }}</code>
-      <span class="{{ '' if trace.type_now_ok else 'bad' }}">{{ '✓' if trace.type_now_ok else '✗ still differs' }}</span>{% endif %}
-    {%- if trace.type_changed and trace.verdict_changed %} · {% endif %}
-    {% if trace.verdict_changed %}verdict: <code>{{ trace.verdict_before }}</code> → <code>{{ label.verdict_gold }}</code>
-      <span class="{{ '' if trace.verdict_now_ok else 'bad' }}">{{ '✓' if trace.verdict_now_ok else '✗ still differs' }}</span>{% endif %}
-  </p>
-  {% endif %}
-  {% if trace.rows %}
-  <table>
-    <tr><th>field</th><th>machine before</th><th>operator corrected</th><th>machine now</th></tr>
-    {% for r in trace.rows %}
-    <tr>
-      <td class="meta">{{ r.field }}</td>
-      <td><code>{{ r.before }}</code></td>
-      <td><code>{{ r.corrected }}</code></td>
-      <td class="{{ '' if r.ok else 'bad' }}"><code>{{ r.now }}</code> {{ '✓' if r.ok else '✗' }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  <p class="meta">
-    {% if trace.now_ok %}machine now matches the correction on: {{ trace.now_ok | join(', ') }}{% endif %}
-    {% if trace.now_bad %}<span class="bad">still differs: {{ trace.now_bad | join(', ') }} — the label alone did not fix these; check Stage A / rules</span>{% endif %}
-  </p>
-  {% elif not trace.type_changed and not trace.verdict_changed %}
-  <p class="meta">no field corrections were needed — the operator confirmed the machine's reading{% if label.notes %} · “{{ label.notes }}”{% endif %}</p>
-  {% endif %}
-</section>
-{% endif %}
+<div class="run-tabs">
+  <span class="seg" id="run-tabs">
+    {% if has_data %}<button type="button" data-panel-target="data">Data</button>{% endif %}
+    <button type="button" data-panel-target="findings">Findings{% if findings %} <span class="meta">{{ findings|length }}</span>{% endif %}</button>
+    {% if has_cmp %}<button type="button" data-panel-target="comparisons">Comparisons</button>{% endif %}
+    {% if has_perc %}<button type="button" data-panel-target="perception">Signature &amp; perception</button>{% endif %}
+    <button type="button" data-panel-target="artifacts">Artifacts</button>
+  </span>
+</div>
 
-{% if preview_pages %}
-<section>
-  <h2>Document preview <span class="meta">{% if preview_pages|length < total_pages %}showing the {{ preview_pages|length }} page(s) the pipeline read of {{ total_pages }}{% else %}all {{ total_pages }} page(s){% endif %}</span></h2>
-  <div class="preview-strip">
-    {% for p in preview_pages %}
-    <a href="/api/v1/runs/{{ run_id }}/preview/{{ p }}" target="_blank">
-      <img src="/api/v1/runs/{{ run_id }}/preview/{{ p }}" alt="page {{ p + 1 }}" loading="lazy">
-      <span class="meta">page {{ p + 1 }}</span>
-    </a>
-    {% endfor %}
-    {% if has_sap_shot %}
-    <a href="/api/v1/runs/{{ run_id }}/preview/0?src=sap" target="_blank">
-      <img src="/api/v1/runs/{{ run_id }}/preview/0?src=sap" alt="SAP screen" loading="lazy">
-      <span class="meta">SAP screen</span>
-    </a>
+{% if has_data %}
+<div data-panel="data">
+  {% if data_rows %}
+  <section>
+    <h2>Extracted data <span class="meta">(source per field; click a crop to zoom)</span>
+      <button type="button" id="btn-copy-fields" title="copy all fields as field&#9;value lines">Copy all</button></h2>
+    <table class="data-table">
+      <tr><th>field</th><th>value</th><th>source</th><th>evidence</th></tr>
+      {% for r in data_rows %}
+      <tr>
+        <td class="meta" style="white-space:nowrap">{{ r.label }}</td>
+        <td>{{ r.value }}{% if r.hint and r.value != '—' %} <span class="hint">→ {{ r.hint }}</span>{% endif %}{% if r.copy_value %} <button type="button" class="copy-field" data-field="{{ r.fkey }}" data-copy="{{ r.copy_value }}" title="copy {{ r.fkey }}">⧉</button>{% endif %}</td>
+        <td>
+          {% if r.prov %}
+          <span class="tag src-tag src-tag--{{ r.prov.source }}"
+                title="{{ r.prov.source }}{% if r.prov.page %}, page {{ r.prov.page }}{% endif %}{% if r.prov.confirmed %}; model reading confirmed by OCR regex{% endif %}">
+            {{ r.prov.source }}{% if r.prov.page %} · p{{ r.prov.page }}{% endif %}{% if r.prov.confirmed %} ✓{% endif %}
+          </span>
+          {% endif %}
+          {% if r.confidence == 'verified' %}<span class="tag" title="deterministic source or model read confirmed by OCR regex">verified ✓</span>
+          {% elif r.confidence == 'agreed' %}<span class="tag" title="dual mode: both engines read the same value">agreed ✓</span>
+          {% elif r.confidence == 'check' %}<span class="tag" style="color:var(--danger,#c00)" title="dual mode: the engines DISAGREE — check this field first">check ⚠</span>
+          {% elif r.confidence == 'model-only' %}<span class="tag" title="single-source model read — nothing corroborated it yet">model-only</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if r.ev %}
+          <a href="/api/v1/runs/{{ run_id }}/evidence/{{ r.ev }}" target="_blank" title="open the {{ r.ev }} crop">
+            <img class="ev-thumb" src="/api/v1/runs/{{ run_id }}/evidence/{{ r.ev }}" alt="{{ r.ev }} evidence"
+                 loading="lazy" onerror="this.closest('a').style.display='none'">
+          </a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  {% if label and trace %}
+  <section>
+    <h2>Learning trace <span class="meta">(what the operator corrected → what the machine does now)</span></h2>
+    {% if trace.type_changed or trace.verdict_changed %}
+    <p>
+      {% if trace.type_changed %}doc_type: <code>{{ trace.type_before }}</code> → <code>{{ label.doc_type_gold }}</code>
+        <span class="{{ '' if trace.type_now_ok else 'bad' }}">{{ '✓' if trace.type_now_ok else '✗ still differs' }}</span>{% endif %}
+      {%- if trace.type_changed and trace.verdict_changed %} · {% endif %}
+      {% if trace.verdict_changed %}verdict: <code>{{ trace.verdict_before }}</code> → <code>{{ label.verdict_gold }}</code>
+        <span class="{{ '' if trace.verdict_now_ok else 'bad' }}">{{ '✓' if trace.verdict_now_ok else '✗ still differs' }}</span>{% endif %}
+    </p>
     {% endif %}
-  </div>
-</section>
-{% endif %}
-
-{% if sap_rows %}
-<section>
-  <h2>SAP comparison <span class="meta">(document vs SAP Bank Details screen)</span></h2>
-  <table>
-    <tr><th>field</th><th>document</th><th>SAP</th><th>result</th></tr>
-    {% for r in sap_rows %}
-    <tr>
-      <td>{{ r.field }}</td>
-      <td><code>{{ r.doc }}</code></td>
-      <td><code>{{ r.sap }}</code></td>
-      <td class="{{ 'bad' if r.status == 'MISMATCH' }}">
-        {{ r.status }}{% if r.note %} <span class="meta">({{ r.note }})</span>{% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
-</section>
-{% endif %}
-
-{% if tpl_rows %}
-<section>
-  <h2>Template comparison <span class="meta">(document vs the request-form workbook)</span></h2>
-  <table>
-    <tr><th>field</th><th>document</th><th>template</th><th>result</th></tr>
-    {% for r in tpl_rows %}
-    <tr>
-      <td>{{ r.field }}</td>
-      <td><code>{{ r.doc }}</code></td>
-      <td><code>{{ r.sap }}</code></td>
-      <td class="{{ 'bad' if r.status == 'MISMATCH' }}">
-        {{ r.status }}{% if r.note %} <span class="meta">({{ r.note }})</span>{% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
-</section>
-{% endif %}
-
-{% if web_rows %}
-<section>
-  <h2>External evidence <span class="meta">(external registries — advisory only)</span></h2>
-  <p class="banner">🌐 {{ web_banner }}</p>
-  <table>
-    <tr><th>check</th><th>result</th><th>source</th><th>detail</th><th>checked</th></tr>
-    {% for r in web_rows %}
-    <tr>
-      <td>{{ r.check }}</td>
-      <td class="ev ev--{{ r.status }}">{{ r.status }} — {{ r.label }}</td>
-      <td>
-        {% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.source }}</a>{% else %}{{ r.source }}{% endif %}
-        <span class="tag" title="source trust tier">{{ r.tier_name }}</span>
-      </td>
-      <td class="meta">{{ r.detail }}</td>
-      <td class="meta"><time>{{ r.ts }}</time></td>
-    </tr>
-    {% endfor %}
-  </table>
-</section>
-{% endif %}
-
-{% if pub.signature_probe %}
-{% set sp = pub.signature_probe %}
-<section>
-  <h2>Signature <span class="meta">(kind: {{ pub.fields.signature_kind or 'n/a' }}{% if sp.page %} · probe page {{ sp.page }}{% endif %})</span>
-    {% if sp.esign_short_circuit %}<span class="tag">e-sign short-circuit — 0 vision probes</span>{% endif %}
-    {% if sp.contested %}<span class="tag" style="color:var(--danger,#c00)">CONTESTED</span>{% elif sp.uncertain %}<span class="tag">uncertain</span>{% endif %}
-    {% if sp.escalated %}<span class="tag">escalated ({{ sp.probes_used }} probes)</span>{% endif %}
-  </h2>
-  {% if sp.votes %}
-  <p class="meta">votes:
-    {% for k in ('band', 'page', 'band_hi', 'crop_b3', 'text') %}{% if sp.votes[k] and sp.votes[k] != 'not-run' %}{{ k }}={{ sp.votes[k] }} {% endif %}{% endfor %}
-  </p>
+    {% if trace.rows %}
+    <table>
+      <tr><th>field</th><th>machine before</th><th>operator corrected</th><th>machine now</th></tr>
+      {% for r in trace.rows %}
+      <tr>
+        <td class="meta">{{ r.field }}</td>
+        <td><code>{{ r.before }}</code></td>
+        <td><code>{{ r.corrected }}</code></td>
+        <td class="{{ '' if r.ok else 'bad' }}"><code>{{ r.now }}</code> {{ '✓' if r.ok else '✗' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p class="meta">
+      {% if trace.now_ok %}machine now matches the correction on: {{ trace.now_ok | join(', ') }}{% endif %}
+      {% if trace.now_bad %}<span class="bad">still differs: {{ trace.now_bad | join(', ') }} — the label alone did not fix these; check Stage A / rules</span>{% endif %}
+    </p>
+    {% elif not trace.type_changed and not trace.verdict_changed %}
+    <p class="meta">no field corrections were needed — the operator confirmed the machine's reading{% if label.notes %} · “{{ label.notes }}”{% endif %}</p>
+    {% endif %}
+  </section>
   {% endif %}
-  {% if sp.trail %}
-  <table>
-    <tr><th>probe</th><th>vote</th><th>evidence</th></tr>
-    {% for t in sp.trail %}
-    <tr><td class="meta">{{ t.probe }}</td><td>{{ t.vote }}</td><td class="meta">{{ t.evidence or '—' }}</td></tr>
-    {% endfor %}
-  </table>
-  {% elif sp.evidence %}
-  <p class="meta">{{ sp.evidence }}</p>
+
+  {% if pub.inventory %}
+  <section>
+    <h2>Also on the document <span class="meta">(labeled identifiers outside the extraction schema — nothing is dropped silently)</span></h2>
+    <table>
+      <thead><tr><th>family</th><th>label</th><th>value</th></tr></thead>
+      <tbody>
+      {% for it in pub.inventory %}
+        <tr><td>{{ it.family }}</td><td>{{ it.label }}</td><td>{{ it.value }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
   {% endif %}
-</section>
+
+  {% if pub.crosscheck %}
+  <section>
+    <h2>OCR cross-check</h2>
+    <p class="meta">{{ pub.crosscheck | join('; ') }}</p>
+  </section>
+  {% endif %}
+</div>
 {% endif %}
 
-{% if pub.engine_compare %}
-<section>
-  <h2>Engine comparison <span class="meta">(dual mode — deterministic OCR patterns vs LLM read, masked)</span></h2>
-  <table>
-    <tr><th>field</th><th>deterministic</th><th>LLM</th><th>verdict</th></tr>
-    {% for r in pub.engine_compare %}
-    <tr>
-      <td class="meta">{{ r.field }}</td>
-      <td>{{ r.deterministic or '—' }}</td>
-      <td>{{ r.llm or '—' }}</td>
-      <td>{% if r.agree %}<span class="tag">agree ✓</span>{% elif r.agree is false %}<span class="tag" style="color:var(--danger,#c00)">DISAGREE</span>{% else %}<span class="meta">only {{ r.only }}</span>{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table>
-</section>
-{% endif %}
-
-{% if data_rows %}
-<section>
-  <h2>Extracted data <span class="meta">(source per field; click a crop to zoom)</span>
-    <button type="button" id="btn-copy-fields" title="copy all fields as field&#9;value lines">Copy all</button></h2>
-  <table class="data-table">
-    <tr><th>field</th><th>value</th><th>source</th><th>evidence</th></tr>
-    {% for r in data_rows %}
-    <tr>
-      <td class="meta" style="white-space:nowrap">{{ r.label }}</td>
-      <td>{{ r.value }}{% if r.hint and r.value != '—' %} <span class="hint">→ {{ r.hint }}</span>{% endif %}{% if r.copy_value %} <button type="button" class="copy-field" data-field="{{ r.fkey }}" data-copy="{{ r.copy_value }}" title="copy {{ r.fkey }}">⧉</button>{% endif %}</td>
-      <td>
-        {% if r.prov %}
-        <span class="tag src-tag src-tag--{{ r.prov.source }}"
-              title="{{ r.prov.source }}{% if r.prov.page %}, page {{ r.prov.page }}{% endif %}{% if r.prov.confirmed %}; model reading confirmed by OCR regex{% endif %}">
-          {{ r.prov.source }}{% if r.prov.page %} · p{{ r.prov.page }}{% endif %}{% if r.prov.confirmed %} ✓{% endif %}
-        </span>
-        {% endif %}
-        {% if r.confidence == 'verified' %}<span class="tag" title="deterministic source or model read confirmed by OCR regex">verified ✓</span>
-        {% elif r.confidence == 'agreed' %}<span class="tag" title="dual mode: both engines read the same value">agreed ✓</span>
-        {% elif r.confidence == 'check' %}<span class="tag" style="color:var(--danger,#c00)" title="dual mode: the engines DISAGREE — check this field first">check ⚠</span>
-        {% elif r.confidence == 'model-only' %}<span class="tag" title="single-source model read — nothing corroborated it yet">model-only</span>
-        {% endif %}
-      </td>
-      <td>
-        {% if r.ev %}
-        <a href="/api/v1/runs/{{ run_id }}/evidence/{{ r.ev }}" target="_blank" title="open the {{ r.ev }} crop">
-          <img class="ev-thumb" src="/api/v1/runs/{{ run_id }}/evidence/{{ r.ev }}" alt="{{ r.ev }} evidence"
+<div data-panel="findings">
+  {% if findings %}
+  <section>
+    <h2>Findings</h2>
+    <ul class="timeline">
+      {% for f in findings %}
+      <li>
+        <span class="chip chip--{{ f.severity }}">{{ f.severity }}</span>
+        <code>{{ f.rule_id }}</code>
+        <span class="grow" style="white-space:normal">{{ f.message }}</span>
+        <button type="button" class="fb-dispute" data-rule="{{ f.rule_id }}"
+                title="dispute this rule — the model will propose a fix">dispute</button>
+        {% if f.ev %}
+        <a href="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" target="_blank" title="evidence: {{ f.ev }}">
+          <img class="ev-thumb ev-thumb--sm" src="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" alt="{{ f.ev }} evidence"
                loading="lazy" onerror="this.closest('a').style.display='none'">
         </a>
         {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
-</section>
-{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
 
-{% if findings %}
-<section>
-  <h2>Findings</h2>
-  <ul class="timeline">
-    {% for f in findings %}
-    <li>
-      <span class="chip chip--{{ f.severity }}">{{ f.severity }}</span>
-      <code>{{ f.rule_id }}</code>
-      <span class="grow" style="white-space:normal">{{ f.message }}</span>
-      <button type="button" class="fb-dispute" data-rule="{{ f.rule_id }}"
-              title="dispute this rule — the model will propose a fix">dispute</button>
-      {% if f.ev %}
-      <a href="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" target="_blank" title="evidence: {{ f.ev }}">
-        <img class="ev-thumb ev-thumb--sm" src="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" alt="{{ f.ev }} evidence"
-             loading="lazy" onerror="this.closest('a').style.display='none'">
-      </a>
-      {% endif %}
-    </li>
-    {% endfor %}
-  </ul>
-</section>
-{% endif %}
+  <section id="propose-box">
+    <h2>Disagree with the verdict?
+      <span class="meta">describe what's wrong — the model proposes a rule change (you decide whether to apply)</span></h2>
+    <textarea id="fb-text" rows="2" style="width:100%"
+              placeholder="e.g. rule BNK-011 fired by mistake — this US document has no IBAN, that's a plain account number"></textarea>
+    <p id="fb-target" class="meta" hidden></p>
+    <div class="actions">
+      <button type="button" id="fb-go" data-run="{{ run_id }}" data-class="{{ doc_class }}">Propose a fix</button>
+      <label class="meta"><input type="checkbox" id="fb-valid"> this document is VALID —
+        record a confirmed ACCEPT alongside the note</label>
+      <span class="hint">the model only PROPOSES — the verdict still comes from the explicit rules;
+        a saved note is ALSO auto-classified: an additive rule lands in Approvals as PENDING</span>
+    </div>
 
-<section id="propose-box">
-  <h2>Disagree with the verdict?
-    <span class="meta">describe what's wrong — the model proposes a rule change (you decide whether to apply)</span></h2>
-  <textarea id="fb-text" rows="2" style="width:100%"
-            placeholder="e.g. rule BNK-011 fired by mistake — this US document has no IBAN, that's a plain account number"></textarea>
-  <p id="fb-target" class="meta" hidden></p>
-  <div class="actions">
-    <button type="button" id="fb-go" data-run="{{ run_id }}" data-class="{{ doc_class }}">Propose a fix</button>
-    <label class="meta"><input type="checkbox" id="fb-valid"> this document is VALID —
-      record a confirmed ACCEPT alongside the note</label>
-    <span class="hint">the model only PROPOSES — the verdict still comes from the explicit rules;
-      a saved note is ALSO auto-classified: an additive rule lands in Approvals as PENDING</span>
-  </div>
-
-  <div id="fb-proposal" hidden>
-    <p><span class="tag" id="fb-kind"></span> <span id="fb-rationale" class="meta"></span></p>
-    <p id="fb-route" class="meta" hidden></p>
-    <div id="fb-rule" hidden>
-      <pre id="fb-diff" class="artifact-body"></pre>
-      <p class="meta">Resulting rules YAML (edit before applying if needed):</p>
-      <textarea id="fb-yaml" rows="12" spellcheck="false" style="width:100%;font-family:monospace"></textarea>
-      <p id="fb-issues" class="bad" hidden></p>
-      <div class="actions">
-        <button type="button" id="fb-apply" data-run="{{ run_id }}" data-class="{{ doc_class }}">Apply rule and re-run</button>
-        <button type="button" id="fb-discard">Discard</button>
-        <label class="meta"><input type="checkbox" id="fb-regen" checked> also update the ABAP side (regenerate)</label>
+    <div id="fb-proposal" hidden>
+      <p><span class="tag" id="fb-kind"></span> <span id="fb-rationale" class="meta"></span></p>
+      <p id="fb-route" class="meta" hidden></p>
+      <div id="fb-rule" hidden>
+        <pre id="fb-diff" class="artifact-body"></pre>
+        <p class="meta">Resulting rules YAML (edit before applying if needed):</p>
+        <textarea id="fb-yaml" rows="12" spellcheck="false" style="width:100%;font-family:monospace"></textarea>
+        <p id="fb-issues" class="bad" hidden></p>
+        <div class="actions">
+          <button type="button" id="fb-apply" data-run="{{ run_id }}" data-class="{{ doc_class }}">Apply rule and re-run</button>
+          <button type="button" id="fb-discard">Discard</button>
+          <label class="meta"><input type="checkbox" id="fb-regen" checked> also update the ABAP side (regenerate)</label>
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
+</div>
 
-{% if pub.inventory %}
-<section>
-  <h2>Also on the document <span class="meta">(labeled identifiers outside the extraction schema — nothing is dropped silently)</span></h2>
-  <table>
-    <thead><tr><th>family</th><th>label</th><th>value</th></tr></thead>
-    <tbody>
-    {% for it in pub.inventory %}
-      <tr><td>{{ it.family }}</td><td>{{ it.label }}</td><td>{{ it.value }}</td></tr>
+{% if has_cmp %}
+<div data-panel="comparisons">
+  {% if sap_rows %}
+  <section>
+    <h2>SAP comparison <span class="meta">(document vs SAP Bank Details screen)</span></h2>
+    <table>
+      <tr><th>field</th><th>document</th><th>SAP</th><th>result</th></tr>
+      {% for r in sap_rows %}
+      <tr>
+        <td>{{ r.field }}</td>
+        <td><code>{{ r.doc }}</code></td>
+        <td><code>{{ r.sap }}</code></td>
+        <td class="{{ 'bad' if r.status == 'MISMATCH' }}">
+          {{ r.status }}{% if r.note %} <span class="meta">({{ r.note }})</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  {% if tpl_rows %}
+  <section>
+    <h2>Template comparison <span class="meta">(document vs the request-form workbook)</span></h2>
+    <table>
+      <tr><th>field</th><th>document</th><th>template</th><th>result</th></tr>
+      {% for r in tpl_rows %}
+      <tr>
+        <td>{{ r.field }}</td>
+        <td><code>{{ r.doc }}</code></td>
+        <td><code>{{ r.sap }}</code></td>
+        <td class="{{ 'bad' if r.status == 'MISMATCH' }}">
+          {{ r.status }}{% if r.note %} <span class="meta">({{ r.note }})</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  {% if web_rows %}
+  <section>
+    <h2>External evidence <span class="meta">(external registries — advisory only)</span></h2>
+    <p class="banner">🌐 {{ web_banner }}</p>
+    <table>
+      <tr><th>check</th><th>result</th><th>source</th><th>detail</th><th>checked</th></tr>
+      {% for r in web_rows %}
+      <tr>
+        <td>{{ r.check }}</td>
+        <td class="ev ev--{{ r.status }}">{{ r.status }} — {{ r.label }}</td>
+        <td>
+          {% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.source }}</a>{% else %}{{ r.source }}{% endif %}
+          <span class="tag" title="source trust tier">{{ r.tier_name }}</span>
+        </td>
+        <td class="meta">{{ r.detail }}</td>
+        <td class="meta"><time>{{ r.ts }}</time></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  {% if pub.engine_compare %}
+  <section>
+    <h2>Engine comparison <span class="meta">(dual mode — deterministic OCR patterns vs LLM read, masked)</span></h2>
+    <table>
+      <tr><th>field</th><th>deterministic</th><th>LLM</th><th>verdict</th></tr>
+      {% for r in pub.engine_compare %}
+      <tr>
+        <td class="meta">{{ r.field }}</td>
+        <td>{{ r.deterministic or '—' }}</td>
+        <td>{{ r.llm or '—' }}</td>
+        <td>{% if r.agree %}<span class="tag">agree ✓</span>{% elif r.agree is false %}<span class="tag" style="color:var(--danger,#c00)">DISAGREE</span>{% else %}<span class="meta">only {{ r.only }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if has_perc %}
+<div data-panel="perception">
+  {% if preview_pages %}
+  <section>
+    <h2>Document preview <span class="meta">{% if preview_pages|length < total_pages %}showing the {{ preview_pages|length }} page(s) the pipeline read of {{ total_pages }}{% else %}all {{ total_pages }} page(s){% endif %}</span></h2>
+    <div class="preview-strip">
+      {% for p in preview_pages %}
+      <a href="/api/v1/runs/{{ run_id }}/preview/{{ p }}" target="_blank">
+        <img src="/api/v1/runs/{{ run_id }}/preview/{{ p }}" alt="page {{ p + 1 }}" loading="lazy">
+        <span class="meta">page {{ p + 1 }}</span>
+      </a>
+      {% endfor %}
+      {% if has_sap_shot %}
+      <a href="/api/v1/runs/{{ run_id }}/preview/0?src=sap" target="_blank">
+        <img src="/api/v1/runs/{{ run_id }}/preview/0?src=sap" alt="SAP screen" loading="lazy">
+        <span class="meta">SAP screen</span>
+      </a>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if pub.signature_probe %}
+  {% set sp = pub.signature_probe %}
+  <section>
+    <h2>Signature <span class="meta">(kind: {{ pub.fields.signature_kind or 'n/a' }}{% if sp.page %} · probe page {{ sp.page }}{% endif %})</span>
+      {% if sp.esign_short_circuit %}<span class="tag">e-sign short-circuit — 0 vision probes</span>{% endif %}
+      {% if sp.contested %}<span class="tag" style="color:var(--danger,#c00)">CONTESTED</span>{% elif sp.uncertain %}<span class="tag">uncertain</span>{% endif %}
+      {% if sp.escalated %}<span class="tag">escalated ({{ sp.probes_used }} probes)</span>{% endif %}
+    </h2>
+    {% if sp.votes %}
+    <p class="meta">votes:
+      {% for k in ('band', 'page', 'band_hi', 'crop_b3', 'text') %}{% if sp.votes[k] and sp.votes[k] != 'not-run' %}{{ k }}={{ sp.votes[k] }} {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+    {% if sp.trail %}
+    <table>
+      <tr><th>probe</th><th>vote</th><th>evidence</th></tr>
+      {% for t in sp.trail %}
+      <tr><td class="meta">{{ t.probe }}</td><td>{{ t.vote }}</td><td class="meta">{{ t.evidence or '—' }}</td></tr>
+      {% endfor %}
+    </table>
+    {% elif sp.evidence %}
+    <p class="meta">{{ sp.evidence }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+</div>
+{% endif %}
+
+<div data-panel="artifacts">
+  <section>
+    <h2>Raw artifacts</h2>
+    {% for name in artifacts %}
+    <details data-artifact="{{ name }}" data-run="{{ run_id }}">
+      <summary>{{ name }}</summary>
+      <pre class="artifact-body">loading…</pre>
+    </details>
     {% endfor %}
-    </tbody>
-  </table>
-</section>
-{% endif %}
-
-{% if pub.crosscheck %}
-<section>
-  <h2>OCR cross-check</h2>
-  <p class="meta">{{ pub.crosscheck | join('; ') }}</p>
-</section>
-{% endif %}
-
-<section>
-  <h2>Raw artifacts</h2>
-  {% for name in artifacts %}
-  <details data-artifact="{{ name }}" data-run="{{ run_id }}">
-    <summary>{{ name }}</summary>
-    <pre class="artifact-body">loading…</pre>
-  </details>
-  {% endfor %}
-</section>
+  </section>
+</div>
 {% endblock %}
 {% block script %}<script>
-  /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest */
-  ["initArtifacts","initSapCompare","initTplCompare","initValidRate","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch"]
+  /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest.
+     initRunTabs runs FIRST so the panels exist before initProposeFix wires disputes. */
+  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch"]
     .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
 </script>{% endblock %}
