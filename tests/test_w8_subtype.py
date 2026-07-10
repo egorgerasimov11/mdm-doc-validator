@@ -53,12 +53,20 @@ def test_ein_candidate_never_fills_w8_fields():
     assert not any("filled-from-OCR" in n for n in notes)
 
 
-def test_foreign_tin_masked_under_full_policy():
+def test_foreign_tin_follows_the_tin_policy(monkeypatch):
+    """The W-8 tax numbers share the W-9 TIN contract exactly: revealed on the
+    operator console, masked whenever the caller or the policy says so."""
     ext = Extraction(doc_class="w9", doc_type="w8")
     ext.fields = {k: "" for k in W8_KEYS}
     ext.fields["foreign_tin"] = "DE 29/815/44444"
-    pub = ext.to_public(policy="full")
-    ftin = pub["fields"]["foreign_tin"]
+
+    ftin = ext.to_public(policy="full")["fields"]["foreign_tin"]
+    assert ftin["present"] is True and ftin["value"] == "DE 29/815/44444"
+    assert "44444" not in ftin["masked"]
+
+    assert "value" not in ext.to_public(policy="masked")["fields"]["foreign_tin"]
+    monkeypatch.setenv("MDMDOC_TIN_VALUES", "masked")
+    ftin = ext.to_public(policy="full")["fields"]["foreign_tin"]
     assert ftin["present"] is True and "value" not in ftin
     assert "44444" not in ftin["masked"]
 

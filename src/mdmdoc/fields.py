@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .privacy import FIELD_KIND, SecretVault, mask
+from .privacy import FIELD_KIND, SecretVault, mask, tin_visible
 
 BANK_DOC_TYPES = ["bank_letter", "bank_statement", "supplier_letterhead", "bank_screenshot",
                   "voided_check", "payment_instructions", "ap_document", "invoice", "email",
@@ -553,9 +553,9 @@ class Extraction:
                 self.vault.register(FIELD_KIND.get(k, "account_number"), v)
 
     def to_public(self, policy: str = "masked") -> dict:
-        """Persistable view. policy='full' additionally exposes BANKING values in a
-        'value' key (operator display policy); TIN never gets a value key —
-        masked+derived facts only, under every policy."""
+        """Persistable view. policy='full' additionally exposes values in a 'value'
+        key: BANKING always, TAX numbers only when config.tin_values_policy() is
+        'full' too (privacy.tin_visible). policy='masked' exposes neither."""
         pub: dict = {}
         for k, v in self.fields.items():
             sv = str(v or "").strip() if not isinstance(v, bool) else v
@@ -577,15 +577,19 @@ class Extraction:
                     pub["tin"] = {"type": (self.fields.get("tin_type") or "").upper() or "unknown",
                                   "masked": mask("tin", sv), "digits": len(digits),
                                   "hyphenated": "-" in sv, "present": True}
+                    if tin_visible(policy):
+                        pub["tin"]["value"] = sv
                 else:
                     pub["tin"] = {"type": (self.fields.get("tin_type") or "").upper() or "unknown",
                                   "masked": "", "digits": 0, "hyphenated": False, "present": False}
             elif k in ("foreign_tin", "us_tin"):
-                # W-8 tax numbers: masked-only under EVERY policy, never a
-                # 'value' key — same contract as the W-9 TIN
+                # W-8 tax numbers: same contract as the W-9 TIN — a 'value' key
+                # appears only when the display policy reveals tax numbers
                 digits = re.sub(r"\D", "", sv) if sv else ""
                 pub[k] = {"masked": mask("tin", sv) if sv else "",
                           "digits": len(digits), "present": bool(sv)}
+                if sv and tin_visible(policy):
+                    pub[k]["value"] = sv
             elif k == "tin_type":
                 continue  # folded into tin above
             else:

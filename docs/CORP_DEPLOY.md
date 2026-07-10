@@ -172,7 +172,8 @@ Key environment (all set in `compose.full.yaml`):
 | `MDMDOC_OLLAMA_HOST` | `http://ollama:11434` | pins the model endpoint; disables all fallback probing incl. the SSH auto-tunnel |
 | `MDMDOC_ALLOWED_HOSTS` | corp hostname | FULL-mode Host-header allowlist |
 | `MDMDOC_API_TOKEN` | from `.env` | bearer second factor |
-| `MDMDOC_BANK_VALUES` | (optional) `masked` | FULL mode defaults to `full` display of account/IBAN/routing for operator verification; set `masked` if corp policy forbids showing them. TIN is masked regardless. |
+| `MDMDOC_BANK_VALUES` | (optional) `masked` | FULL mode defaults to `full` display of account/IBAN/routing for operator verification; set `masked` if corp policy forbids showing them. |
+| `MDMDOC_TIN_VALUES` | (optional) `masked` | The same knob for tax numbers (TIN/SSN/EIN). FULL mode defaults to `full`: the operator types them into SAP, and *Download document* hands over the source PDF regardless. Set `masked` if corp policy forbids showing them. Independent of the training-data, egress and `reasoning.md` paths, which never reveal a tax number under any setting. |
 | `MDMDOC_RULE_GATE` | default `1` | human rule-approval hard gate; `0` is the no-redeploy off-switch |
 
 ---

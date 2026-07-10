@@ -27,7 +27,16 @@ CTZIUS33
 
 
 # ---------------------------------------------------------------- policy ------
-def test_display_value_tin_always_masked():
+def test_display_value_tin_follows_the_tin_policy(monkeypatch):
+    # operator console (default): tax numbers read like banking identifiers
+    assert display_value("tin", "81-0826734", "full") == "81-0826734"
+    assert display_value("ssn", "320-54-0693", "full") == "320-54-0693"
+    # a caller that asks for 'masked' by name is never overridden — this is what
+    # keeps reasoning.md (built for export to an external model) free of TINs
+    assert display_value("tin", "81-0826734", "masked") == "XX-XXX6734"
+    assert display_value("ssn", "320-54-0693", "masked") == "XXX-XX-0693"
+    # the switch masks tax numbers while banking stays full
+    monkeypatch.setenv("MDMDOC_TIN_VALUES", "masked")
     assert display_value("tin", "81-0826734", "full") == "XX-XXX6734"
     assert display_value("ssn", "320-54-0693", "full") == "XXX-XX-0693"
     assert display_value("iban", "DE44500105175407324931", "full") == "DE44500105175407324931"
@@ -60,15 +69,22 @@ def test_scrub_tin_only_keeps_banking_masks_tin():
     assert "1408137817" not in strict and "81-0826734" not in strict
 
 
-def test_to_public_policy_full_banking_value_tin_never():
+def test_to_public_policy_full_exposes_banking_and_tin(monkeypatch):
     e = Extraction(doc_class="bank", doc_type="bank_letter")
     e.fields = {"account_number": "1408137817", "routing_aba": "211070175",
                 "routing_aba_wires": "011500120", "iban": ""}
     pub = e.to_public(policy="full")
     assert pub["fields"]["account_number"]["value"] == "1408137817"
     assert pub["fields"]["routing_aba_wires"]["value"] == "011500120"
+
     w = Extraction(doc_class="w9", doc_type="w9")
     w.fields = {"tin_type": "EIN", "tin_raw": "81-0826734"}
+    tin = w.to_public(policy="full")["fields"]["tin"]
+    assert tin["value"] == "81-0826734" and tin["masked"] == "XX-XXX6734"
+
+    # 'masked' by name, and the TIN switch, both suppress the value key
+    assert "value" not in w.to_public(policy="masked")["fields"]["tin"]
+    monkeypatch.setenv("MDMDOC_TIN_VALUES", "masked")
     tin = w.to_public(policy="full")["fields"]["tin"]
     assert "value" not in tin and tin["masked"] == "XX-XXX6734"
 

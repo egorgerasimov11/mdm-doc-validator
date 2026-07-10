@@ -134,7 +134,8 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
                                              "locked": True})
         raise UnreadableDocument("password-protected PDF — request an unlocked copy")
 
-    # display/gate policy: banking values full for the operator, TIN always masked
+    # display/gate policy: the operator console shows banking AND tax values in
+    # full (config.*_values_policy); reasoning.md opts out explicitly below.
     policy = config.bank_values_policy()
     gate = config.gate_policy()
 
@@ -310,9 +311,11 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
             + "; ".join(conf["reasons"][:4])))
     verdict = decide(findings)
     # AFTER sap compare — its values are secrets too. Under the tin-only gate the
-    # run artifacts legitimately carry full banking values, so only TIN secrets
-    # are enforced there; training-data paths always get the full strict set.
-    secrets = ext.vault.tin_secrets() if gate == "tin-only" else ext.vault.secrets()
+    # the gate enforces exactly what the display still masks: a value family shown
+    # in full must not be a known-secret here or every artifact would trip on its
+    # own legitimate content. Training-data paths always get the full strict set.
+    secrets = {"none": [],
+               "tin-only": ext.vault.tin_secrets()}.get(gate, ext.vault.secrets())
 
     # operator precedent: a confirmed label for THIS document (by content hash)
     # overrides the machine verdict/doc_type — feedback must stick immediately.

@@ -2,10 +2,17 @@
 """
 privacy.py — the single choke point for sensitive values.
 
-Full SSN/TIN/EIN, IBANs and account numbers exist ONLY in memory during a run.
 Everything persisted or printed flows through mask()/scrub_text() and is gated
-by assert_no_leak(). Few-shot / LoRA exemplars use fake_preserve_shape() values
+by assert_no_leak(): the gate blocks exactly the value families the display
+policy still masks. Few-shot / LoRA exemplars use fake_preserve_shape() values
 (same prefix/length/hyphenation, different digits) so nothing real ever leaves.
+
+Two display policies decide what the OPERATOR sees, both defaulting to full on
+the console and masked in BTP/api-only: config.bank_values_policy() (IBAN,
+account, routing) and config.tin_values_policy() (SSN/EIN/TIN). Neither can
+reach training data (dataset/few-shot/LoRA are always gated strict), outbound
+web calls (egress.py forbids TIN_KINDS unconditionally), or a caller that asks
+for policy='masked' by name.
 """
 from __future__ import annotations
 
@@ -15,7 +22,7 @@ import re
 from . import ocr
 
 SENSITIVE_KINDS = ("ssn", "ein", "tin", "iban", "account_number", "routing_aba")
-TIN_KINDS = ("ssn", "ein", "tin")                      # masked under EVERY policy
+TIN_KINDS = ("ssn", "ein", "tin")                      # full only under config.tin_values_policy()
 BANK_KINDS = ("iban", "account_number", "routing_aba")  # full only under policy="full"
 
 # sensitive field name -> kind (used by callers to route through mask())
@@ -34,13 +41,25 @@ FIELD_KIND = {
 }
 
 
+def tin_visible(policy: str) -> bool:
+    """True when a caller asking for policy='full' may also see tax numbers.
+    A caller that asks for 'masked' ALWAYS gets a mask — that is what keeps
+    reasoning.md (built for export to an external model) free of tax numbers
+    no matter how the operator console is configured."""
+    if policy != "full":
+        return False
+    from . import config          # lazy: config must stay importable from privacy
+    return config.tin_values_policy() == "full"
+
+
 def display_value(kind: str, value: str, policy: str = "masked") -> str:
-    """THE policy-aware display choke point. TIN kinds are masked BEFORE the
-    policy is even consulted — no configuration can reveal a tax number."""
+    """THE policy-aware display choke point."""
     v = (value or "").strip()
     if not v:
         return ""
-    if kind in TIN_KINDS or policy != "full":
+    if policy != "full":
+        return mask(kind, v)
+    if kind in TIN_KINDS and not tin_visible(policy):
         return mask(kind, v)
     return v
 
@@ -195,10 +214,13 @@ def assert_no_leak(blob: str, known_secrets: list[str] | None = None,
     """Scan an output string for full sensitive values. Returns list of leak
     descriptions; raises ValueError when raise_on_hit and something leaked.
 
-    policy="strict"  — TIN + banking patterns (training data, default).
-    policy="tin-only" — TIN patterns only (run artifacts under the operator's
-    full-banking display policy). Callers choose which known_secrets to pass
-    (vault.tin_secrets() under tin-only).
+    policy="strict"   — TIN + banking patterns (training data, default).
+    policy="tin-only" — TIN patterns only (banking shown in full).
+    policy="none"     — both families are shown in full on this artifact, so no
+                        pattern is a leak. Callers must pass known_secrets to
+                        match: the gate blocks exactly what the display masks
+                        (config.gate_policy() picks the mode, pipeline picks the
+                        secrets). Training-data writes never use this mode.
 
     allowed_fakes: shape-preserving fakes (from sensitive_map) are SUPPOSED to
     look real, so generic-pattern hits equal to a registered fake are skipped.
@@ -218,7 +240,9 @@ def assert_no_leak(blob: str, known_secrets: list[str] | None = None,
         pat = re.compile(r"[\s\-–]*".join(re.escape(c) for c in dv))
         if s in b or pat.search(b):
             leaks.append(f"known-secret:{mask('tin', s)}")
-    patterns = _TIN_LEAK_RES if policy == "tin-only" else (_TIN_LEAK_RES + _BANK_LEAK_RES)
+    patterns = {"strict": _TIN_LEAK_RES + _BANK_LEAK_RES,
+                "tin-only": _TIN_LEAK_RES,
+                "none": ()}.get(policy, _TIN_LEAK_RES + _BANK_LEAK_RES)
     for rx in patterns:
         for m in rx.finditer(b):
             if re.sub(r"[\s\-–]", "", m.group(0)) in fake_norms:

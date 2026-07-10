@@ -39,7 +39,7 @@ TIME_MODIFIERS_S = {"strong": 60, "signature": 30, "sap": 30}
 
 def bank_values_policy() -> str:
     """'full' | 'masked' — how BANKING identifiers (account/routing/IBAN) appear
-    in run artifacts and the UI. TIN/SSN/EIN is masked under EVERY policy.
+    in run artifacts and the UI.
     Explicit MDMDOC_BANK_VALUES wins; else operator console -> full, BTP -> masked."""
     v = os.environ.get("MDMDOC_BANK_VALUES", "").strip().lower()
     if v in ("full", "masked"):
@@ -47,10 +47,38 @@ def bank_values_policy() -> str:
     return "masked" if os.environ.get("MDMDOC_MODE", "full") == "api-only" else "full"
 
 
+def tin_values_policy() -> str:
+    """'full' | 'masked' — how TAX numbers (TIN/SSN/EIN, W-8 foreign/US TIN)
+    appear in run artifacts and the UI. Same shape as bank_values_policy: the
+    operator types these into SAP and the source document is one click away, so
+    the console shows them in full; BTP/api-only stays masked.
+
+    This governs the OPERATOR display policy only. Three things it can never
+    reach, by construction: training data (dataset/few-shot/LoRA gates are
+    always strict), outbound web verification (egress.py forbids TIN_KINDS
+    unconditionally), and any caller that asks for policy='masked' explicitly."""
+    v = os.environ.get("MDMDOC_TIN_VALUES", "").strip().lower()
+    if v in ("full", "masked"):
+        return v
+    return "masked" if os.environ.get("MDMDOC_MODE", "full") == "api-only" else "full"
+
+
 def gate_policy() -> str:
-    """Leak-gate mode for run artifacts: 'tin-only' when banking values are shown
-    in full, 'strict' otherwise. Training data is ALWAYS gated strict."""
-    return "tin-only" if bank_values_policy() == "full" else "strict"
+    """Leak-gate mode for RUN ARTIFACTS — it blocks exactly the value families the
+    display policy still masks, so a family shown in full can never trip the gate
+    on its own legitimate content:
+
+        bank masked -> 'strict'   (both families blocked; tax numbers are masked
+                                   too, because a surface that hides banking gets
+                                   policy='masked' and privacy.tin_visible is False)
+        bank full, tin masked -> 'tin-only'
+        bank full, tin full   -> 'none'
+
+    'none' is not a disabled gate: it is the honest statement that this artifact
+    is allowed to carry both. Training data is ALWAYS gated strict."""
+    if bank_values_policy() != "full":
+        return "strict"
+    return "none" if tin_values_policy() == "full" else "tin-only"
 
 # Stage B input budget: OCR text is truncated to this many chars before the model sees it.
 STAGE_B_TEXT_LIMIT = 8000

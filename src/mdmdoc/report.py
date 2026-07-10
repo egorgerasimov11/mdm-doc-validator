@@ -48,7 +48,7 @@ def _evidence(pub: dict) -> list[str]:
             ev.append(f"country: {f['country_incorporation']}")
         ftin = f.get("foreign_tin", {})
         if isinstance(ftin, dict) and ftin.get("present"):
-            ev.append(f"foreign TIN: {ftin.get('masked')}")
+            ev.append(f"foreign TIN: {_fmt(ftin)}")
         if isinstance(f.get("signed"), bool):
             ev.append("signed: " + ("yes" if f["signed"] else "no"))
         return ev
@@ -72,7 +72,7 @@ def _evidence(pub: dict) -> list[str]:
             ev.append(f"Line 2: {f['line2_business_name']}")
         tin = f.get("tin", {})
         if tin.get("present"):
-            ev.append(f"TIN ({tin.get('type', '?')}): {tin.get('masked')}")
+            ev.append(f"TIN ({tin.get('type', '?')}): {_fmt(tin)}")
     return ev
 
 
@@ -80,12 +80,19 @@ def _fmt(v, empty="—") -> str:
     if isinstance(v, dict):
         if not v.get("present"):
             return empty
-        # 'value' present only under the full display policy (banking kinds);
-        # TIN dicts never carry it — they fall back to the mask
+        # 'value' present only under the full display policy (banking always,
+        # tax numbers per config.tin_values_policy); otherwise fall back to the mask
         return v.get("value") or v.get("masked") or empty
     if isinstance(v, bool):
         return "yes" if v else "no"
     return str(v).strip() or empty
+
+
+def _tin_label(base: str, d) -> str:
+    """'TIN' or 'TIN (masked)' — the suffix has to follow what the row actually
+    shows, otherwise the label lies the moment the display policy reveals it."""
+    shown = isinstance(d, dict) and d.get("value")
+    return base if shown else f"{base} (masked)"
 
 
 def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
@@ -142,8 +149,8 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
             ("Chapter 3 status", _fmt(f.get("chapter3_status")), "", "chapter3_status"),
             ("Chapter 4 (FATCA) status", _fmt(f.get("chapter4_status")), "", "chapter4_status"),
             ("Chapter 4 certification", _fmt(f.get("chapter4_cert_section")), "", "chapter4_cert_section"),
-            ("Foreign TIN (masked)", _fmt(ftin), "NEVER → Tax Number 1/2", "foreign_tin"),
-            ("US TIN (masked)", _fmt(ustin), "Tax Number 2 only if a real US EIN", "us_tin"),
+            (_tin_label("Foreign TIN", ftin), _fmt(ftin), "NEVER → Tax Number 1/2", "foreign_tin"),
+            (_tin_label("US TIN", ustin), _fmt(ustin), "Tax Number 2 only if a real US EIN", "us_tin"),
             ("Address — street", _fmt(f.get("address_street")), "", "address_street"),
             ("Address — city/country", _fmt(f.get("address_city_country")), "", "address_city_country"),
             ("Treaty country", _fmt(f.get("treaty_country")), "", "treaty_country"),
@@ -163,7 +170,7 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
         ("Line 2 — business name", _fmt(f.get("line2_business_name")), "SAP Name 2", "line2_business_name"),
         ("Classification (Line 3)", _fmt(f.get("line3_classification")), "", "line3_classification"),
         ("TIN type", tin.get("type") or "—", tin_target, "tin"),
-        ("TIN (masked)", _fmt(tin), "", "tin"),
+        (_tin_label("TIN", tin), _fmt(tin), "", "tin"),
         ("Address — street", _fmt(f.get("address_street")), "", "address_street"),
         ("Address — city/state/ZIP", _fmt(f.get("address_city_state_zip")), "", "address_city_state_zip"),
         ("Signed", signed, "", "signed"),

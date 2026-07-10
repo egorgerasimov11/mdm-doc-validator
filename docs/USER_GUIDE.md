@@ -193,6 +193,9 @@ You do not install anything yourself. Depending on who you are:
 - **Rule** — a written, human-approved condition that produces findings. The
   AI never invents rules and never decides verdicts.
 - **Masked value** — a value shown with most characters hidden
-  (e.g. an EIN shown as `XX-XXX6789`). Tax IDs are always masked, everywhere.
+  (e.g. an EIN shown as `XX-XXX6789`). The console shows account, IBAN, routing
+  and tax numbers in full, so you can type them straight into SAP. The
+  *Export reasoning* file, the training data and anything sent over the network
+  stay masked.
 - **Candidate model** — a newly trained version of the reading model that is
   being tested but is not yet in production.

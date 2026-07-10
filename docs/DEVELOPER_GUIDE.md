@@ -328,12 +328,18 @@ Full treatment: [PRIVACY.md](PRIVACY.md). The enforced shape:
   `dataset.append_label`, adoption state, fewshot, LoRA export — it RAISES: a
   leaking write crashes instead of leaking), `egress.assert_safe_outbound`
   (network — the outbound mirror of the leak gate).
-- **Two-policy model**: TIN/SSN/EIN masked under EVERY policy —
-  `display_value` masks TIN kinds before consulting config, so no env var can
-  reveal a tax number. Banking values follow `MDMDOC_BANK_VALUES`: full by
-  default in the local operator console, masked in api-only/BTP; the leak gate
-  runs tin-only vs strict accordingly. What is displayed is exactly what is
-  persisted/copied — there is no unmasked side channel.
+- **Two-policy model**: banking values follow `MDMDOC_BANK_VALUES` and tax
+  numbers follow `MDMDOC_TIN_VALUES`; both default to full in the local operator
+  console and masked in api-only/BTP. `config.gate_policy()` then blocks exactly
+  the families still masked (`strict` → `tin-only` → `none`), so a revealed value
+  can never trip the gate on its own content. What is displayed is exactly what
+  is persisted/copied — there is no unmasked side channel.
+  Two seams keep the reveal from spreading: `display_value`/`to_public` mask
+  whenever the *caller* passes `policy="masked"` by name (that is how
+  `reasoning.md` stays TIN-free), and training data, egress and the BTP image
+  never consult the display policy at all. Locked by `tests/test_tin_reveal.py`.
+  The ABAP twin has no operator console and always masks — that divergence is
+  intentional, not drift.
 - **Training data is ALWAYS strict**: labels are re-masked in
   `review_core.build_label`; exemplars carry only shape-preserving fakes.
 - **SecretVault per run**: kind/value/masked/fake (`fake_preserve_shape` =

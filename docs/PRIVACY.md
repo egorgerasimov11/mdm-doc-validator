@@ -6,27 +6,41 @@ treats privacy as an *invariant enforced by code*, not a policy hope.
 
 ## The two-policy model (updated)
 
-There are two orthogonal levels, chosen deliberately after operator feedback:
+Two value families, each with its own *display policy*. Both default to `full`
+in the operator console and `masked` in the api-only/BTP image:
 
-- **TIN/SSN/EIN — masked under EVERY policy, everywhere.** The display choke
-  point (`privacy.display_value`) masks TIN kinds *before* consulting any
-  configuration; no env var can reveal a tax number.
-- **Banking identifiers (account number, routing/ABA, IBAN)** follow the
-  *display policy* `MDMDOC_BANK_VALUES`: `full` (default in the operator
-  console — the operator must be able to verify digits against the form) or
-  `masked` (default in the api-only/BTP image). Under `full`, run artifacts and
-  the UI show complete banking values; the leak gate for those artifacts runs
-  in `tin-only` mode (TIN patterns + known TIN secrets still blocked).
-- **Training data is ALWAYS strict** — `dataset/labels.jsonl`,
-  `prompts/fewshot/`, `dataset/mlx-lora/` never carry full values regardless of
-  policy: the label builder re-masks anything copied from full-policy run
-  artifacts, and their gates fail closed.
+- **Banking identifiers (account number, routing/ABA, IBAN)** — `MDMDOC_BANK_VALUES`.
+- **Tax numbers (TIN/SSN/EIN, W-8 foreign/US TIN)** — `MDMDOC_TIN_VALUES`.
+  Revealed on the console because the operator types them into SAP and the
+  source document — which shows the number in plain sight — is one click away
+  behind *Download document*. Masking the field while shipping the PDF that
+  contains it bought no protection and cost a transcription step.
+
+The leak gate for run artifacts blocks exactly the families the display still
+masks (`config.gate_policy()`: `strict` → `tin-only` → `none`), so a value shown
+in full can never trip the gate on its own legitimate content.
+
+Revealing a family on the console reaches **nothing else**. Four separate
+mechanisms keep it contained, each locked by a test in `tests/test_tin_reveal.py`:
+
+1. **`reasoning.md`** — the decision trace built to be pasted into an external
+   LLM. It is assembled from `to_public(policy="masked")` and then run through
+   `scrub_text(policy="strict")`. A caller that asks for `masked` by name is
+   never overridden by configuration, so this artifact carries no tax number no
+   matter how the console is configured.
+2. **Training data is ALWAYS strict** — `dataset/labels.jsonl`,
+   `prompts/fewshot/`, `dataset/mlx-lora/` never carry full values: the label
+   builder strips the `value` key on *keep* and re-masks anything typed on
+   *set*, and their gates fail closed.
+3. **Outbound web verification** — `web_enrichment/egress.py` forbids `TIN_KINDS`
+   unconditionally; a tax number is never a query parameter.
+4. **BTP / api-only** — the SAP-facing deployment masks both families.
 
 ## Invariants
 
-1. **Full TIN values live only in process memory.** Banking values persist into
-   local run artifacts only under the operator's explicit `full` display policy;
-   they never enter training data or the BTP image defaults.
+1. **Sensitive values persist into local run artifacts only under the
+   operator's explicit `full` display policy.** They never enter training data,
+   never leave over the network, and never appear in the BTP image defaults.
 2. **Every persisted byte passes a leak gate.** `runstore.write()` (all run
    artifacts) and `dataset.append_label()` (training data) call
    `privacy.assert_no_leak()`, which scans for known full values *and* generic
@@ -36,6 +50,11 @@ There are two orthogonal levels, chosen deliberately after operator feedback:
    comparison table; the fix was masking at the source, never relaxing the gate.
 3. **Eval enforces zero leakage.** `mdmdoc eval` sweeps `runs/`, `dataset/`,
    `prompts/`, `eval/` and hard-fails (non-zero exit) if `leakage_count > 0`.
+   Read the number honestly: `dataset/`, `prompts/` and `eval/` are always swept
+   `strict`, and those are the trees that get committed. `runs/` is swept under
+   the display policy, so on a console with both families revealed the sweep of
+   `runs/` proves nothing — by design, because those artifacts are *allowed* to
+   carry the values. `runs/` is gitignored and local.
 
 ## The masking model (`src/mdmdoc/privacy.py`)
 

@@ -219,9 +219,10 @@ report, `ZMDMDOC_SETUP`, with a GO/NO-GO summary. A persistent note to the Data 
 
 Owned by [PRIVACY.md](PRIVACY.md); the load-bearing invariants:
 
-- **TIN/SSN/EIN is masked under every policy, everywhere** — the display choke point
-  masks tax IDs before consulting any configuration; no env var can reveal one. This
-  holds identically in the ABAP twin's masking class.
+- **TIN/SSN/EIN is masked in every SAP-facing deployment** — the ABAP twin and the
+  api-only image have no operator console and mask tax IDs unconditionally. Only the
+  local Python console can reveal them (`MDMDOC_TIN_VALUES`, default full there), and
+  even there the reveal never reaches training data, outbound calls or `reasoning.md`.
 - **Every persisted byte passes a leak gate** (`assert_no_leak`): a leaking write
   *raises* instead of leaking; the eval sweep hard-fails on `leakage_count > 0`
   (baseline: 0). The one observed false positive — a phantom-TIN kind-conflict —
