@@ -24,6 +24,7 @@
   </span>
   {% endif %}
   {% if rating == 'down' %}<span class="chip chip--WARNING" id="flag-bad">operator flagged this analysis</span>{% endif %}
+  {% if run_is_test %}<span class="tag" id="test-tag" title="filed under Test runs — hidden from the Documents list">test run</span>{% endif %}
 </div>
 <p style="margin:0 0 4px">{{ report.next_step }}</p>
 <p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }}{% if pub.tier == 'strong' %} · <span class="tag" title="escalated: {{ pub.escalated_because | join(', ') }}">strong tier</span>{% endif %}{% if meta.engine_effective %} ·
@@ -73,6 +74,11 @@
         <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.json" download="{{ meta.file_name }}.report.json">Export .json</a>
         <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/reasoning.md" download="{{ meta.file_name }}.reasoning.md"
            title="the full decision trace — perception, every guard, every rule evaluated, the verdict fold; paste it into an external LLM for critique">Export reasoning</a>
+      </div>
+      <div class="actions">
+        <button type="button" id="btn-test" data-run="{{ run_id }}" data-test="{{ '1' if run_is_test else '0' }}">
+          {{ 'Move to Documents' if run_is_test else 'Move to Test runs' }}</button>
+        <span class="hint">runs are filed as test unless the document was uploaded through this console; this overrides that for good</span>
       </div>
     </div>
   </details>
@@ -387,6 +393,6 @@
 {% block script %}<script>
   /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest.
      initRunTabs runs FIRST so the panels exist before initProposeFix wires disputes. */
-  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch","initRerun"]
+  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch","initRerun","initTestToggle"]
     .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
 </script>{% endblock %}

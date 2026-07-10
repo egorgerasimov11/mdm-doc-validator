@@ -22,7 +22,14 @@
     <span id="host-chip" class="meta host-chip">…</span>
   </div>
 </header>
-{% if page == 'rules' %}
+{# the Documents sub-tabs only appear on the two list pages: a run page sets
+   page='documents' with no subpage, and must not grow a second nav row #}
+{% if page == 'documents' and subpage %}
+<div class="wrap"><nav class="subtabs">
+  <a href="/ui" class="{{ 'current' if subpage == 'documents' }}">Documents</a>
+  <a href="/ui/test" class="{{ 'current' if subpage == 'test' }}">Test runs{% if test_count %} <span class="meta">{{ test_count }}</span>{% endif %}</a>
+</nav></div>
+{% elif page == 'rules' %}
 <div class="wrap"><nav class="subtabs">
   <a href="/ui/rules" class="{{ 'current' if subpage == 'editor' }}">Rule editor</a>
   <a href="/ui/rules/approve" class="{{ 'current' if subpage == 'approvals' }}">Approvals</a>

@@ -451,6 +451,23 @@ window.mdmdoc = (() => {
     };
   }
 
+  /* ---------- run page: file this run under Test runs, or take it back ---- */
+  function initTestToggle() {
+    const btn = document.getElementById("btn-test");
+    if (!btn) return;
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const next = btn.dataset.test !== "1";
+      try {
+        await api(`/api/v1/runs/${btn.dataset.run}/test`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ test: next }),
+        });
+        location = next ? "/ui/test" : "/ui";
+      } catch (e) { alert("could not move the run: " + e.message); btn.disabled = false; }
+    };
+  }
+
   /* ---------- run page: re-analyze against the CURRENT rules -------------- */
   function initRerun() {
     const btn = document.getElementById("btn-rerun");
@@ -1000,5 +1017,5 @@ window.mdmdoc = (() => {
 
   return { api, pollJob, initDropZone, initTplCompare, initValidRate, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
-           initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun };
+           initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun, initTestToggle };
 })();

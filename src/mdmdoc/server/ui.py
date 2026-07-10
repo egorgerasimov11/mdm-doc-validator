@@ -72,26 +72,42 @@ def _doctor_safe() -> dict:
                 "tesseract": {}, "labels_count": 0, "runs_count": 0}
 
 
-@router_ui.get("/ui", response_class=HTMLResponse)
-def dashboard(request: Request):
-    # no doctor probe here any more: the header chip fetches /doctor async
-    # (refreshChip), so the page no longer blocks on the model host
-    rows = runstore.list_runs()
+def _run_rows(test: bool) -> list[dict]:
+    rows = runstore.list_runs(test=test)
     labeled = _labeled_ids()
     thumbs = ratings.latest()          # run_id -> up|down (one small jsonl read)
     rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
     for r in rows:
         r["labeled"] = r["run_id"] in labeled
         r["rating"] = thumbs.get(r["run_id"], "")
+    return rows
+
+
+@router_ui.get("/ui", response_class=HTMLResponse)
+def dashboard(request: Request):
+    # no doctor probe here any more: the header chip fetches /doctor async
+    # (refreshChip), so the page no longer blocks on the model host
+    rows = _run_rows(test=False)
     env_eng = os.environ.get("MDMDOC_ENGINE", "").strip().lower()
     return templates.TemplateResponse(request, "dashboard.html",
-                                      _ctx(runs=rows[:40], page="documents",
+                                      _ctx(runs=rows[:40], page="documents", subpage="documents",
+                                           test_count=len(runstore.list_runs(test=True)),
                                            default_effort=config.default_effort(),
                                            engine_default=config.engine_mode(),
                                            engine_modes=list(config.ENGINE_MODES),
                                            engine_env_override=(env_eng if env_eng in config.ENGINE_MODES else ""),
                                            active_jobs=[j.to_dict() for j in jobs.REGISTRY.list()
                                                         if j.status in ("queued", "running")]))
+
+
+@router_ui.get("/ui/test", response_class=HTMLResponse)
+def test_runs_page(request: Request):
+    """Pipeline exercises — the corpus, the synthetic set, anything analyzed
+    outside the console. Same list, same filters, kept out of Documents."""
+    rows = _run_rows(test=True)
+    return templates.TemplateResponse(request, "test_runs.html",
+                                      _ctx(runs=rows, page="documents", subpage="test",
+                                           test_count=len(rows)))
 
 
 @router_ui.get("/ui/runs/{run_id}", response_class=HTMLResponse)
@@ -156,6 +172,7 @@ def run_page(request: Request, run_id: str, flash: str = ""):
         rating=__import__("mdmdoc.ratings", fromlist=["of"]).of(rid),
         doc_class=meta.get("doc_class", "bank"), label=label,
         gate_stale=_gate_is_stale(findings, meta.get("doc_class", "bank")),
+        run_is_test=runstore.is_test(meta),
         trace=_learning_trace(label, pub, rep) if label else None,
         artifacts=["meta.json", "stage_a.json", "extraction.json", "reasoning.md", "findings.json",
                    "report.json", "report.md", "sap_compare.json", "web_evidence.json"]))

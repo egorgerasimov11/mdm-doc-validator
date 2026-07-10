@@ -102,6 +102,10 @@ def _cmd_check(args, doc_class: str) -> int:
         print(res.report_md)
         print(f"(run {res.run_id} — artifacts in runs/{res.run_id}/; "
               f"correct me with: mdmdoc review {res.run_id})")
+        from . import runstore
+        if runstore.is_test(runstore.load(res.run_id, "meta.json") or {}):
+            print("(filed under Test runs — the document was not uploaded through "
+                  "the console; move it on the run page if that is wrong)")
     if args.report:
         Path(args.report).write_text(res.report_md, encoding="utf-8")
     return exit_code(res.verdict)

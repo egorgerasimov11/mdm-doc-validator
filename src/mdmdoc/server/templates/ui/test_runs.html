@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — test runs{% endblock %}
+{% block content %}
+<h1>Test runs</h1>
+<p class="meta">Documents analyzed outside the console — the labeled corpus, the synthetic
+set, anything run from the CLI. They stay out of <a href="/ui">Documents</a> so the
+operator's list is only real masterdata work. Open a run and press
+<strong>Move to Documents</strong> if one landed here by mistake.</p>
+
+<section>
+  <h2>{{ runs|length }} run{{ '' if runs|length == 1 else 's' }}</h2>
+  <div class="filterbar" data-filter-root data-filter-list="runs-list">
+    <input type="text" data-filter-search autocomplete="off" placeholder="filter by file name or run id…">
+    <span class="seg" data-filter-key="class">
+      <button type="button" class="active" data-filter-val="">all</button>
+      <button type="button" data-filter-val="bank">bank</button>
+      <button type="button" data-filter-val="w9">w9</button>
+    </span>
+    <span class="seg" data-filter-key="verdict">
+      <button type="button" class="active" data-filter-val="">any verdict</button>
+      <button type="button" data-filter-val="accept">accept</button>
+      <button type="button" data-filter-val="review">needs review</button>
+      <button type="button" data-filter-val="reject">reject</button>
+    </span>
+    <span class="seg" data-filter-key="labeled">
+      <button type="button" class="active" data-filter-val="">any label</button>
+      <button type="button" data-filter-val="1">labeled</button>
+      <button type="button" data-filter-val="0">unlabeled</button>
+    </span>
+    <span class="meta" data-filter-count></span>
+  </div>
+  {% if runs %}
+  <ul class="timeline" id="runs-list">
+    {% for r in runs %}
+    {% set vb = 'accept' if r.verdict == 'ACCEPT' else 'reject' if r.verdict == 'REJECT' else 'review' %}
+    <li data-search="{{ r.file }} {{ r.run_id }}"
+        data-class="{{ r.doc_class }}" data-verdict="{{ vb }}"
+        data-labeled="{{ '1' if r.labeled else '0' }}" data-rating="{{ r.rating }}">
+      <span class="dot dot--{{ r.verdict }}"></span>
+      <span class="meta">{{ r.doc_type }}</span>
+      <a class="grow" href="/ui/runs/{{ r.run_id }}">{{ r.file }}</a>
+      {% if r.rating == 'down' %}<span class="tag" title="you flagged this analysis">👎</span>{% endif %}
+      {% if r.labeled %}<span class="tag">labeled ✓</span>{% endif %}
+      <span class="meta">{{ r.run_id[:8] }} · {{ r.ts }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="meta">No test runs.</p>{% endif %}
+</section>
+{% endblock %}

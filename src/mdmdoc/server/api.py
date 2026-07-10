@@ -274,7 +274,8 @@ def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                   sap_image: Path | None = None, quality: bool = False,
                   web: bool = False, engine: str = "", sap_bp: str = "",
                   job=None, effort: int = 0,
-                  template_path: Path | None = None) -> dict:
+                  template_path: Path | None = None,
+                  is_test: bool | None = None) -> dict:
     mc.reset_host()
     # HARD GATE default ON (Egor's choice); MDMDOC_RULE_GATE=0 is the instant
     # off-switch (no redeploy) if the "everything held for approval" phase is
@@ -295,7 +296,7 @@ def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                         engine=engine or None, sap_bp=sap_bp,
                         cancel=(job.cancel if job is not None else None),
                         on_stage=on_stage, effort=effort or None,
-                        template_path=template_path)
+                        template_path=template_path, is_test=is_test)
     report = json.loads(res.report_json)
     return {"run_id": res.run_id, "verdict": res.verdict, "report": report,
             "report_md": res.report_md}
@@ -323,6 +324,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
         raise api_error(400, "bad_request", "lang must be 'en' or 'ru'")
     if effort and effort not in (1, 2, 3, 4, 5):
         raise api_error(400, "bad_request", "effort must be 1..5 (or 0 for legacy params)")
+    is_test = None                     # None -> derive from where the document lives
     if file is not None:
         path = save_upload(file.filename or "document", file.file.read())
     elif rerun_run_id:
@@ -333,6 +335,8 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
         if not meta or not Path(meta.get("path", "")).exists():
             raise api_error(404, "not_found", f"run {rerun_run_id} has no re-runnable document")
         path = Path(meta["path"])
+        # a re-run must not silently undo an operator who filed this run by hand
+        is_test = runstore.is_test(meta)
     else:
         raise api_error(400, "bad_request", "provide a file or rerun_run_id")
     sap_path = None
@@ -363,7 +367,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
         try:
             out = _run_pipeline(path, doc_class, lang, use_vision, sap_path,
                                 quality, web, engine, sap_bp, effort=effort,
-                                template_path=tpl_path)
+                                template_path=tpl_path, is_test=is_test)
             out["estimate_s"] = est
             return out
         except UnreadableDocument as e:
@@ -384,7 +388,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
             log(f"template: {tpl_path.name}")
         out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality,
                             web, engine, sap_bp, job=job, effort=effort,
-                            template_path=tpl_path)
+                            template_path=tpl_path, is_test=is_test)
         out["estimate_s"] = est
         log(f"verdict: {out['verdict']} (run {out['run_id']})")
         return out
@@ -763,6 +767,23 @@ def rate_run(run_id: str, body: dict) -> dict:
     from .. import ratings
     row = ratings.record(rid, rating)
     return {"ok": True, **row}
+
+
+@router_teach.post("/runs/{run_id}/test", tags=["teach"])
+def set_run_test(run_id: str, body: dict) -> dict:
+    """File a run under Test runs, or move it back to Documents. Runs are
+    classified by where their document lives (inbox/ = the operator uploaded it),
+    which is right almost always and wrong occasionally — this is the escape
+    hatch, and the stored flag then wins over the derivation for good."""
+    if "test" not in body:
+        raise api_error(400, "bad_request", "body must carry 'test': true|false")
+    rid = runstore.resolve_run(run_id)
+    meta = runstore.load(rid, "meta.json") if rid else None
+    if not meta:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    meta["test"] = bool(body["test"])
+    runstore.write(rid, "meta.json", meta, [], policy=config.gate_policy())
+    return {"ok": True, "run_id": rid, "test": meta["test"]}
 
 
 @router_teach.post("/runs/{run_id}/propose-fix", tags=["teach"])

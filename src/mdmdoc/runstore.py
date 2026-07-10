@@ -91,7 +91,32 @@ def resolve_run(spec: str) -> str | None:
     return None
 
 
-def list_runs() -> list[dict]:
+def default_is_test(path) -> bool:
+    """A run is a TEST run unless its document arrived through the console.
+
+    save_upload() is the only writer of inbox/, so 'lives in inbox/' means 'the
+    operator dropped this on the dashboard'. Everything else — the labeled
+    corpus, the synthetic set, a scratch directory, a CLI invocation against
+    some path — is somebody exercising the pipeline, not doing masterdata work.
+    Deriving it beats a flag nobody remembers to pass."""
+    try:
+        Path(path).resolve().relative_to(config.INBOX_DIR.resolve())
+        return False
+    except (ValueError, OSError):
+        return True
+
+
+def is_test(meta: dict) -> bool:
+    """Persisted flag wins; runs written before the flag existed are classified
+    by the same rule at read time, so no migration touches operator data."""
+    if "test" in (meta or {}):
+        return bool(meta["test"])
+    return default_is_test((meta or {}).get("path", ""))
+
+
+def list_runs(test: bool | None = None) -> list[dict]:
+    """test=None: everything. test=False: the operator's documents (default view).
+    test=True: only the pipeline exercises."""
     out = []
     if not config.RUNS_DIR.exists():
         return out
@@ -100,10 +125,13 @@ def list_runs() -> list[dict]:
             continue
         meta = load(d.name, "meta.json") or {}
         rep = load(d.name, "report.json") or {}
+        t = is_test(meta)
+        if test is not None and t != test:
+            continue
         out.append({"run_id": d.name, "file": Path(meta.get("path", "?")).name,
                     "doc_class": meta.get("doc_class", "?"),
                     "doc_type": rep.get("doc_type", "?"), "verdict": rep.get("verdict", "?"),
-                    "ts": meta.get("ts", "")})
+                    "ts": meta.get("ts", ""), "test": t})
     return out
 
 

@@ -32,7 +32,8 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
               engine: str | None = None, sap_bp: str = "",
               cancel=None, on_stage=None, overrides: dict | None = None,
               effort: int | None = None,
-              template_path: Path | None = None) -> CheckResult:
+              template_path: Path | None = None,
+              is_test: bool | None = None) -> CheckResult:
     """Thin control-plane wrapper (D1): binds a RunControl (cooperative cancel
     event, stage-progress callback, per-run config overrides) to THIS thread's
     context for the duration of the run, then delegates. A canceled run raises
@@ -58,7 +59,7 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                                quality=quality, web_evidence=web_evidence,
                                enforce_approvals=enforce_approvals, engine=engine,
                                sap_bp=sap_bp, effort=effort,
-                               template_path=template_path)
+                               template_path=template_path, is_test=is_test)
     finally:
         runctl.deactivate(token)
 
@@ -70,7 +71,8 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
                     web_evidence: bool | None = None, enforce_approvals: bool = True,
                     engine: str | None = None, sap_bp: str = "",
                     effort: int | None = None,
-                    template_path: Path | None = None) -> CheckResult:
+                    template_path: Path | None = None,
+                    is_test: bool | None = None) -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
     not the operator's stored answers. quality=True forces the strong tier.
     web_evidence: None -> honour the MDMDOC_WEB_EVIDENCE env flag; True/False
@@ -126,12 +128,16 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
     if doc_class in ("auto", ""):
         doc_class = stage_a.sniff_doc_class(path)
 
+    # a run the operator never uploaded is a pipeline exercise, not masterdata
+    # work: it is filed under Test runs and kept out of the Documents list
+    test_run = runstore.default_is_test(path) if is_test is None else bool(is_test)
+
     runctl.checkpoint("perception", 8)
     raw = stage_a.perceive(path, doc_class, rdir, use_vision=use_vision)
     if raw.locked:
         runstore.write(run_id, "meta.json", {"path": str(path), "doc_class": doc_class,
                                              "run_id": run_id, "ts": runstore.now_iso(),
-                                             "locked": True})
+                                             "test": test_run, "locked": True})
         raise UnreadableDocument("password-protected PDF — request an unlocked copy")
 
     # display/gate policy: the operator console shows banking AND tax values in
@@ -387,6 +393,7 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
     report_md = rpt.render_report(pub, findings, verdict, lang=lang)
     meta = {"path": str(path), "file_name": path.name, "doc_class": doc_class,
             "run_id": run_id, "ts": runstore.now_iso(), "model": ext.model_id,
+            "test": test_run,
             "use_vision": use_vision, "duration_s": round(time.time() - t0, 1),
             "tier": ext.tier, "escalated_because": ext.escalated_because,
             "engine_requested": engine_req, "engine_effective": engine_eff,
