@@ -146,6 +146,9 @@ class RawDoc:
     images: list = field(default_factory=list)
     type_hint: str = ""
     warnings: list = field(default_factory=list)
+    # P2: a text layer existed but was unreadable (encoded font) — the doc was
+    # rerouted to the scan branch; recorded for eval/review observability
+    text_layer_garbage: bool = False
 
     @property
     def run_id(self) -> str:
@@ -632,7 +635,16 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             raw.warnings.append("password-protected PDF — cannot read")
             return raw
         texts, raw.pages = _pdf_page_texts(path, SCAN_PAGE_CAP)
-        if sum(ocr.realword_count(t) for t in texts) >= 15:
+        if ocr.text_layer_garbage(texts):
+            # a text layer EXISTS but is unreadable (custom font without a
+            # ToUnicode CMap -> control-char soup that still yields enough
+            # word-shaped tokens to pass the gate below). Real 5-page vendor
+            # packet: every page_score was 0, the first pages won by index,
+            # and the extractor was fed garbage. Treat as a scan (P2).
+            raw.text_layer_garbage = True
+            raw.warnings.append("text layer present but unreadable (encoded/"
+                                "garbage font) — treated as a scan")
+        if sum(ocr.realword_count(t) for t in texts) >= 15 and not raw.text_layer_garbage:
             # text layer: score every page, keep the most relevant ones,
             # best page first so it never falls off the Stage-B budget
             raw.has_text_layer = True
@@ -746,6 +758,7 @@ def to_public(raw: RawDoc, vault, policy: str = "masked") -> dict:
         "pages": raw.pages, "pages_used": raw.pages_used, "rotations": raw.rotations,
         "bank_letter_pages": raw.bank_letter_pages, "invoice_pages": raw.invoice_pages,
         "type_hint": raw.type_hint, "warnings": raw.warnings,
+        "text_layer_garbage": raw.text_layer_garbage,
         "raw_text_excerpt": scrub_text(raw.raw_text[:config.EXCERPT_LIMIT], vault,
                                        policy=scrub_policy),
         "tesseract_chars": len(raw.tesseract_text), "vision_chars": len(raw.vision_text),

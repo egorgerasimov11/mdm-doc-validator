@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import unicodedata
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -23,10 +24,37 @@ HAVE_TESSERACT = bool(shutil.which("tesseract"))
 RENDER_DPI = 300
 
 _WORD = re.compile(r"[A-Za-zÀ-ÿ]{2,}")
+_LATIN_LETTER = re.compile(r"[A-Za-zÀ-ÿ]")
 
 
 def realword_count(text: str) -> int:
     return len(_WORD.findall(text or ""))
+
+
+def text_layer_garbage(texts: list[str]) -> bool:
+    """A text layer that EXISTS but is unreadable — a custom font without a
+    ToUnicode CMap extracts as control-char soup with tiny real fragments
+    (real case: a 5-page vendor packet whose get_text() was \\x00\\x01… while
+    the pages rendered perfectly). Two independent metrics:
+      * control/private-use char ratio >= 0.15 (the real garbage packet sits
+        far above; clean docs at ~0);
+      * real-word density over LATIN letters only < 0.25 when there are
+        >= 200 latin letters (CJK/Cyrillic never enter the denominator, so
+        non-Latin text layers cannot misfire; pure-CJK layers never reach
+        this gate anyway — the has_text_layer word gate routes them to the
+        scan branch first)."""
+    t = "".join(texts or [])
+    if not t.strip():
+        return False
+    bad = sum(1 for c in t
+              if unicodedata.category(c) in ("Cc", "Co") and c not in "\t\n\r")
+    if bad / len(t) >= 0.15:
+        return True
+    latin = len(_LATIN_LETTER.findall(t))
+    if latin >= 200:
+        word_chars = sum(len(w) for w in _WORD.findall(t))
+        return word_chars / latin < 0.25
+    return False
 
 
 def _avail_langs() -> set:
