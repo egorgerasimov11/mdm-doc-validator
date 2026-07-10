@@ -48,6 +48,11 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 - officer_block_guard — ported
 - finalize_provenance — n/a (Python report provenance structure; the ABAP result has no provenance field)
 - corroborate_across_pages — n/a (needs per-page perception texts; ABAP receives one flat text and has no page structure)
+- fix_zh_form — ported
+- ground_account_holder — ported
+- record_settlement_issuer — n/a (folds the officer_block flag + issuer phrases
+  into doc_subtype_evidence for the BNK-027 NOTE; the ABAP result struct has no
+  subtype-evidence field — the flag-driven rule itself IS in the shared data)
 
 ## Guards (continued, 2026-07-09 accuracy wave)
 - normalize_tin — ported (already listed)

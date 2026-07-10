@@ -537,6 +537,9 @@ class Extraction:
     # component booleans are persisted for the review UI / eval debugging
     doc_type_uncertain: bool = False
     doc_type_evidence: dict = field(default_factory=dict)
+    # G3 issuer-aware evidence for payment_instructions (settlement_issuer
+    # components) — informational, feeds BNK-027 (NOTE) via a derived flag
+    doc_subtype_evidence: dict = field(default_factory=dict)
 
     def register_secrets(self) -> None:
         keys = _SENSITIVE_BANK if self.doc_class == "bank" else _SENSITIVE_W9
@@ -606,4 +609,6 @@ class Extraction:
         if self.doc_type_uncertain:
             pub_wrap["doc_type_uncertain"] = True
             pub_wrap["doc_type_evidence"] = dict(self.doc_type_evidence)
+        if self.doc_subtype_evidence:
+            pub_wrap["doc_subtype_evidence"] = dict(self.doc_subtype_evidence)
         return pub_wrap

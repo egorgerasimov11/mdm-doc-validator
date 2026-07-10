@@ -305,6 +305,66 @@
     "literal": "phone|mobile|\\<tel\\>|fax|e-?mail|@|www\\.|bank",
     "count": 1
    }
+  },
+  {
+   "id": "zh_mobile_shape",
+   "canon": "pinned",
+   "note": "CN mobile 1[3-9] + 9 digits; py uses re.fullmatch, ABAP anchors ^...$ over digits_only",
+   "py": {
+    "file": "src/mdmdoc/stage_b.py",
+    "literal": "1[3-9]\\d{9}",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "literal": "^1[3-9][0-9]{9}$",
+    "count": 1
+   }
+  },
+  {
+   "id": "zh_phone_context_labels",
+   "canon": "pinned",
+   "note": "phone/contact CJK labels — identical literal both sides",
+   "py": {
+    "file": "src/mdmdoc/stage_b.py",
+    "literal": "电话|手机|联系人|联系方式|传真|邮编",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "literal": "电话|手机|联系人|联系方式|传真|邮编",
+    "count": 1
+   }
+  },
+  {
+   "id": "zh_account_labels",
+   "canon": "pinned",
+   "note": "account CJK labels; py non-capturing (?:...), ABAP capturing group for SUBMATCHES",
+   "py": {
+    "file": "src/mdmdoc/stage_b.py",
+    "literal": "(?:开户账号|收款账[户号]|银行账[户号]|账号|帐号|账户)",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "literal": "(开户账号|收款账[户号]|银行账[户号]|账号|帐号|账户)",
+    "count": 1
+   }
+  },
+  {
+   "id": "signatory_labels",
+   "canon": "pinned",
+   "note": "role labels that mark a signer/contact (G1); py \\s vs ABAP [[:space:]] dialect — first alternation line pinned per side",
+   "py": {
+    "file": "src/mdmdoc/stage_b.py",
+    "literal": "account\\s+signator(?:y|ies)|authori[sz]ed\\s+sign(?:er|ers|atory|atories)|",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "literal": "account[[:space:]]+signator(y|ies)|authori[sz]ed[[:space:]]+sign(er|ers|atory|atories)|",
+    "count": 1
+   }
   }
  ]
 }

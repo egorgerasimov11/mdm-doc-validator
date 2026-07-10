@@ -86,6 +86,31 @@ def _bank_identity(text: str, cands: dict) -> bool:
     return False
 
 
+# issuer-evidence phrases: the letter asserts the account is held AT the
+# issuing bank / is a bank-authored settlement-instruction sheet (G3)
+_ACCOUNT_HELD_PHRASES = ("account held", "held with", "held at",
+                         "maintained with", "maintained at",
+                         "standard settlement instructions",
+                         "settlement instructions")
+
+
+def settlement_issuer(text: str, regex_candidates: dict | None,
+                      officer_block) -> dict:
+    """Issuer-awareness for payment_instructions (G3): bank-ISSUED standard
+    settlement instructions (named bank + officer block / account-held
+    statement) vs a supplier's self-made ACH sheet. Pure and model-free;
+    informational only — BNK-027 folds it into a NOTE, never a verdict."""
+    t = (text or "").lower()
+    comp = {
+        "bank_identity": _bank_identity(text or "", regex_candidates or {}),
+        "officer_block": bool(officer_block),
+        "account_held": any(p in t for p in _ACCOUNT_HELD_PHRASES),
+    }
+    comp["issuer_strong"] = comp["bank_identity"] and (comp["officer_block"]
+                                                       or comp["account_held"])
+    return comp
+
+
 def score(text: str, regex_candidates: dict | None,
           bank_letter_pages: list | None) -> dict:
     """-> {'components': {...bool...}, 'bank_letter_strong': bool}.

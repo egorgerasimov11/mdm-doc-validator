@@ -461,6 +461,129 @@ def _fix_jp_form(ext: Extraction, raw: RawDoc) -> None:
         _cross_note(ext, "bank country inferred: JP (Japanese domestic form markers)")
 
 
+def _fix_zh_form(ext: Extraction, raw: RawDoc) -> None:
+    """Chinese domestic forms/notices (mirror of _fix_jp_form): an 11-digit CN
+    MOBILE number (1[3-9]xxxxxxxxx) is not an account number; labeled 账号/账户
+    fields rescue the real value; country is inferable. NFKC first (full-width
+    digits). Gated on CN markers and the ABSENCE of the JP 口座 marker."""
+    if ext.doc_class != "bank":
+        return
+    import unicodedata
+    text = unicodedata.normalize("NFKC", raw.raw_text or "")
+    if not re.search(r"账|帐|户名|开户", text) or "口座" in text:
+        return
+    f = ext.fields
+    acct = re.sub(r"\D", "", str(f.get("account_number") or ""))
+    # [CONST:zh_mobile_shape]
+    if re.fullmatch(r"1[3-9]\d{9}", acct):
+        pos = text.find(acct)
+        ctx = text[max(0, pos - 24):pos + len(acct) + 8] if pos >= 0 else ""
+        # [CONST:zh_phone_context_labels]
+        if pos < 0 or re.search(r"电话|手机|联系人|联系方式|传真|邮编", ctx):
+            ext.warnings.append(f"account_number …{acct[-4:]} matches the CN mobile "
+                                "shape in a phone/contact context — dropped")
+            f["account_number"] = ""
+            ext.provenance.pop("account_number", None)
+    if not str(f.get("account_number") or "").strip():
+        # [CONST:zh_account_labels]
+        m = re.search(r"(?:开户账号|收款账[户号]|银行账[户号]|账号|帐号|账户)"
+                      r"\s*[:：]?\s*([0-9][0-9 \-]{6,28}[0-9])", text)
+        if m:
+            f["account_number"] = re.sub(r"[ \-]", "", m.group(1))
+            ext.provenance["account_number"] = {"source": "ocr-regex", "page": None}
+            _cross_note(ext, "account number taken from the labeled 账号/账户 field")
+    if not str(f.get("bank_country") or "").strip():
+        f["bank_country"] = "CN"
+        ext.provenance["bank_country"] = {"source": "rule", "page": None}
+        _cross_note(ext, "bank country inferred: CN (Chinese domestic form markers)")
+
+
+# role labels that mark a NAME as signer/contact — not the account OWNER
+# [CONST:signatory_labels]
+_SIGNATORY_LABEL_RE = re.compile(
+    r"(?i)\b(?:account\s+signator(?:y|ies)|authori[sz]ed\s+sign(?:er|ers|atory|atories)|"
+    r"signator(?:y|ies)|contact\s+(?:person|name)|representative|attn\.?|attention|"
+    r"prepared\s+by|requested\s+by|submitted\s+by)\b")
+# holder labels that KEEP the value where it is (ownership context wins)
+_HOLDER_KEEP_RE = re.compile(
+    r"(?i)account\s*holder|beneficiary|account\s*name|in\s+the\s+name\s+of|"
+    r"a\s+nombre\s+de|titular|kontoinhaber|intestat")
+# relationship sentences that NAME the owner ('verify that X is a customer')
+_REL_HOLDER_RES = (
+    re.compile(r"(?i)\b(?:verify|verifies|confirm|confirms|certify|certifies)\s+that\s+"
+               r"([A-Z][\w&.,'()\- ]{2,70}?)\s+is\s+(?:a|an|our)\s+"
+               r"(?:valued\s+)?(?:customer|client|account\s*holder)"),
+    re.compile(r"(?i)\b([A-Z][\w&.,'()\- ]{2,60}?)\s+(?:holds|maintains)\s+"
+               r"(?:a|an|the|its)?\s*(?:(?:business|checking|deposit)\s+)*account"),
+)
+
+
+def _ground_account_holder(ext: Extraction, raw: RawDoc) -> None:
+    """Role gate for account_holder (bank): a name printed under a
+    signatory/contact label is the SIGNER, not the account owner (real case:
+    'Account signatory: <person>' became the holder and the run ACCEPTed).
+    (a) signatory-labeled value moves to the derived account_signatory field;
+    (b) an empty holder is re-grounded from a relationship sentence
+    ('...verify that <NAME> is a customer...'); (c) ownership-labeled values
+    are never touched."""
+    if ext.doc_class != "bank":
+        return
+    f = ext.fields
+    holder = str(f.get("account_holder") or "").strip()
+    text = raw.raw_text or ""
+    if holder:
+        ctx = _value_line_context(text, holder)
+        if ctx and _SIGNATORY_LABEL_RE.search(ctx) and not _HOLDER_KEEP_RE.search(ctx):
+            f["account_signatory"] = holder
+            f["account_holder"] = ""
+            ext.provenance.pop("account_holder", None)
+            ext.provenance["account_signatory"] = {"source": "rule", "page": None}
+            ext.warnings.append(
+                f"account_holder '{holder}' sits under a signatory/contact label — "
+                "moved to account_signatory (a signer is not the account owner)")
+            holder = ""
+    if not holder:
+        for rx in _REL_HOLDER_RES:
+            m = rx.search(text)
+            if not m:
+                continue
+            name = m.group(1).strip().strip(".,;:'\"")
+            if 3 <= len(name) <= 70:
+                f["account_holder"] = name
+                ext.provenance["account_holder"] = {"source": "rule", "page": None}
+                _cross_note(ext, "account holder grounded from the document's "
+                                 "relationship sentence")
+                break
+
+
+def _value_line_context(text: str, value: str) -> str:
+    """The line carrying `value` plus the line above it — labels commonly sit
+    on either. Empty string when the value is not printed as-is."""
+    vcf = value.casefold()
+    lines = (text or "").splitlines()
+    for i, ln in enumerate(lines):
+        if vcf in ln.casefold():
+            return (lines[i - 1] + "\n" + ln) if i > 0 else ln
+    return ""
+
+
+def _record_settlement_issuer(ext: Extraction, raw: RawDoc) -> None:
+    """Issuer-aware evidence for payment_instructions (G3): bank-ISSUED
+    standard settlement instructions (named bank + officer block or an
+    account-held statement) are a different beast from a supplier's self-made
+    ACH sheet. Records the component booleans and the settlement_issuer_strong
+    flag that BNK-027 (NOTE, pending approval) reads — never a verdict."""
+    if ext.doc_class != "bank" or ext.doc_type != "payment_instructions":
+        return
+    from . import doctype_evidence
+    comp = doctype_evidence.settlement_issuer(raw.raw_text, raw.regex_candidates,
+                                              ext.fields.get("officer_block"))
+    ext.doc_subtype_evidence = {"settlement_issuer": comp}
+    if comp["issuer_strong"]:
+        ext.fields["settlement_issuer_strong"] = True
+        ext.provenance["settlement_issuer_strong"] = {"source": "rule", "page": None}
+
+
 def _fix_statement_period(ext: Extraction, raw: RawDoc) -> None:
     """A statement's date IS its period — rescue it when the model left doc_date
     empty ('no visible document date' on a dated statement reads as a miss)."""
@@ -1066,6 +1189,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     # 'account' must open the gap the strong tier is asked to fill)
     _audit_bank_ids(ext_res, raw)
     _fix_jp_form(ext_res, raw)
+    _fix_zh_form(ext_res, raw)
+    _ground_account_holder(ext_res, raw)
     _fix_statement_period(ext_res, raw)
     _esignature_guard(ext_res, raw)
 
@@ -1103,6 +1228,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
             # re-audit AFTER the re-crosscheck (it replaced the notes again)
             _audit_bank_ids(ext_res, raw)
             _fix_jp_form(ext_res, raw)
+            _fix_zh_form(ext_res, raw)
+            _ground_account_holder(ext_res, raw)
             _fix_statement_period(ext_res, raw)
             _esignature_guard(ext_res, raw)
             ext_res.tier, ext_res.model_strong = "strong", strong_model
@@ -1118,6 +1245,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     # a negative probe can no longer overwrite the text-tier evidence
     _officer_block_guard(ext_res, raw)
     _resolve_signature(ext_res, raw)
+    _record_settlement_issuer(ext_res, raw)   # needs the officer_block flag
     _corroborate_across_pages(ext_res, raw)
     _finalize_provenance(ext_res, raw)
 

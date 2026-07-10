@@ -135,6 +135,17 @@ rules:
     message: "No wet signature/stamp; compensating evidence present ({detail}) — normal for system-issued bank letters; note for the Data Owner."
     message_ru: "Живой подписи/печати нет; есть компенсирующее свидетельство ({detail}) — норма для системно выпускаемых банковских писем; заметка для Data Owner."
 
+  - id: BNK-027
+    name: settlement_issuer_strong
+    tier: experimental
+    source: policy
+    applies_to: [payment_instructions]
+    when: {flag_true: settlement_issuer_strong}
+    severity: NOTE
+    verdict_effect: null
+    message: "Payment instructions appear BANK-ISSUED (named bank plus an officer block or an account-held statement) — materially stronger than a supplier's self-declaration; context for the Data Owner."
+    message_ru: "Платёжные инструкции выглядят ВЫПУЩЕННЫМИ БАНКОМ (именованный банк + officer block или подтверждение ведения счёта) — существенно сильнее самодекларации поставщика; контекст для Data Owner."
+
   - id: BNK-022
     name: partial_screenshot
     tier: corp
