@@ -4,8 +4,30 @@
     {
       "name": "mdmdoc-ui",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "mdmdoc", "serve", "--host", "127.0.0.1", "--port", "8766"],
+      "runtimeArgs": [
+        "run",
+        "mdmdoc",
+        "serve",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8766"
+      ],
       "port": 8766
+    },
+    {
+      "name": "mdmdoc-ui-v6",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "mdmdoc",
+        "serve",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8768"
+      ],
+      "port": 8768
     }
   ]
 }

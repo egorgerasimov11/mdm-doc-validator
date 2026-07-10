@@ -171,3 +171,7 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 /* D4: effort slider */
 .effort-box { display: inline-flex; align-items: center; gap: 6px; }
 .effort-box input[type="range"] { width: 130px; }
+
+/* the hidden attribute must always win over class display rules
+   (.actions{display:flex} was overriding [hidden] on the progress rows) */
+[hidden] { display: none !important; }
