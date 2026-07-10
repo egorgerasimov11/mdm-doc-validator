@@ -1,0 +1,35 @@
+# Bulk bank-details validation data (V-wave). Logic in bulk/bank.py;
+# US routing arithmetic shared with the document rules via rules/bankmath.py.
+#
+# key_shapes: what a NATIONAL bank key looks like per country (BUT0BK BANKL).
+# IBAN countries often leave the key empty — checked only when present.
+version: 1
+
+key_shapes:
+  US: {regex: '^\d{9}$', name: "ABA routing number"}
+  CA: {regex: '^0?\d{8,9}$', name: "institution + transit"}
+  DE: {regex: '^\d{8}$', name: "Bankleitzahl (BLZ)"}
+  GB: {regex: '^\d{6}$', name: "sort code"}
+  AU: {regex: '^\d{6}$', name: "BSB"}
+  NZ: {regex: '^\d{6}$', name: "bank/branch"}
+  IN: {regex: '^[A-Z]{4}0[A-Z0-9]{6}$', name: "IFSC"}
+  CN: {regex: '^\d{12}$', name: "CNAPS (联行号)"}
+  JP: {regex: '^\d{4}\d{3}$', name: "bank + branch code"}
+  HK: {regex: '^\d{3}\d{3}$', name: "bank + branch"}
+  SG: {regex: '^\d{4}\d{3}$', name: "bank + branch"}
+  BR: {regex: '^\d{3,8}$', name: "bank code (+agência)"}
+  MX: {regex: '^\d{3,18}$', name: "bank code / CLABE prefix"}
+  ZA: {regex: '^\d{6}$', name: "branch code"}
+  CH: {regex: '^\d{3,9}$', name: "clearing number"}
+  SE: {regex: '^\d{4,5}$', name: "clearing number"}
+
+control_keys:
+  US: {allowed: ["", "01", "02", "03", "04"],
+       note: "01 checking / 02 savings (SAP BKONT convention)"}
+
+# countries whose accounts are normally IBAN — a missing IBAN with a filled
+# domestic account is not an error, but noted for awareness
+iban_countries: [AD, AE, AL, AT, AZ, BA, BE, BG, BH, CH, CY, CZ, DE, DK, EE,
+                 ES, FI, FO, FR, GB, GE, GI, GL, GR, HR, HU, IE, IL, IS, IT,
+                 JO, KW, KZ, LB, LI, LT, LU, LV, MC, MD, ME, MK, MT, NL, "NO",
+                 PL, PT, QA, RO, RS, SA, SE, SI, SK, SM, TN, TR, UA, VA, XK]
