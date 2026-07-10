@@ -485,17 +485,25 @@ def _select_w8_pages(scored: list, max_pages: int) -> tuple[list, int]:
 
     part1 = _first(_W8_PART1_RE)
     part1 = part1 if part1 is not None else idxs[0]
-    cert = _first(_W8_CERT_XXX_RE)
+
+    # the certification Part of every W-8 variant sits at the END of the form,
+    # so each ladder stage scans BACKWARDS and, on a >=4-page form, ignores
+    # first-half hits: page 2 of the real GVS W-8BEN-E says '...including
+    # signing the form in Part XXX.' — an instructional REFERENCE that used to
+    # win over the true page-8 Part (whose scan OCR'd too poorly to match),
+    # sending the signature probe to the wrong page.
+    def _cert_candidate(rx) -> int | None:
+        half = idxs[len(idxs) // 2] if len(idxs) >= 4 else idxs[0]
+        for i in reversed(idxs):
+            if i >= half and rx.search(by_idx[i][2] or ""):
+                return i
+        return None
+
+    cert = _cert_candidate(_W8_CERT_XXX_RE)
     if cert is None:
-        cert = _first(_W8_SIGNHERE_RE)
+        cert = _cert_candidate(_W8_SIGNHERE_RE)
     if cert is None:
-        cert = _last(_W8_CERT_WORD_RE)
-        # the certification Part of every W-8 variant sits at the END of the
-        # form; a 'Certification' word-hit in the FIRST half is quick-OCR noise
-        # (real 8-page GVS scan: page 2 matched, page 8 — the true Part XXX —
-        # OCR'd too poorly to hit, and the signature probe searched page 2)
-        if cert is not None and len(idxs) >= 4 and cert < idxs[len(idxs) // 2]:
-            cert = None
+        cert = _cert_candidate(_W8_CERT_WORD_RE)
     if cert is None:
         cert = idxs[-1]
     picks = [by_idx[part1]]
