@@ -28,7 +28,7 @@ router_teach = APIRouter(prefix="/api/v1", dependencies=[Depends(require_token)]
 
 ARTIFACT_ALLOWLIST = {"meta.json", "stage_a.json", "extraction.json",
                       "findings.json", "report.json", "report.md", "sap_compare.json",
-                      "web_evidence.json"}
+                      "web_evidence.json", "reasoning.md"}
 
 
 def _labeled_ids() -> set[str]:

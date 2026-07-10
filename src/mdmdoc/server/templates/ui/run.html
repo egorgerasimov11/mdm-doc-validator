@@ -27,6 +27,8 @@
   <a class="btn" href="/api/v1/runs/{{ run_id }}/document" download="{{ meta.file_name }}">Download document</a>
   <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.md" download="{{ meta.file_name }}.report.md">Export .md</a>
   <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.json" download="{{ meta.file_name }}.report.json">Export .json</a>
+  <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/reasoning.md" download="{{ meta.file_name }}.reasoning.md"
+     title="the full decision trace — perception, every guard, every rule evaluated, the verdict fold; paste it into an external LLM for critique">Export reasoning</a>
   <button type="button" id="btn-sap" data-class="{{ doc_class }}">Compare with SAP…</button>
   <input type="file" id="sap-input"
          accept="{{ '.png,.jpg,.jpeg,.pdf,.xlsx,.xlsm' if doc_class == 'bank' else '.xlsx,.xlsm' }}" hidden>

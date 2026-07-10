@@ -96,7 +96,8 @@ def _eval_when(when: dict, ext: Extraction, tables: dict) -> tuple[bool, str, st
 
 
 def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
-              enforce_approvals: bool = False) -> list[Finding]:
+              enforce_approvals: bool = False,
+              trace: list | None = None) -> list[Finding]:
     """enforce_approvals=True is the HARD GATE (live pipeline): a rule fires only
     if a human Approved it in the panel. A rejected rule is skipped; a pending
     (never-reviewed or changed-since-approval) rule that APPLIES to the document
@@ -109,11 +110,22 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
     if enforce_approvals:
         from .. import rule_approvals
         approvals = rule_approvals.load()
+    def _trace(rid, name, outcome, detail=""):
+        # D6 reasoning trail: what happened to EVERY rule — fired / did not
+        # fire / not applicable / skipped by the approval gate. Off (None) on
+        # every existing call site; the pipeline passes a list for reasoning.md.
+        if trace is not None:
+            trace.append({"rule_id": rid, "name": name, "outcome": outcome,
+                          "detail": str(detail)[:160]})
+
     for rule in cfg.get("rules", []) or []:
         rid = str(rule.get("id", "?"))
+        rname = str(rule.get("name", ""))
         try:
             applies = rule.get("applies_to")
             if applies and ext.doc_type not in applies:
+                _trace(rid, rname, "not-applicable",
+                       f"applies_to {applies}, doc_type {ext.doc_type}")
                 continue
             if enforce_approvals:
                 from .. import rule_approvals
@@ -121,10 +133,18 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
                 if st != rule_approvals.APPROVED:
                     if st == rule_approvals.PENDING:
                         pending_applicable.append(rid)
+                    _trace(rid, rname, f"skipped-{st.lower()}",
+                           "approval gate" if st == rule_approvals.PENDING
+                           else "rejected by operator")
                     continue   # rejected -> silent skip; pending -> NMR below
             fired, detail, fname = _eval_when(rule.get("when", {}) or {}, ext, tables)
             if not fired:
+                _trace(rid, rname, "did-not-fire")
                 continue
+            _trace(rid, rname,
+                   f"FIRED {rule.get('severity', 'WARNING')}"
+                   + (f" -> {rule.get('verdict_effect')}" if rule.get("verdict_effect") else ""),
+                   detail)
             raw_value = str(ext.fields.get(fname, "") or "") if fname else ""
             kind = FIELD_KIND.get(fname)
             from ..privacy import display_value

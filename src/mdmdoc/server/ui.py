@@ -146,7 +146,7 @@ def run_page(request: Request, run_id: str, flash: str = ""):
         sap_rows=sap_rows, web_rows=web_rows, web_banner=web_banner,
         doc_class=meta.get("doc_class", "bank"), label=label,
         trace=_learning_trace(label, pub, rep) if label else None,
-        artifacts=["meta.json", "stage_a.json", "extraction.json", "findings.json",
+        artifacts=["meta.json", "stage_a.json", "extraction.json", "reasoning.md", "findings.json",
                    "report.json", "report.md", "sap_compare.json", "web_evidence.json"]))
 
 

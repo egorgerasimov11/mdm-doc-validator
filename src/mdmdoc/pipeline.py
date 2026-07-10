@@ -146,7 +146,9 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
 
     # rules -> verdict (+ optional SAP comparison as extra findings)
     runctl.checkpoint("rules", 76)
-    findings = run_rules(ext, lang=lang, policy=policy, enforce_approvals=enforce_approvals)
+    rules_trace: list = []
+    findings = run_rules(ext, lang=lang, policy=policy,
+                         enforce_approvals=enforce_approvals, trace=rules_trace)
     from .rules.engine import Finding as _Finding
     if engine_req != "deterministic" and not llm_ok:
         findings.insert(0, _Finding(
@@ -336,7 +338,22 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
             "ladder": ladder_meta, "effort": effort}
     report_json = rpt.build_json(pub, findings, verdict, meta)
 
+    # reasoning.md is BUILT MASKED regardless of the operator display policy:
+    # its purpose is to be pasted into an EXTERNAL LLM for critique — banking
+    # values follow the egress spirit of web_enrichment (masked), TIN always
+    from . import reasoning as _reasoning
+    from .privacy import scrub_text as _scrub
+    reasoning_md = _reasoning.build_reasoning(
+        meta, stage_a.to_public(raw, ext.vault, policy="masked"),
+        ext.to_public(policy="masked"), findings,
+        verdict, conf, ladder_meta, sap_rows, rules_trace,
+        container_note=container_note)
+    # crosscheck/warning lines were rendered under the OPERATOR policy at
+    # extraction time — strict-scrub the assembled export end-to-end
+    reasoning_md = _scrub(reasoning_md, ext.vault, policy="strict")
+
     runstore.write(run_id, "meta.json", meta, secrets, policy=gate)
+    runstore.write(run_id, "reasoning.md", reasoning_md, secrets, policy=gate)
     runstore.write(run_id, "stage_a.json", stage_a.to_public(raw, ext.vault, policy=policy),
                    secrets, policy=gate)
     runstore.write(run_id, "extraction.json", pub, secrets, policy=gate)
