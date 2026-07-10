@@ -864,23 +864,52 @@ window.mdmdoc = (() => {
   }
 
   /* ---------- dashboard: run filters -------------------------------------- */
-  function initRunFilters() {
-    const seg = document.querySelector("#run-filters .seg");
-    const list = document.getElementById("runs-list");
-    if (!seg || !list) return;
-    seg.querySelectorAll("button").forEach(b => b.onclick = () => {
-      seg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
-      b.classList.add("active");
-      const f = b.dataset.f;
-      list.querySelectorAll("li").forEach(li => {
-        let show = true;
-        if (f === "bank" || f === "w9") show = li.dataset.class === f;
-        else if (f === "review") show = ["NEED_MANUAL_REVIEW", "WARNING"].includes(li.dataset.verdict);
-        else if (f === "unlabeled") show = li.dataset.labeled === "0";
-        li.style.display = show ? "" : "none";
+  /* One filter bar for every list in the console (N2).
+     Markup contract:
+       <div class="filterbar" data-filter-root data-filter-list="runs-list">
+         <input data-filter-search>                       -> matches row data-search
+         <span class="seg" data-filter-key="verdict">     -> matches row data-verdict
+           <button class="active" data-filter-val="">any</button>
+           <button data-filter-val="accept">accept</button>
+     A row shows when the search substring matches AND every seg whose active
+     button carries a non-empty value equals that row's data-<key>. */
+  function initFilterBar(root) {
+    root = root || document.querySelector("[data-filter-root]");
+    if (!root) return;
+    const list = document.getElementById(root.dataset.filterList);
+    if (!list) return;
+    const search = root.querySelector("[data-filter-search]");
+    const segs = [...root.querySelectorAll(".seg[data-filter-key]")];
+    const count = root.querySelector("[data-filter-count]");
+
+    function apply() {
+      const q = search ? search.value.trim().toLowerCase() : "";
+      const cons = segs.map(s => {
+        const b = s.querySelector("button.active");
+        return [s.dataset.filterKey, b ? (b.dataset.filterVal || "") : ""];
       });
-    });
+      let shown = 0;
+      [...list.children].forEach(row => {
+        let show = !q || (row.dataset.search || "").toLowerCase().includes(q);
+        for (const [k, v] of cons) if (show && v) show = row.dataset[k] === v;
+        row.style.display = show ? "" : "none";
+        if (show) shown += 1;
+      });
+      if (count) count.textContent = shown + " of " + list.children.length;
+    }
+
+    segs.forEach(s => s.querySelectorAll("button").forEach(b => b.onclick = () => {
+      s.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      apply();
+    }));
+    if (search) search.addEventListener("input", apply);
+    apply();
+    return apply;   // callers that mutate rows (approvals) re-apply after a repaint
   }
+
+  // legacy name kept so the export list and any cached inline caller keep working
+  function initRunFilters() { initFilterBar(); }
 
   /* ---------- run page: copy report ---------------------------------------- */
   function initCopyReport() {
@@ -918,10 +947,10 @@ window.mdmdoc = (() => {
   refreshChip();
   setInterval(refreshChip, 60000);
 
-  initRunFilters();
+  initFilterBar();
   initCopyReport();
 
   return { api, pollJob, initDropZone, initTplCompare, initValidRate, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
-           initRetrainWatch, initBulk };
+           initRetrainWatch, initBulk, initFilterBar, initRunFilters };
 })();

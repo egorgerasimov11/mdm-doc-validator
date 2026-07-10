@@ -187,3 +187,8 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 .card { flex: 1 1 220px; border: 1px solid var(--divider); border-radius: 8px; padding: 14px 16px; }
 .cmp-table th, .cmp-table td { padding: 4px 10px 4px 0; }
 .ok { color: var(--accept); }
+
+/* N2: the one filter bar (dashboard runs, rule approvals) */
+.filterbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.filterbar input[type=text] { width: 18em; flex: 0 1 auto; }
+.filterbar [data-filter-count] { margin-left: auto; white-space: nowrap; }

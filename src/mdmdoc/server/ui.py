@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import config, dataset, model_client as mc, review_core, runstore
+from .. import config, dataset, model_client as mc, ratings, review_core, runstore
 from ..evidence import FIELD_EVIDENCE, resolve_all as resolve_evidence
 from ..report import _data_rows
 from . import jobs
@@ -78,9 +78,11 @@ def dashboard(request: Request):
     # (refreshChip), so the page no longer blocks on the model host
     rows = runstore.list_runs()
     labeled = _labeled_ids()
+    thumbs = ratings.latest()          # run_id -> up|down (one small jsonl read)
     rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
     for r in rows:
         r["labeled"] = r["run_id"] in labeled
+        r["rating"] = thumbs.get(r["run_id"], "")
     env_eng = os.environ.get("MDMDOC_ENGINE", "").strip().lower()
     return templates.TemplateResponse(request, "dashboard.html",
                                       _ctx(runs=rows[:40], page="documents",
@@ -365,6 +367,7 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
         rows.append({"id": r.get("id"), "name": r.get("name"), "message": r.get("message"),
                      "severity": r.get("severity"), "verdict_effect": r.get("verdict_effect"),
                      "applies_to": r.get("applies_to"), "tier": r.get("tier") or "",
+                     "source": str(r.get("source") or "").split(":")[0],
                      "status": rule_approvals.status(store, doc_class, r)})
     counts = {s: sum(x["status"] == s for x in rows)
               for s in ("approved", "pending", "rejected")}

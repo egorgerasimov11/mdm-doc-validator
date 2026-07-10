@@ -41,10 +41,37 @@
 </table>
 {% endif %}
 
+<div class="filterbar" data-filter-root data-filter-list="rules-tbody">
+  <input type="text" data-filter-search autocomplete="off" placeholder="filter by rule id, name or text…">
+  <span class="seg" data-filter-key="status">
+    <button type="button" class="active" data-filter-val="">all</button>
+    <button type="button" data-filter-val="approved">approved</button>
+    <button type="button" data-filter-val="pending">pending</button>
+    <button type="button" data-filter-val="rejected">rejected</button>
+  </span>
+  <span class="seg" data-filter-key="tier">
+    <button type="button" class="active" data-filter-val="">any tier</button>
+    <button type="button" data-filter-val="corp">corp</button>
+    <button type="button" data-filter-val="experimental">experimental</button>
+    <button type="button" data-filter-val="learned">learned</button>
+  </span>
+  <span class="seg" data-filter-key="source">
+    <button type="button" class="active" data-filter-val="">any source</button>
+    <button type="button" data-filter-val="skill">skill</button>
+    <button type="button" data-filter-val="policy">policy</button>
+    <button type="button" data-filter-val="operator">operator</button>
+  </span>
+  <span class="meta" data-filter-count></span>
+</div>
+
 <table class="data-table" id="rules-table">
+  <thead>
   <tr><th>rule</th><th>tier</th><th>what it does</th><th>effect</th><th>status</th><th>decision</th></tr>
+  </thead>
+  <tbody id="rules-tbody">
   {% for r in rows %}
-  <tr data-rule="{{ r.id }}">
+  <tr data-rule="{{ r.id }}" data-search="{{ r.id }} {{ r.name }} {{ r.message }}"
+      data-status="{{ r.status }}" data-tier="{{ r.tier }}" data-source="{{ r.source }}">
     <td class="meta" style="white-space:nowrap"><code>{{ r.id }}</code><br>{{ r.name }}</td>
     <td class="meta"><span class="tag tier-chip" data-rule="{{ r.id }}">{{ r.tier or '—' }}</span></td>
     <td>{{ r.message }}{% if r.applies_to %} <span class="hint">[{{ r.applies_to | join(', ') }}]</span>{% endif %}</td>
@@ -59,16 +86,20 @@
     </td>
   </tr>
   {% endfor %}
+  </tbody>
 </table>
 {% endblock %}
 {% block script %}<script>
 (function () {
   const api = mdmdoc.api, log = document.getElementById("job-log");
   const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+  const refilter = mdmdoc.initFilterBar(document.querySelector("[data-filter-root]"));
   function paint(row, status) {
     const s = row.querySelector(".status .tag");
     s.textContent = status;
     s.className = "tag " + (status === "approved" ? "ok" : status === "pending" ? "bad" : "");
+    row.dataset.status = status;      // keep the status filter honest after a decision
+    if (refilter) refilter();
   }
   async function decide(cls, ruleId, decision, row) {
     try {
