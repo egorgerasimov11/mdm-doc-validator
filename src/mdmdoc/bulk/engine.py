@@ -84,9 +84,11 @@ def _write_result_xlsx(src: Path, case: str, rows: list[dict],
     out = config.INBOX_DIR / f"{bulk_id}__{case}_validated.xlsx"
     wb = Workbook()
 
+    from .reader import _CASE_ALIASES
+    disp = {canon: names[0] for canon, names in _CASE_ALIASES[case].items()}
     ws = wb.active
     ws.title = "Data"
-    headers = res.columns + ["Verdict", "Rule IDs", "Reasons"]
+    headers = [disp.get(c, c) for c in res.columns] + ["Verdict", "Rule IDs", "Reasons"]
     ws.append(headers)
     for c in ws[1]:
         c.font = Font(bold=True)
