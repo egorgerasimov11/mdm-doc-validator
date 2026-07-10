@@ -32,15 +32,23 @@ ABAP_ROOT = Path(os.environ.get("MDMDOC_ABAP_HOME",
 
 def _lit(s: str) -> str:
     """A backtick ABAP string literal, chunked to keep lines <=140 chars
-    (abaplint line_length). Backticks in the text are doubled."""
-    s = s.replace("`", "``")
-    if len(s) <= 100:
-        return f"`{s}`"
-    parts, i = [], 0
-    while i < len(s):
-        parts.append(s[i:i + 90])
-        i += 90
-    return " &&\n          ".join(f"`{p}`" for p in parts)
+    (abaplint line_length). Backticks in the text are doubled; embedded
+    newlines become cl_abap_char_utilities=>newline concatenations (a literal
+    newline inside a template literal is an ABAP parser error)."""
+    out_parts: list[str] = []
+    for si, seg in enumerate(s.split("\n")):
+        if si:
+            out_parts.append("cl_abap_char_utilities=>newline")
+        seg = seg.replace("`", "``")
+        i = 0
+        while i < len(seg):
+            out_parts.append(f"`{seg[i:i + 90]}`")
+            i += 90
+    if not out_parts:
+        return "``"
+    if len(out_parts) == 1:
+        return out_parts[0]
+    return " &&\n          ".join(out_parts)
 
 
 def _kv(v) -> str:
