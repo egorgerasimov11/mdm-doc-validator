@@ -375,12 +375,25 @@ def _audit_bank_ids(ext: Extraction, raw: RawDoc) -> None:
         _cross_note(ext, "iban checksum (ISO 13616 mod-97): "
                     + ("valid" if iban_mod97_ok(iban) else "INVALID"))
     domestic: list[str] = []
+    cands = getattr(raw, "regex_candidates", {}) or {}
+    nc_cand = re.sub(r"\D", "", str(cands.get("national_clearing") or ""))
     for k in ("routing_aba", "routing_aba_wires"):
         d = re.sub(r"\D", "", str(f.get(k) or ""))
         if d and len(d) != 9:
-            domestic.append(d)
             f[k] = ""
             ext.provenance.pop(k, None)
+            # a labeled national clearing code the model pressed into a routing
+            # field is REAL data — relocate it instead of demoting it to a note
+            if (nc_cand and d == nc_cand
+                    and not str(f.get("national_clearing") or "").strip()):
+                f["national_clearing"] = str(cands["national_clearing"])
+                f["national_clearing_kind"] = str(
+                    cands.get("national_clearing_kind") or "")
+                ext.provenance["national_clearing"] = {"source": "rule", "page": None}
+                _cross_note(ext, "non-ABA routing value relocated to the national "
+                                 f"clearing field ({f['national_clearing_kind'] or 'domestic'})")
+                continue
+            domestic.append(d)
     if domestic:
         if iban.startswith("IT") and len(iban) >= 15:
             abi, cab = iban[5:10], iban[10:15]
@@ -496,6 +509,27 @@ def _fix_zh_form(ext: Extraction, raw: RawDoc) -> None:
         f["bank_country"] = "CN"
         ext.provenance["bank_country"] = {"source": "rule", "page": None}
         _cross_note(ext, "bank country inferred: CN (Chinese domestic form markers)")
+
+
+def _ground_national_clearing(ext: Extraction, raw: RawDoc) -> None:
+    """A labeled national clearing code (CN CNAPS 联行号, IN IFSC, UK sort code,
+    AU BSB, DE BLZ) is the domestic analog of a US routing number — and for
+    CN/GB/AU/IN it IS the SAP Bank Key. Real case: a Chinese letter's 联行号
+    303100000397 was invisible to every field, so the SAP bank-key compare
+    always fell to 'sap-only'. Derived field outside BANK_KEYS (the model
+    prompt never changes); never overwrites an existing value."""
+    if ext.doc_class != "bank":
+        return
+    cand = str(raw.regex_candidates.get("national_clearing") or "").strip()
+    if not cand or str(ext.fields.get("national_clearing") or "").strip():
+        return
+    from .privacy import display_value
+    kind = str(raw.regex_candidates.get("national_clearing_kind") or "").strip()
+    ext.fields["national_clearing"] = cand
+    ext.fields["national_clearing_kind"] = kind
+    ext.provenance["national_clearing"] = {"source": "ocr-regex", "page": None}
+    _cross_note(ext, f"national clearing code ({kind or 'domestic'}) taken from "
+                     f"the labeled field: {display_value('routing_aba', cand, ext.policy)}")
 
 
 # role labels that mark a NAME as signer/contact — not the account OWNER
@@ -1190,6 +1224,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     _audit_bank_ids(ext_res, raw)
     _fix_jp_form(ext_res, raw)
     _fix_zh_form(ext_res, raw)
+    _ground_national_clearing(ext_res, raw)
     _ground_account_holder(ext_res, raw)
     _fix_statement_period(ext_res, raw)
     _esignature_guard(ext_res, raw)
@@ -1229,6 +1264,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
             _audit_bank_ids(ext_res, raw)
             _fix_jp_form(ext_res, raw)
             _fix_zh_form(ext_res, raw)
+            _ground_national_clearing(ext_res, raw)
             _ground_account_holder(ext_res, raw)
             _fix_statement_period(ext_res, raw)
             _esignature_guard(ext_res, raw)

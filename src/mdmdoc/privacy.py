@@ -24,6 +24,7 @@ FIELD_KIND = {
     "account_number": "account_number",
     "routing_aba": "routing_aba",
     "routing_aba_wires": "routing_aba",
+    "national_clearing": "routing_aba",
     "tin_raw": "tin",
     "tin_boxed": "tin",
     "foreign_tin": "tin",

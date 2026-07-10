@@ -179,7 +179,8 @@ def _row_score(row: dict, ext: Extraction) -> int:
         s += 40
     if d_iban and r_acc and r_acc.lstrip("0") and d_iban.endswith(r_acc.lstrip("0")):
         s += 40
-    d_key = _norm_id(f.get("routing_aba")) or _norm_id(f.get("routing_aba_wires"))
+    d_key = (_norm_id(f.get("routing_aba")) or _norm_id(f.get("routing_aba_wires"))
+             or _norm_id(f.get("national_clearing")))
     if d_key and _norm_id(row.get("BANKL")) == d_key:
         s += 20
     return s

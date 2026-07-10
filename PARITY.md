@@ -50,6 +50,7 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 - corroborate_across_pages — n/a (needs per-page perception texts; ABAP receives one flat text and has no page structure)
 - fix_zh_form — ported
 - ground_account_holder — ported
+- ground_national_clearing — ported
 - record_settlement_issuer — n/a (folds the officer_block flag + issuer phrases
   into doc_subtype_evidence for the BNK-027 NOTE; the ABAP result struct has no
   subtype-evidence field — the flag-driven rule itself IS in the shared data)

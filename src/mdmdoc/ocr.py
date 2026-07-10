@@ -214,18 +214,36 @@ def regex_fields(text: str) -> dict:
     # a wires-qualified value with no standard one: keep field semantics honest
     if "routing_aba" not in out and "routing_aba_wires" in out and len(seen) == 1:
         pass  # single wires ABA stays in routing_aba_wires only
+    # national clearing codes — the domestic analog of a US routing number
+    # (CN CNAPS 联行号, IN IFSC, UK sort code, AU BSB, DE BLZ). For CN/GB/AU/IN
+    # this IS the SAP Bank Key. Label-anchored ONLY — never guessed from bare
+    # digit runs (real case: a Chinese letter's 联行号 303100000397 was
+    # invisible to every field). Most-specific label first.
+    # [CONST:national_clearing_labels]
+    for kind, rx in (("CNAPS", r"(?:联行号码?|CNAPS)[^0-9]{0,10}(\d{12})\b"),
+                     ("IFSC", r"(?i)\bIFSC[^A-Z0-9]{0,8}([A-Z]{4}0[A-Z0-9]{6})\b"),
+                     ("SORT", r"(?i)\bsort\s*code[^0-9]{0,10}(\d{2}[- ]?\d{2}[- ]?\d{2})\b"),
+                     ("BSB", r"(?i)\bBSB[^0-9]{0,10}(\d{3}[- ]?\d{3})\b"),
+                     ("BLZ", r"(?i)(?:bankleitzahl|\bBLZ)[^0-9]{0,10}(\d{8})\b")):
+        m = re.search(rx, t)
+        if m:
+            out["national_clearing"] = re.sub(r"[\s\-]", "", m.group(1)).upper()
+            out["national_clearing_kind"] = kind
+            break
     # account number: digits near an 'account' keyword in EN/ES/DE/FR/PT/RU/CJK
     for am in re.finditer(r"(?i)(?:acc(?:oun)?t|cuenta|cta\.?|konto(?:nummer)?|kto\.?|"
                           r"compte|conta|сч[её]т|계좌|口座|账[户戶号號]|帐[户戶号號])"
                           r"[^0-9]{0,14}([0-9][0-9 \-]{5,20}[0-9])", t):
         acct = re.sub(r"[\s\-]", "", am.group(1))
-        if 6 <= len(acct) <= 18 and acct != out.get("routing_aba"):
+        if (6 <= len(acct) <= 18 and acct != out.get("routing_aba")
+                and acct != out.get("national_clearing")):
             out["account_number"] = acct
             break
     # fallback: a long standalone digit run (11-18 digits) as account candidate
     if "account_number" not in out:
         cands = [re.sub(r"[\s\-]", "", m) for m in re.findall(r"\b\d[\d \-]{9,20}\d\b", t)]
-        cands = [c for c in cands if 11 <= len(c) <= 18 and c != out.get("routing_aba")]
+        cands = [c for c in cands if 11 <= len(c) <= 18 and c != out.get("routing_aba")
+                 and c != out.get("national_clearing")]
         if cands:
             out["account_number"] = max(cands, key=len)
     return out

@@ -365,6 +365,21 @@
     "literal": "account[[:space:]]+signator(y|ies)|authori[sz]ed[[:space:]]+sign(er|ers|atory|atories)|",
     "count": 1
    }
+  },
+  {
+   "id": "national_clearing_labels",
+   "canon": "pinned",
+   "note": "label-anchored national clearing capture (O1); CNAPS line pinned per side — py \\b vs ABAP \\> dialect; full pattern tables must be edited together",
+   "py": {
+    "file": "src/mdmdoc/ocr.py",
+    "literal": "(?:联行号码?|CNAPS)[^0-9]{0,10}(\\d{12})\\b",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_regex.clas.abap",
+    "literal": "(?:联行号码?|CNAPS)[^0-9]{0,10}(\\d{12})\\>",
+    "count": 1
+   }
   }
  ]
 }

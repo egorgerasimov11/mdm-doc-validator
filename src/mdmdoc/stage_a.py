@@ -40,7 +40,8 @@ VISION_TARGETED_PROMPT = (
     "This is a banking/payment document. SEARCH the image for payment details, wherever "
     "and however they are printed (tables, stamps, footers, handwriting, small print): "
     "bank name, account holder/beneficiary, IBAN, account number, SWIFT/BIC, "
-    "routing/ABA/sort code, currency. Transcribe each one exactly, with its label. "
+    "routing/ABA, national clearing code (联行号/CNAPS, sort code, BSB, IFSC, BLZ), "
+    "currency. Transcribe each one exactly, with its label. "
     "If a detail is truly absent, say ABSENT."
 )
 HOLDER_TARGETED_PROMPT = (

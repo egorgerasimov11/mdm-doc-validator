@@ -34,7 +34,8 @@ W8_KEYS = ["form_variant", "legal_name", "country_incorporation",
 
 ID_FIELDS = ("iban", "swift_bic", "account_number", "routing_aba", "routing_aba_wires")
 
-_SENSITIVE_BANK = ("iban", "account_number", "routing_aba", "routing_aba_wires")
+_SENSITIVE_BANK = ("iban", "account_number", "routing_aba", "routing_aba_wires",
+                   "national_clearing")
 _SENSITIVE_W9 = ("tin_raw", "foreign_tin", "us_tin")
 
 
@@ -561,7 +562,8 @@ class Extraction:
                           "length": len(c), "present": True}
                 if policy == "full":
                     pub[k]["value"] = c
-            elif k in ("account_number", "routing_aba", "routing_aba_wires") and sv:
+            elif k in ("account_number", "routing_aba", "routing_aba_wires",
+                       "national_clearing") and sv:
                 pub[k] = {"masked": mask(FIELD_KIND[k], sv), "length": len(_norm_id(sv)),
                           "present": True}
                 if policy == "full":

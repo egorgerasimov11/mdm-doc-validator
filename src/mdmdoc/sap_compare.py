@@ -213,16 +213,23 @@ def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Fi
         in_doc_iban = bool(d_iban and s_key in d_iban[4:4 + len(s_key) + 2])
         eq_routing = bool((d_routing and d_routing == s_key)
                           or (d_wires and d_wires == s_key))
-        if in_doc_iban or eq_routing:
+        # national clearing code (CN CNAPS / UK sort / AU BSB / IN IFSC): for
+        # these countries the SAP Bank Key IS the domestic clearing code
+        d_clearing = _norm_id(f.get("national_clearing"))
+        nc_kind = str(f.get("national_clearing_kind") or "domestic")
+        eq_clearing = bool(d_clearing and d_clearing == s_key)
+        if in_doc_iban or eq_routing or eq_clearing:
             status, note = "match", ("confirmed by document IBAN" if in_doc_iban
-                                     else "matches document routing")
-        elif d_routing or d_iban:
+                                     else "matches document routing" if eq_routing
+                                     else f"matches document clearing code ({nc_kind})")
+        elif d_routing or d_iban or d_clearing:
             status, note = "MISMATCH", "no document-side confirmation"
             warn("SAP-006", f"SAP Bank Key {s_key} is not confirmed by the document "
                             "(not in the IBAN bank-code position, routing differs).")
         else:
             status, note = "sap-only", "document shows no routing/IBAN to compare"
         doc_side = (_dv("routing_aba", d_routing or d_wires) if (d_routing or d_wires)
+                    else _dv("routing_aba", d_clearing) if d_clearing
                     else ("from IBAN" if d_iban else ""))
         rows.append(_row_p("Bank Key", doc_side, s_key, status, note))
 
