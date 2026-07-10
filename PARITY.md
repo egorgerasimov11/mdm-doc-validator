@@ -56,6 +56,13 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 - corroborate_across_pages — n/a (needs per-page perception texts; ABAP receives one flat text and has no page structure)
 - fix_zh_form — ported
 - ground_account_holder — ported
+- ground_bank_address — ported (G3: a labeled "Bank Address" line + the next
+  City/State/Zip line fill an EMPTY bank_address — table-shaped remit forms
+  print it verbatim while the model regularly skips it; never overwrites)
+- annotate_bank_ids — n/a (G2/G4 console-notes layer over Python-ocr candidate
+  keys — routing_suspect / swift_secondary / swift qualifiers — that the ABAP
+  regex port does not produce; the strict routing/SWIFT FIELD logic is
+  byte-identical on both sides, so nothing decision-relevant diverges)
 - ground_doc_country — ported (F3: derived document country for `countries:`-scoped rules; sources bank_country → IBAN prefix → SWIFT cc → W-9⇒US / W-8⇒country_incorporation; the Python inventory-address fallback deliberately does NOT exist on either side)
 - ground_national_clearing — ported
 - collect_inventory — n/a (report/UI inventory layer + vault registration; pure

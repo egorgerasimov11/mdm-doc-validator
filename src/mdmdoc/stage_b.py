@@ -641,6 +641,57 @@ def _record_settlement_issuer(ext: Extraction, raw: RawDoc) -> None:
         ext.provenance["settlement_issuer_strong"] = {"source": "rule", "page": None}
 
 
+def _ground_bank_address(ext: Extraction, raw: RawDoc) -> None:
+    """[GUARD:ground_bank_address] A labeled "Bank Address" line fills an EMPTY
+    bank_address field (G3). The model regularly skips it on table-shaped remit
+    forms although the document prints it verbatim ("Bank Address | 100 N.
+    Tyron St.." + "City, State, Zip Code | Charlotte, NC. 28202"). Deterministic,
+    label-anchored, never overwrites a model value."""
+    if ext.doc_class != "bank" or str(ext.fields.get("bank_address") or "").strip():
+        return
+    text = raw.raw_text or ""
+    m = re.search(r"(?im)^[ \t|>*-]{0,3}Bank(?:'s)?\s+Address(?:\s+for)?"
+                  r"[ \t:：#.·|]{0,6}(\S[^\n]{4,88})", text)
+    if not m:
+        return
+    addr = m.group(1).strip().rstrip(".,;").strip()
+    # the very next non-blank line often carries the labeled city/state/zip of
+    # the SAME bank block — glue it on so SAP gets the full address
+    tail = next((ln for ln in text[m.end():].splitlines() if ln.strip()), "")
+    csz = re.match(r"(?i)^[ \t|>*-]{0,3}City,?\s*State,?\s*(?:&\s*)?Zip(?:\s*Code)?"
+                   r"[ \t:：#.·|]{0,6}(\S[^\n]{3,60})", tail)
+    if csz:
+        addr = f"{addr}, {csz.group(1).strip().rstrip('.,;')}"
+    ext.fields["bank_address"] = addr
+    ext.provenance["bank_address"] = {"source": "ocr-regex", "page": None}
+    _cross_note(ext, "bank_address=filled from the labeled document line")
+
+
+def _annotate_bank_ids(ext: Extraction, raw: RawDoc) -> None:
+    """G2/G4: surface what the strict field shapes had to reject — a labeled
+    routing value that is not 9 digits ("Routing for Wires 0260095933") and a
+    second SWIFT with its printed qualifiers ("BOFAUS3N US Domestic / BOFAUS6S
+    Foreign Currency"). Notes only — fields keep their strict shapes."""
+    cands = raw.regex_candidates or {}
+    suspect = str(cands.get("routing_suspect") or "")
+    if suspect:
+        label = str(cands.get("routing_suspect_label") or "routing")
+        _cross_note(ext, f"labeled '{label}' value has {len(suspect)} digits — "
+                         "not a valid US ABA (9 expected); NOT written to the "
+                         "routing field")
+    primary = str(cands.get("swift_bic") or "")
+    qual = str(cands.get("swift_qualifier") or "")
+    if qual and str(ext.fields.get("swift_bic") or "").strip().upper() == primary:
+        ext.fields["swift_qualifier"] = qual      # derived, outside BANK_KEYS
+        ext.provenance.setdefault("swift_qualifier",
+                                  {"source": "ocr-regex", "page": None})
+    secondary = str(cands.get("swift_secondary") or "")
+    if secondary:
+        q2 = str(cands.get("swift_secondary_qualifier") or "")
+        _cross_note(ext, f"second SWIFT on the document: {secondary}"
+                         + (f" ({q2})" if q2 else ""))
+
+
 def _collect_inventory(ext: Extraction, raw: RawDoc) -> None:
     """'Also on the document' (O2): label-anchored inventory of identifiers the
     schema does not carry — tax IDs, company registrations, every labeled
@@ -664,14 +715,19 @@ def _collect_inventory(ext: Extraction, raw: RawDoc) -> None:
 
     if vt and _cjk(vt) > 2 * max(1, _cjk(text)):
         text = vt
-    items = inv.collect(text)
+    flat = {k: v for k, v in ext.fields.items() if isinstance(v, str) and v.strip()}
+    items = inv.collect(text, extracted=flat)
     if not items:
         return
+    suspect = re.sub(r"\D", "", str((raw.regex_candidates or {})
+                                    .get("routing_suspect") or ""))
     pub_items: list[dict] = []
     acct_norms: list[str] = []
     for it in items:
         v, kind = it["value"], it["kind"]
-        if kind == "account_number":
+        if it["family"] == "account" and kind == "account_number":
+            # ONLY the account family feeds the two-accounts signal — a
+            # digit-run in some unknown "other" label must not fake BNK-031
             acct_norms.append(_norm_id(v))
         if kind in TIN_KINDS:
             ext.vault.register(kind, v)
@@ -681,8 +737,13 @@ def _collect_inventory(ext: Extraction, raw: RawDoc) -> None:
             shown = display_value(kind, v, ext.policy)
         else:
             shown = v
-        pub_items.append({"family": it["family"], "label": it["label"],
-                          "value": shown})
+        row = {"family": it["family"], "label": it["label"], "value": shown}
+        if it.get("matches"):
+            row["matches"] = it["matches"]
+        if suspect and it["family"] == "routing" and re.sub(r"\D", "", v) == suspect:
+            row["note"] = (f"{len(suspect)} digits — not a valid US ABA "
+                           "(9 expected); not written to the routing field")
+        pub_items.append(row)
     ext.inventory = pub_items
 
     # multi-block account signal: IBAN-shaped values and values contained in
@@ -1410,6 +1471,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     _resolve_signature(ext_res, raw)
     _record_settlement_issuer(ext_res, raw)   # needs the officer_block flag
     _ground_doc_country(ext_res, raw)         # F3: country scope for the rules
+    _ground_bank_address(ext_res, raw)        # G3: labeled line fills an empty field
+    _annotate_bank_ids(ext_res, raw)          # G2/G4: suspect routing + SWIFT notes
     _collect_inventory(ext_res, raw)
     _corroborate_across_pages(ext_res, raw)
     _finalize_provenance(ext_res, raw)

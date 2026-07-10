@@ -167,11 +167,16 @@ def regex_fields(text: str) -> dict:
         iban = _clean(m.group(1))
         if 15 <= len(iban) <= 34:
             out["iban"] = iban
-    # SWIFT: pick a candidate that is not a common word run; prefer near 'BIC/SWIFT'
+    # SWIFT: pick a candidate that is not a common word run; prefer near 'BIC/SWIFT'.
+    # The label branch is (?i:) SCOPED — an all-pattern (?i) would let the
+    # separator class eat letters and the value class match lowercase words;
+    # "(?:\s*code)?" survives 'Swift Code BOFAUS3N' (real miss: the label
+    # branch died on the word 'Code' and the fallback won by luck).
     sw = None
-    near = re.search(r"(?i)(?:bic|swift)[^A-Z0-9]{0,8}([A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)", t)
+    near = re.search(r"(?i:(?:bic|swift)(?:\s*/?\s*bic)?(?:\s*code)?)"
+                     r"[^A-Za-z0-9\n]{0,10}([A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)", t)
     if near:
-        sw = near.group(1).upper()
+        sw = near.group(1)
     else:
         for c in SWIFT_RE.findall(t):
             if not c.isalpha():            # require at least one digit -> real BIC, not a word
@@ -179,6 +184,23 @@ def regex_fields(text: str) -> dict:
                 break
     if sw:
         out["swift_bic"] = sw
+        # a SECOND code on the document ("BOFAUS3N US Domestic / BOFAUS6S
+        # Foreign Currency") used to vanish with its qualifiers — keep the
+        # first extra candidate and both printed qualifiers for the notes
+        for c in SWIFT_RE.findall(t):
+            if not c.isalpha() and c.upper() != sw:
+                out["swift_secondary"] = c.upper()
+                break
+        for key, code in (("swift_qualifier", sw),
+                          ("swift_secondary_qualifier", out.get("swift_secondary", ""))):
+            if not code:
+                continue
+            i = t.find(code)
+            if i >= 0:
+                q = re.search(r"(?i)\b(us domestic|domestic|foreign currency|international)\b",
+                              t[i:i + len(code) + 30])
+                if q:
+                    out[key] = q.group(1)
     m = EIN_RE.search(t)
     if m:
         out["ein"] = m.group(1)
@@ -214,6 +236,19 @@ def regex_fields(text: str) -> dict:
     # a wires-qualified value with no standard one: keep field semantics honest
     if "routing_aba" not in out and "routing_aba_wires" in out and len(seen) == 1:
         pass  # single wires ABA stays in routing_aba_wires only
+    # a labeled routing value that is NOT 9 digits ("Routing for Wires
+    # 0260095933" — 10 printed digits) must not vanish silently: it fails the
+    # strict field shape above, so keep it as a SUSPECT for the cross-check
+    # note + inventory (never written into a routing field)
+    for rm in re.finditer(r"(?i)((?:bank\s+)?(?:routing|aba|ach|rtn|wire[s]?)"
+                          r"(?:[ /]*(?:aba|routing|number|no\.?|#))?"
+                          r"(?:[ /]*for)?[^0-9\n]{0,28})(\d[\d \-]{6,14}\d)", t):
+        val = re.sub(r"[\s\-]", "", rm.group(2))
+        if len(val) == 9 or val in seen:
+            continue                        # 9-digit values took the field path
+        out["routing_suspect"] = val
+        out["routing_suspect_label"] = re.sub(r"\s+", " ", rm.group(1)).strip(" :#.")
+        break
     # national clearing codes — the domestic analog of a US routing number
     # (CN CNAPS 联行号, IN IFSC, UK sort code, AU BSB, DE BLZ). For CN/GB/AU/IN
     # this IS the SAP Bank Key. Label-anchored ONLY — never guessed from bare

@@ -330,6 +330,26 @@
      "bank country inferred: CN"
     ]
    }
+  },
+  {
+   "id": "bank-address-grounding",
+   "doc_class": "bank",
+   "filename": "remit_form.pdf",
+   "raw_text": "Bank confirmation letter.\nREMIT PAYMENT INFORMATION\nName on Account AcmeCo LLC\nBank Name First Example Bank\nBank Address 100 N. Example St..\nCity, State, Zip Code Springfield, CA. 00000\nAccount Number 001200000000\nRouting for ACH 121000358\nThis letter is to confirm the account details below for AcmeCo LLC.\nSincerely,\nJordan Q. Sample\nVice President\nFirst Example Bank",
+   "llm_fields": {
+    "account_holder": "AcmeCo LLC",
+    "bank_name": "First Example Bank",
+    "bank_country": "US",
+    "account_number": "001200000000",
+    "routing_aba": "121000358",
+    "signed": false
+   },
+   "expect": {
+    "doc_type": "bank_letter",
+    "fields": {
+     "bank_address": "100 N. Example St, Springfield, CA. 00000"
+    }
+   }
   }
  ]
 }

@@ -119,10 +119,17 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
             ("Bank country", _fmt(f.get("bank_country")), "", "bank_country"),
             ("Bank address", _fmt(f.get("bank_address")), "", "bank_address"),
             ("IBAN", _fmt(iban) + iban_extra, "", "iban"),
-            ("SWIFT/BIC", _fmt(f.get("swift_bic")), "", "swift_bic"),
+            ("SWIFT/BIC",
+             _fmt(f.get("swift_bic"))
+             + (f" ({f.get('swift_qualifier')})"
+                if f.get("swift_qualifier")
+                and _fmt(f.get("swift_bic")) != "—" else ""),
+             "", "swift_bic"),
             ("Account number", _fmt(f.get("account_number")), "", "account_number"),
-            ("Routing/ABA (standard)", _fmt(f.get("routing_aba")), "", "routing_aba"),
-            ("Routing/ABA (wires)", _fmt(f.get("routing_aba_wires")), "", "routing_aba_wires"),
+            ("Routing/ABA (standard)", _fmt(f.get("routing_aba")),
+             "ACH payment method", "routing_aba"),
+            ("Routing/ABA (wires)", _fmt(f.get("routing_aba_wires")),
+             "wire transfers", "routing_aba_wires"),
             ("National clearing code",
              _fmt(f.get("national_clearing"))
              + (f" ({f.get('national_clearing_kind')})"
