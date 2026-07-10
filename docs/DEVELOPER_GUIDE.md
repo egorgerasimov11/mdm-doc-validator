@@ -855,3 +855,69 @@ oplog/challenges are Python-console-only (PARITY.md perception paragraph) —
 the ABAP twin has no operator console. Verdict invariant untouched: every
 E-wave surface produces audit rows, PENDING states or informational chips —
 never a verdict change without an approved rule.
+
+## 16. The F-wave: undo everywhere, country rules, taught doc types (2026-07-10)
+
+### 16.1 Undo (`undo.py`, F1)
+Every mutating History row carries an `op` id (uuid, minted inside
+`oplog.log`) and `POST /api/v1/undo {op}` reverts it through the SAME choke
+points the action used. Per-action handlers refuse on stale state (the rule
+was re-decided, the file changed again, the document was re-labeled) instead
+of clobbering; a second undo of the same op refuses via the undo rows
+themselves. Supporting machinery added for reversibility:
+`rules/history/` pre-write snapshots (hooked into BOTH `_write_rules_text`
+and `save_unified` — the editor's whole-file save bypasses the former),
+`dataset/labels_history.jsonl` (`append_label` physically destroys the
+previous label for a sha otherwise), `challenges` kind `retracted` (takes
+back ONE vote; `counts()`/`for_rule()` updated atomically with the writer),
+`rule-approve` logging `prev -> new`. Label undo restores the displaced
+predecessor through the leak gate (fail-closed) and rebuilds fewshot
+synchronously so the deleted label leaves the prompt immediately.
+
+### 16.2 Rules panel v2 (F2a)
+"Deleted rules" section (backups under `rules/deleted/`, Restore ↩ splices
+the block back verbatim, the rule returns PENDING) and an inline per-rule
+editor: `GET /rules/{class}/block/{id}` serves the EXACT block bytes,
+`POST /rules/{class}/edit` splices the operator's text back verbatim (his
+comments and the file's indentation survive) after full-file validation; an
+edited rule re-pends automatically. The rule-creation wizard
+(`/rules/{class}/draft` + `/rules/{class}/create`, `rule_wizard.py`) is built
+by the parallel session — `rule-create` is already a registered, undoable
+oplog action.
+
+### 16.3 Country-scoped rules (F3, ABAP pair)
+Optional rule key `countries: [DE, ...]` (ISO2). `[GUARD:ground_doc_country]`
+derives `fields.doc_country` from portable sources only (bank_country →
+IBAN prefix → SWIFT cc; W-9 ⇒ US, W-8 ⇒ country of incorporation). The
+engine gates AFTER `applies_to` and BEFORE the approval gate (an out-of-scope
+rule must not hold RULE-GATE); a detected non-matching country skips
+silently, an UNDETECTED country skips with ONE `COUNTRY-1` NOTE (operator
+decision: inform, never block). `countries` stays inside the approval hash
+on purpose — changing a rule's scope is a re-approval, not metadata.
+
+### 16.4 Teach the doc type (F4)
+The run page's doc type is a dropdown; Teach writes a LIGHT label
+(`teach_only`): `doc_type_gold` set, `verdict_gold` EMPTY — the precedent
+overrides the type and leaves the verdict to the live machine (freezing the
+machine verdict of the moment would pin a wrong-type verdict after the flip
+changes which rules apply). evalrun scores the type and skips verdict
+scoring for goldless labels (`verdict_goldless` counter). A background
+re-run (`_spawn_rerun`, shared with mark-valid) shows the flip immediately.
+
+### 16.5 Doc-type pattern memory (`doctype_profiles.py`, F5)
+One profile per (document, source) in `dataset/doctype_profiles.jsonl`: doc
+type, the page-marker signature perception already computed, a page-1 text
+embedding (the EMBED role / nomic-embed — previously dead code). The prior
+in `stage_b` fills ONLY the weak `type_hint or "other"` fallback and never
+overrides a valid model/strong answer (at most `doc_type_uncertain`);
+deterministic overrides, packet fences and the golden `injected_llm` seam
+are structurally out of reach. Effort tiers: markers vote (0 model calls) →
+ONE cached embed (effort ≥2, uncertain docs only) → ONE vision layout
+descriptor (effort ≥4). Sources: teach-type/label/Mark valid inline, 👍 via
+a tiny background job, and the cancelable "Study the corpus" job (Training)
+over labeled + 👍-endorsed runs ONLY — the memory never learns the machine's
+own unconfirmed guesses, never invents a type outside the known lists, and
+`run_eval` gates it off (`runctl` override `doctype_prior=False`).
+
+Python-console-only except the F3 pair (PARITY.md); every teach surface
+stays behind the verdict invariant — rules decide, the memory only perceives.

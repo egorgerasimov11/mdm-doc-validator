@@ -95,7 +95,9 @@ ladder (ladder.py — the pipeline controller's bounded second perception pass).
 None of these are stage_b guards except `corroborate_across_pages` (listed
 n/a above); nothing here is a pending port. The operator-console trust layer
 (E-wave 2026-07-10: `oplog.py` audit ledger, `challenges.py` rule-challenge
-ledger, gate-panel/mark-valid/finding-vote endpoints) is equally
+ledger, gate-panel/mark-valid/finding-vote endpoints; F-wave additions:
+`undo.py`, rules/history + labels_history snapshots, teach-type,
+`doctype_profiles.py` pattern memory) is equally
 Python-console-only — the ABAP twin has no operator console; rule DATA changes
 made through it (delete/tier) reach ABAP through the normal `gen_rules_abap`
 regeneration, nothing else to port.
