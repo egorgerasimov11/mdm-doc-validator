@@ -32,14 +32,10 @@ def _digits(s: str) -> str:
     return re.sub(r"\D", "", str(s or ""))
 
 
-def checksum_valid(aba: str) -> bool:
-    """Standard ABA routing checksum (mod-10 weighted 3-7-1)."""
-    d = _digits(aba)
-    if len(d) != 9:
-        return False
-    n = [int(c) for c in d]
-    return (3 * (n[0] + n[3] + n[6]) + 7 * (n[1] + n[4] + n[7])
-            + (n[2] + n[5] + n[8])) % 10 == 0
+# Single source of truth for the routing arithmetic — shared with the
+# verdict-driving rule predicates (BNK-040..046). Re-exported under the old
+# name so existing callers/tests keep working.
+from ..rules.bankmath import checksum_valid  # noqa: E402
 
 
 def _fdic_lookup(bank_name: str, vault) -> tuple[list[dict], bool]:
@@ -131,6 +127,66 @@ def _fed_routing_evidence(aba: str, bank_name: str, vault) -> Evidence | None:
                     src, 1, "WEB-FED-1", url, query=f"aba:{aba}")
 
 
+def _directory_evidence(aba: str, vault) -> Evidence:
+    """Does this routing number EXIST in live public directories? 3-source ladder
+    (skill sap-us-bank-validate): usbanklocations (commercial banks) ->
+    paymentlabs (also lists government/Treasury/DoD payees usbanklocations
+    omits) -> wise (also lists merged/renamed banks the other two miss).
+    Real if ANY source finds it; NOT_FOUND only when all three miss AND the
+    first two provably answered (their 'not found' pages are HTTP 200, which
+    proves the network is up — wise 404s are ambiguous on their own)."""
+    aba = _digits(aba)
+    src = "usbanklocations + paymentlabs + wise (3-source directory ladder)"
+
+    url1 = f"https://www.usbanklocations.com/routing-number-{aba}.html"
+    t1 = http.get_text(url1, vault=vault)
+    title1 = ""
+    if t1:
+        m = re.search(r"<title>([^<]*)</title>", t1, re.I)
+        title1 = (m.group(1) if m else "").strip()
+        mm = re.match(rf"Bank Routing Number {aba},\s*(.+)$", title1, re.I)
+        if mm and "not found" not in title1.lower():
+            return Evidence("aba_directory", FOUND,
+                            f"routing {aba} is listed: {mm.group(1).strip()}",
+                            src, 3, "WEB-DIR-1", url1, query=f"aba:{aba}")
+    miss1 = bool(title1) and "not found" in title1.lower()
+
+    url2 = f"https://www.paymentlabs.io/routing/{aba}"
+    t2 = http.get_text(url2, vault=vault)
+    title2 = ""
+    if t2:
+        m = re.search(r"<title>([^<]*)</title>", t2, re.I)
+        title2 = (m.group(1) if m else "").strip()
+        mm = re.match(rf"Payment Labs\s*-\s*{aba}\s*-\s*(.+?)\s+Routing Number", title2, re.I)
+        if mm and "not found" not in title2.lower():
+            return Evidence("aba_directory", FOUND,
+                            f"routing {aba} is listed: {mm.group(1).strip()} "
+                            "(government/Treasury payees appear here)",
+                            src, 3, "WEB-DIR-1", url2, query=f"aba:{aba}")
+    miss2 = bool(title2) and "not found" in title2.lower()
+
+    url3 = f"https://wise.com/us/routing-number/{aba}"
+    t3 = http.get_text(url3, vault=vault)
+    if t3 and "no longer" not in t3.lower() and "isn't valid" not in t3.lower():
+        m = re.search(r"routing number[^.]*?\bfor\b\s+([A-Z][A-Za-z0-9 .,&'\-]{2,50})", t3)
+        name = f": {m.group(1).strip()}" if m else " (page exists)"
+        return Evidence("aba_directory", FOUND,
+                        f"routing {aba} is listed{name} "
+                        "(merged/renamed banks appear here)",
+                        src, 3, "WEB-DIR-1", url3, query=f"aba:{aba}")
+
+    if miss1 or miss2:
+        return Evidence("aba_directory", NOT_FOUND,
+                        f"routing {aba} is NOT listed in any of 3 live directories "
+                        "— unassigned or retired; verify before payment",
+                        src, 3, "WEB-DIR-1", url1,
+                        detail=f"checked: {url1} ; {url2} ; {url3}",
+                        query=f"aba:{aba}")
+    return Evidence("aba_directory", UNAVAILABLE,
+                    f"routing {aba}: directory sources unreachable",
+                    src, 3, "WEB-DIR-1", url1, query=f"aba:{aba}")
+
+
 def _routing_evidence(aba: str, which: str, bank_name: str, vault) -> list[Evidence]:
     aba = _digits(aba)
     out: list[Evidence] = []
@@ -151,6 +207,10 @@ def _routing_evidence(aba: str, which: str, bank_name: str, vault) -> list[Evide
                             src, 1, "WEB-ABA-1",
                             detail="a typo or an invalid number — verify against the bank letter",
                             query=f"aba:{aba}"))
+    if checksum_valid(aba):
+        # existence only makes sense for well-formed numbers; a checksum-fail
+        # is already conclusive and a directory miss would just be noise
+        out.append(_directory_evidence(aba, vault))
     fed = _fed_routing_evidence(aba, bank_name, vault)
     if fed is not None:
         out.append(fed)

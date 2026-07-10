@@ -92,6 +92,30 @@ rules:
     verdict_effect: NEED_MANUAL_REVIEW
     message: "Internal inconsistency: {detail}. Request clarification or an updated W-9 (rule DR-20260624-131532)."
 
+  # W9-040/041 tables: us-tax-number-validator skill (references/rules.md —
+  # IRS "How EINs are Assigned", SSA randomization FAQ, IRS Pub 4757).
+  - id: W9-040
+    name: tin_structure_invalid
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {check: tin_structural, field: tin_raw}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN {value} fails US TIN structure: {detail}. Verify the digits against the form image; if the form really reads so, request a corrected W-9."
+    message_ru: "TIN {value} структурно невалиден: {detail}. Сверить с изображением формы; если так и напечатано — запросить исправленный W-9."
+
+  - id: W9-041
+    name: tin_placeholder_fake
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {check: tin_placeholder, field: tin_raw}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN {value} is a placeholder/known-fake value ({detail}) — not a real TIN. Request the actual TIN or an updated W-9."
+    message_ru: "TIN {value} — заглушка/известный фиктивный номер ({detail}). Запросить настоящий TIN или обновлённый W-9."
+
   - id: W9-013
     name: line_swap_suspect
     tier: corp

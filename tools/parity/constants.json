@@ -380,6 +380,81 @@
     "literal": "(?:联行号码?|CNAPS)[^0-9]{0,10}(\\d{12})\\>",
     "count": 1
    }
+  },
+  {
+   "id": "ein_never_prefixes",
+   "canon": "same",
+   "note": "IRS never-assigned EIN prefixes (17) — complement of the 83 valid; W9-040",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "extract": "_EIN_NEVER_PREFIXES = \\((.*?)\\)",
+    "parse": "py_strs"
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "extract": "DATA\\(lt_never\\) = VALUE string_table\\((.*?)\\)\\.",
+    "parse": "abap_ticks"
+   }
+  },
+  {
+   "id": "known_fake_tins",
+   "canon": "same",
+   "note": "never-issued / SSA-advertising TINs (13); W9-041",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "extract": "_KNOWN_FAKE_TINS = \\((.*?)\\)",
+    "parse": "py_strs"
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "extract": "DATA\\(lt_fake\\) = VALUE string_table\\((.*?)\\)\\.",
+    "parse": "abap_ticks"
+   }
+  },
+  {
+   "id": "ssn_area_invalid",
+   "canon": "pinned",
+   "note": "SSA: areas 000/666/9xx never issued (SSN branch of tin_structural)",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "literal": "if area in (\"000\", \"666\") or area.startswith(\"9\"):",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "literal": "IF lv_area = `000` OR lv_area = `666` OR lv_first = `9`.",
+    "count": 1
+   }
+  },
+  {
+   "id": "itin_group_ranges",
+   "canon": "pinned",
+   "note": "IRS Pub 4757 ITIN groups 50-65/70-88/90-92/94-99 + ATIN 93 (coded 90-93 u 94-99)",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "literal": "if (50 <= g <= 65) or (70 <= g <= 88) or (90 <= g <= 93) or (94 <= g <= 99):",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "literal": "( lv_g >= 50 AND lv_g <= 65 ) OR ( lv_g >= 70 AND lv_g <= 88 )",
+    "count": 1
+   }
+  },
+  {
+   "id": "tin_format_shapes",
+   "canon": "pinned",
+   "note": "printed-hyphenation type shapes; EIN shape pinned, the SSN twin (^\\d{3}-\\d{2}-\\d{4}$) is exercised by unit + golden tests",
+   "py": {
+    "file": "src/mdmdoc/rules/predicates.py",
+    "literal": "_EIN_FMT = re.compile(r\"^\\d{2}[- ]\\d{7}$\")",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_rules.clas.abap",
+    "literal": "^\\d\\d[- ]\\d{7}$",
+    "count": 1
+   }
   }
  ]
 }

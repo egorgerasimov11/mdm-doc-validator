@@ -25,6 +25,7 @@ returns nothing and no network call is made.
 | 1 | ABA routing checksum | FFIEC/Fed mod-10 algorithm | 1 | ✅ always |
 | 1 | bank exists / ACTIVE, name vs document | **FDIC BankFind** (`banks.data.fdic.gov`) | 1 | needs network |
 | 1 | routing → owning bank name | **Fed E-Payments Routing Directory** (connector) | 1 | needs connector |
+| 1 | routing EXISTS in live directories | **3-source ladder**: usbanklocations → paymentlabs (gov/Treasury/DoD payees) → wise (merged/renamed banks) — real if ANY finds it, `not_found` only when all three provably miss | 3 | needs network |
 | 2 | BIC syntax + ISO country + country-vs-document | ISO-9362 (offline) | 1 | ✅ always |
 | 2 | BIC → institution name/address | SWIFTRef (licensed, optional connector) | 2 | needs connector |
 | 3 | legal-entity match (holder / Line 1) | **GLEIF** (`api.gleif.org`) | 1 | needs network |

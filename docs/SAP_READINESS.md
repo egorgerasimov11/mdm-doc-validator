@@ -50,21 +50,21 @@ These are verified on the developer side, off-system:
   `*** VERIFY ON SYSTEM ***` in their source headers.
   ABAP Unit itself can only run on a system — see section 5.
 
-- ✅ **ABAP Unit test inventory: 198 test methods** (as of 2026-07-09, recounted
-  directly from the `*.testclasses.abap` files in `src/`), local test classes on each
-  class, all `RISK LEVEL HARMLESS DURATION SHORT`, no network/filesystem/GUI.
-  Per-class (source recount; INTEGRATION.md ch.13.2 is stale — see the known-stale
-  list in the inventory bullet below):
+- ✅ **ABAP Unit test inventory: 204 test methods** (as of 2026-07-10, recounted
+  directly from the `*.testclasses.abap` files in `src/` — non-comment `FOR TESTING`
+  statements minus the `DEFINITION FOR TESTING` class lines), local test classes on
+  each class, all `RISK LEVEL HARMLESS DURATION SHORT`, no network/filesystem/GUI.
+  The count grows with every wave — recount before quoting it. Per-class:
 
   | Class | Tests | Covers |
   |---|---|---|
-  | ZCL_MDMDOC_RULES | 29 | rule engine, all when-operators, predicates, RU messages, JSON override |
+  | ZCL_MDMDOC_RULES | 29 | rule engine, all when-operators, predicates, RU messages, JSON override, ENGINE-GUARD fail-closed |
   | ZCL_MDMDOC_MASK | 23 | SSN/EIN/IBAN/account masks, display policy, scrub, leak-gate |
   | ZCL_MDMDOC_SNIFF | 22 | doc class/type, invoice/letter/W-8 heuristics |
+  | ZCL_MDMDOC_EXTRACT | 22 | regex-overrides-LLM overlay, crosscheck, guard heuristics (officer block, e-signature) |
   | ZCL_MDMDOC_VERDICT | 19 | verdict precedence, next_step EN/RU, message_type |
-  | ZCL_MDMDOC_EXTRACT | 19 | regex-overrides-LLM overlay, crosscheck |
   | ZCL_MDMDOC_FILE | 18 | classify_ext, .eml/.zip unwrap, sha16 |
-  | ZCL_MDMDOC_COMPARE | 14 | SAP-000..008 comparison: IBAN/account/SWIFT/country/bank-key/name + masking |
+  | ZCL_MDMDOC_COMPARE | 16 | SAP-000..009 comparison: IBAN/account/SWIFT/country/bank-key/name + masking |
   | ZCL_MDMDOC_REGEX | 13 | IBAN/SWIFT/routing/EIN/boxed-TIN extraction |
   | ZCL_MDMDOC_NORM | 13 | IBAN mod-97, to_iso2, classification, date parsing |
   | ZCL_MDMDOC_LLM | 11 | Ollama response parsing behind a test double, no network |
@@ -72,6 +72,7 @@ These are verified on the developer side, off-system:
   | ZCL_MDMDOC_PDF | 5 | synthetic PDFs: uncompressed stream, /Encrypt, page counter |
   | ZCL_MDMDOC_SAP_MANUAL | 3 | JSON->fields, end-to-end compare run |
   | ZCL_MDMDOC_SELFTEST | 2 | core of the pre-flight checks |
+  | ZCL_MDMDOC_GOLDEN_DATA | 1 | golden parity corpus: regex→extract→rules→verdict vs the Python engine |
 
 - ✅ **YAML-generated rule data.** Rule DATA lives in this repo (`rules/banking.yaml`,
   `rules/w9.yaml` — single source of truth); `tools/gen_rules_abap.py` (invoked by the
@@ -94,10 +95,19 @@ These are verified on the developer side, off-system:
      conscious status: `ported` requires a literal `[GUARD:x]` marker in
      `zcl_mdmdoc_extract`; `n/a` documents a Python-only guard (vision/few-shot/
      provenance — see section 8); `pending` = tracked drift → non-zero exit. Currently
-     7 guards `ported`, 4 `n/a`, 0 `pending`;
+     9 guards `ported`, 5 `n/a`, 0 `pending`;
   6. **ONE VERSION — the `abap/` submodule pin** must equal the live ABAP checkout's
      HEAD (see `docs/SYNC.md`); a stale pin means this repo would ship an outdated
-     ABAP twin.
+     ABAP twin;
+  7. **GOLDEN parity (behavioural)** — the 11-case corpus hash
+     (`tools/golden/golden_cases.json`) must equal the `GOLDEN-HASH` header baked
+     into the generated `ZCL_MDMDOC_GOLDEN_DATA`, the generator hash must equal its
+     `GEN-HASH` header, and a regenerate-and-diff must be byte-identical (catches
+     hand edits, generator drift and a stale baked corpus);
+  8. **CONSTANTS parity** — hand-duplicated constants (regexes, thresholds, phrase
+     lists) registered in `tools/parity/constants.json` and marked `[CONST:id]` at
+     both source sites are extracted and compared (or pinned per dialect); an
+     unregistered marker fails the run.
 
 - ✅ **Self-contained package.** No external Z-dependencies: internal deps are only the
   interface `ZIF_MDMDOC_TYPES` and the generated `ZCL_MDMDOC_RULES_DATA`. The core
@@ -106,15 +116,14 @@ These are verified on the developer side, off-system:
 
 - ✅ **Object inventory (actual `src/`):** 5 programs (`ZMDMDOC`, `ZMDMDOC_SETUP`,
   `ZMDMDOC_DOCTOR`, `ZMDMDOC_MDG_DISCOVER`, `ZMDMDOC_RULES`), 2 interfaces
-  (`ZIF_MDMDOC_TYPES`, `ZIF_MDMDOC_SAP_READER`), 19 classes. Package `ZMDMDOC`
-  (confirmed by `src/zmdmdoc.devc.xml`); abapGit metadata: MASTER_LANGUAGE=E,
-  STARTING_FOLDER=/src/, FOLDER_LOGIC=PREFIX.
-  **Known doc discrepancies (stale INTEGRATION.md chapters):** ch.2.4 still says
-  "1 program, 1 interface, 12 classes" — stale; and ch.13.2's per-class ABAP Unit
-  test table is also stale (its counts no longer match the testclasses sources —
-  trust the recounted table above). CONTRACT.md reflects the current inventory.
-  Also note: the **message class ZMDMDOC is NOT delivered via abapGit**
-  (no `.msag` file in `src/`) — it must be created manually in SE91 (section 5, item 9).
+  (`ZIF_MDMDOC_TYPES`, `ZIF_MDMDOC_SAP_READER`), 20 classes (13 core + 2 generated
+  + 5 MDG-scenario), plus the message class `ZMDMDOC` delivered as
+  `src/zmdmdoc.msag.xml` (verify it imported with the pull; SE91 fallback is
+  1 message). Package `ZMDMDOC` (confirmed by `src/zmdmdoc.devc.xml`); abapGit
+  metadata: MASTER_LANGUAGE=E, STARTING_FOLDER=/src/, FOLDER_LOGIC=PREFIX.
+  The former INTEGRATION.md ch.2.4/ch.13.2 inventory discrepancies were fixed on
+  2026-07-10 (the EN rewrite recounted both); CONTRACT.md reflects the current
+  inventory.
 
 ---
 
@@ -189,15 +198,16 @@ Package: **`ZMDMDOC`**. Ignore list in `.abapgit.xml`: `/.gitignore`, `/LICENSE`
 6. **Post-import verification** (ch.2.5):
    - SE80 → select all classes → Run → Unit Tests (Ctrl+Shift+F10). All tests are
      HARMLESS/SHORT, no network/files — **all package tests must be green**
-     (198 as of 2026-07-09).
+     (204 as of 2026-07-10 — recount on your system, the number grows with updates).
    - SA38 → `ZMDMDOC` → selection screen opens without syntax errors.
-7. **Create the message class manually:** SE91 → message class `ZMDMDOC`,
-   message `001` = `&1&2&3&4` (not shipped via abapGit).
+7. **Message class:** shipped as `src/zmdmdoc.msag.xml` (message `001` =
+   `&1&2&3&4`) — verify it imported with the pull; if your abapGit build skipped
+   it, create it manually: SE91 → `ZMDMDOC` → message `001`.
 
 **Recommended activation/enablement order** (INTEGRATION.md ch.13.3):
 
 1. Import package → activate → ABAP Unit on the package (Ctrl+Shift+F10), all green
-   (198 as of 2026-07-09).
+   (204 as of 2026-07-10 — recount on your system, the number grows with updates).
 2. Run **`ZMDMDOC_SETUP`** without `p_cr` — core + discovery checks green, review the
    proposed mapping. `ZMDMDOC_SETUP` is the recommended single entry point (ch.11.0):
    a ONE-SHOT onboarding report that runs, in order, (1) pre-flight tests

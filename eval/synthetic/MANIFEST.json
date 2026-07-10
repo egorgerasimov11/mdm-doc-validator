@@ -1,8 +1,8 @@
 {
  "seed": 20260709,
  "generator_version": 2,
- "count": 52,
- "truth_vs_deterministic_agreement": 0.442,
+ "count": 55,
+ "truth_vs_deterministic_agreement": 0.582,
  "matrix": {
   "synth_bank_letter": 24,
   "synth_bank_statement": 4,
@@ -24,17 +24,18 @@
   "synth_sig_unsigned": 23,
   "synth_ssi_issuer": 1,
   "synth_supplier_letterhead": 3,
-  "synth_tin_ein": 5,
+  "synth_tin_ein": 8,
   "synth_tin_none": 1,
   "synth_tin_ssn": 2,
   "synth_voided_check": 2,
   "synth_w8": 2,
   "synth_w8_signed": 1,
   "synth_w8_unsigned": 1,
-  "synth_w9": 9,
+  "synth_w9": 12,
   "synth_w9_boxed": 2,
   "synth_w9_conflict": 1,
   "synth_w9_esig": 1,
+  "synth_w9_tin_crafted": 3,
   "synth_zh": 1,
   "synth_zh_cnaps": 1
  }

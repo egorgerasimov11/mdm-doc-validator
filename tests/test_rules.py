@@ -250,3 +250,123 @@ def test_invalid_verdict_effect_fails_closed(tmp_path, monkeypatch):
     assert any(x.rule_id == "ENGINE-GUARD" and "invalid verdict_effect" in x.message
                for x in f)
     assert decide(f) == "NEED_MANUAL_REVIEW"
+
+
+# --- W9-040/041 TIN structure & placeholder (us-tax-number-validator port) ---
+
+def test_tin_structural_valid_shapes_quiet():
+    from mdmdoc.rules.predicates import tin_structural
+    assert tin_structural("36-1234567", {}, {}, {}) == (False, "")   # valid EIN prefix
+    assert tin_structural("320-54-0693", {}, {}, {}) == (False, "")  # valid SSN
+    assert tin_structural("912-70-1234", {}, {}, {}) == (False, "")  # ITIN group 70-88
+    assert tin_structural("912-93-1234", {}, {}, {}) == (False, "")  # ATIN group 93
+
+
+def test_tin_structural_ein_never_prefix():
+    from mdmdoc.rules.predicates import tin_structural
+    fired, detail = tin_structural("07-1234567", {}, {}, {})
+    assert fired and detail == "EIN prefix is not an IRS-assigned prefix"
+
+
+def test_tin_structural_ssn_components():
+    from mdmdoc.rules.predicates import tin_structural
+    assert tin_structural("000-12-3456", {}, {}, {}) == (True, "SSN area is a never-issued area")
+    assert tin_structural("666-12-3456", {}, {}, {}) == (True, "SSN area is a never-issued area")
+    assert tin_structural("123-00-4567", {}, {}, {}) == (True, "SSN group is invalid")
+    assert tin_structural("123-45-0000", {}, {}, {}) == (True, "SSN serial is invalid")
+
+
+def test_tin_structural_itin_gap_group():
+    from mdmdoc.rules.predicates import tin_structural
+    fired, detail = tin_structural("912-89-1234", {}, {}, {})  # 89 in the 89-gap
+    assert fired and detail == "ITIN group is outside the IRS-assigned ranges"
+
+
+def test_tin_structural_bare_nine_any_of():
+    from mdmdoc.rules.predicates import tin_structural
+    # 960891234: EIN prefix 96 dead; starts with 9 -> ITIN path, group 89 in the gap
+    fired, detail = tin_structural("960891234", {}, {}, {})
+    assert fired and detail == "9 digits match no valid EIN/SSN/ITIN structure"
+    # 212554321: EIN prefix 21 is valid -> any-of passes, quiet
+    assert tin_structural("212554321", {}, {}, {}) == (False, "")
+
+
+def test_tin_structural_type_hint_narrows():
+    from mdmdoc.rules.predicates import tin_structural
+    # bare digits, dead EIN prefix 07 but valid as SSN 071-23-4567: hint decides
+    fired, _ = tin_structural("071234567", {"tin_type": "EIN"}, {}, {})
+    assert fired  # EIN hint -> dead prefix
+    assert tin_structural("071234567", {"tin_type": ""}, {}, {}) == (False, "")  # any-of: SSN ok
+
+
+def test_tin_structural_ignores_non_nine():
+    from mdmdoc.rules.predicates import tin_structural, tin_placeholder
+    for v in ("12-345678", "", "Applied For", "1234567890"):
+        assert tin_structural(v, {}, {}, {}) == (False, "")
+        assert tin_placeholder(v, {}, {}, {}) == (False, "")
+
+
+def test_tin_placeholder_fires():
+    from mdmdoc.rules.predicates import tin_placeholder
+    assert tin_placeholder("999999999", {}, {}, {}) == (True, "repeated-single-digit placeholder")
+    assert tin_placeholder("000-00-0000", {}, {}, {}) == (True, "repeated-single-digit placeholder")
+    assert tin_placeholder("078-05-1120", {}, {}, {}) == (True, "known never-issued / reserved example TIN")
+    assert tin_placeholder("987654329", {}, {}, {}) == (True, "known never-issued / reserved example TIN")
+
+
+def test_tin_predicates_disjoint_and_digit_free():
+    import re
+    from mdmdoc.rules.predicates import tin_placeholder, tin_structural
+    assert tin_structural("999999999", {}, {}, {}) == (False, "")  # placeholder territory
+    for v in ("07-1234567", "000-12-3456", "912-89-1234", "999999999", "078-05-1120"):
+        for pred in (tin_structural, tin_placeholder):
+            _, detail = pred(v, {}, {}, {})
+            assert not re.search(r"\d{4,}", detail), f"digits leaked in detail: {detail!r}"
+
+
+def test_w9_040_dead_prefix_nmr():
+    f = run_rules(_w9("w9", line1_name="ACME LLC", line3_classification="LLC",
+                      tin_type="EIN", tin_raw="07-1234567"))
+    assert any(x.rule_id == "W9-040" for x in f)
+    assert not any(x.rule_id in ("W9-041", "W9-010") for x in f)
+    assert decide(f) == "NEED_MANUAL_REVIEW"
+    msg = next(x.message for x in f if x.rule_id == "W9-040")
+    assert "07-1234567" not in msg  # masked
+
+
+def test_w9_041_placeholder_nmr():
+    f = run_rules(_w9("w9", line1_name="ACME LLC", line3_classification="LLC",
+                      tin_type="EIN", tin_raw="99-9999999"))
+    assert any(x.rule_id == "W9-041" for x in f)
+    assert not any(x.rule_id == "W9-040" for x in f)
+    assert decide(f) == "NEED_MANUAL_REVIEW"
+
+
+def test_w9_clean_ein_still_accepts():
+    f = run_rules(_w9("w9", line1_name="ACME LLC", line3_classification="LLC",
+                      tin_type="EIN", tin_raw="36-1234567",
+                      address_street="1 Main St", address_city_state_zip="Chicago, IL 60606"))
+    assert decide(f) == "ACCEPT"
+    assert not any(x.rule_id in ("W9-040", "W9-041") for x in f)
+
+
+def test_w9_wrong_digit_count_stays_w9_010_only():
+    f = run_rules(_w9("w9", line1_name="ACME LLC", line3_classification="LLC",
+                      tin_type="EIN", tin_raw="12-345678"))  # 8 digits
+    assert any(x.rule_id == "W9-010" for x in f)
+    assert not any(x.rule_id in ("W9-040", "W9-041") for x in f)
+
+
+def test_w9_040_not_applied_to_w8():
+    f = run_rules(_w9("w8", tin_raw="07-1234567"))
+    assert not any(x.rule_id in ("W9-040", "W9-041") for x in f)
+
+
+def test_w9_041_joins_w9_012_on_blocklisted_tin():
+    # the W9-012 triple uses 12-3456789 (= blocklisted 123456789): both fire, NMR
+    f = run_rules(_w9("w9", line1_name="John Smith LLC",
+                      line3_classification="Individual/sole proprietor",
+                      tin_type="EIN", tin_raw="12-3456789"))
+    assert any(x.rule_id == "W9-012" for x in f)
+    assert any(x.rule_id == "W9-041" for x in f)
+    assert decide(f) == "NEED_MANUAL_REVIEW"

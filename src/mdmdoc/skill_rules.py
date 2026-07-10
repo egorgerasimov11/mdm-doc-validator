@@ -23,7 +23,9 @@ _SKILL_ROOTS = [Path.home() / ".claude" / "skills",
 # Curated map: which validator rule id / mechanism already covers a DR rule, or
 # why it can't be a document-only check. Maintained as rules are promoted.
 COVERAGE: dict[str, str] = {
-    "DR-20260608-121112": "W9-010 (ein_shape: EIN/SSN must be 9 digits)",
+    "DR-20260608-121112": "W9-010 (ein_shape: EIN/SSN must be 9 digits) + W9-040/W9-041 "
+                          "(tin_structural/tin_placeholder: IRS EIN-prefix, SSA SSN "
+                          "area/group/serial, ITIN ranges, placeholder/fake blocklist)",
     "DR-20260624-131532": "W9-011 (tin_type_vs_classification) + W9-012 (individual+business+EIN)",
     "DR-20260528-195622": "W9-013 (line_swap_suspect: Line1/Line2 order)",
     "DR-20260608-122211": "extraction: address taken from the W-9 only (no invented components)",

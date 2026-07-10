@@ -20,3 +20,6 @@ eval/gold_staleness.json
 dataset/corpus/
 dataset/labels.jsonl.bak-*
 settings.json
+
+# per-instance operator approval state (never travels between machines)
+rules/approvals.json

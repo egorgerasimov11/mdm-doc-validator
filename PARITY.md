@@ -29,6 +29,12 @@ is listed under "Pending ABAP logic ports".
 - line_swap_suspect
 - date_older_than
 - w8_ch4_cert_missing
+- tin_structural
+- tin_placeholder
+- routing_format
+- routing_checksum
+- routing_prefix
+- account_sig_digits
 
 ## Guards (stage_b deterministic guards ↔ `zcl_mdmdoc_extract` `[GUARD:x]` markers)
 Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`),
@@ -100,10 +106,13 @@ both repos (ABAP first, then the pin bump).
 Hand-duplicated constants (regexes, thresholds, phrase lists) are registered in
 `tools/parity/constants.json` and marked `[CONST:id]` at both source sites;
 check_parity §8 extracts and compares them (canon `same`) or pins each side's
-literal (canon `pinned`, for dialect-divergent regexes). Registered now (14):
+literal (canon `pinned`, for dialect-divergent regexes). Registered now (29):
 BIC/IBAN shapes, 4 OCR id-regexes, SWIFT-lengths/EIN-digits/years defaults,
 _EV_POSITIVE, no_bank_ids keys, ES/DE month map, ABAP month table, Python date
-formats. Backlog to register incrementally (each = marker + manifest entry):
+formats, ZH letter/label sets, officer/signatory phrase sets, and the 2026-07-10
+TIN-structure pack (ein_never_prefixes, known_fake_tins, ssn_area_invalid,
+itin_group_ranges, tin_format_shapes — W9-040/041, shared with the /ui/tax
+bulk tab via tin_bulk.py). Backlog to register incrementally (each = marker + manifest entry):
 business-suffix regex, _BANKNAME_NOISE, person-name regex + stopwords,
 classification keywords, e-sig markers, JP markers + 口座番号/postal regexes,
 statement-period regex, COUNTRY_NAME_TO_ISO map, verdict precedence/next_step.

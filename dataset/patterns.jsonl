@@ -1,0 +1,1 @@
+{"ts": "2026-07-10T11:26:15Z", "doc_sha256": "fe975ad30fb4464d", "valid": true, "verdict_gold": "ACCEPT", "machine_verdict": "NEED_MANUAL_REVIEW", "scenarios": [], "doc_class": "bank", "doc_type": "bank_letter", "overridden": ["RULE-GATE"], "field_shape": ["account_number", "iban", "swift_bic"]}

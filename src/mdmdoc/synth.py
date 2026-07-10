@@ -125,8 +125,13 @@ _W9_HEAD = ["Form W-9", "Request for Taxpayer Identification Number and Certific
 
 
 def _w9_text(rng: random.Random, holder: str, tin_kind: str, boxed: bool,
-             classification: str, signed: bool, dba: str = "") -> tuple[str, dict]:
+             classification: str, signed: bool, dba: str = "",
+             tin_value: str = "") -> tuple[str, dict]:
+    # Always draw, then override: the rng stream length stays invariant, so a
+    # crafted tin_value never shifts the bytes of any doc generated after it.
     tin = synth_ein(rng) if tin_kind == "EIN" else synth_ssn(rng)
+    if tin_value:
+        tin = tin_value
     lines = list(_W9_HEAD)
     lines.append(f"1 Name (as shown on your income tax return): {holder}")
     lines.append(f"2 Business name/disregarded entity name: {dba}")
@@ -246,6 +251,19 @@ def _spec_list(rng: random.Random) -> list[dict]:
     specs.append({"template": "zh_cnaps", "lang": "zh", "cc": "DE",
                   "holder": "假冒服务有限公司",
                   "validity": "valid", "sig": "unsigned"}); i += 1
+    # --- v4 TIN-structure wave (APPENDED; W9-040/041) ---
+    # Crafted tin_value keeps the PII posture explicit: 36-0000001 has a valid
+    # IRS prefix but a synthetic serial; 07-… is a never-assigned prefix
+    # (fires W9-040); 99-9999999 is a repeated-digit placeholder (fires W9-041).
+    specs.append({"template": "w9", "tin": "EIN", "boxed": False,
+                  "cls": "Limited liability company", "signed": True,
+                  "tin_value": "36-0000001"}); i += 1
+    specs.append({"template": "w9", "tin": "EIN", "boxed": False,
+                  "cls": "C Corporation", "signed": True,
+                  "tin_value": "07-1234567"}); i += 1
+    specs.append({"template": "w9", "tin": "EIN", "boxed": False,
+                  "cls": "Partnership", "signed": True,
+                  "tin_value": "99-9999999"}); i += 1
     return specs
 
 
@@ -365,7 +383,8 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
             holder = _COMPANIES[idx % len(_COMPANIES)]     # business name + Individual + EIN
         dba = "Harbor Trading Co" if spec.get("dba") else ""
         text, truth = _w9_text(rng, holder, spec["tin"], spec["boxed"],
-                               spec["cls"], spec["signed"], dba)
+                               spec["cls"], spec["signed"], dba,
+                               tin_value=spec.get("tin_value", ""))
         if not spec["tin"]:
             truth["tin_raw"] = ""
             truth["tin_type"] = ""
@@ -376,6 +395,8 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
             scen.append("synth_w9_boxed")
         if spec.get("conflict"):
             scen.append("synth_w9_conflict")
+        if spec.get("tin_value"):
+            scen.append("synth_w9_tin_crafted")
         fname = f"w9_{idx:03d}.pdf"
     else:
         doc_class = "bank"

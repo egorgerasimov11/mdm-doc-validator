@@ -218,3 +218,80 @@ rules:
     verdict_effect: NEED_MANUAL_REVIEW
     message: "Document type could not be established — an unrecognized document is never auto-accepted; review manually."
     message_ru: "Тип документа не установлен — неопознанный документ не принимается автоматически; проверьте вручную."
+
+  # --- US routing / account arithmetic (skill sap-us-bank-validate, 2026-07-09).
+  # Deterministic math — offline, source-cited (ABA registrar / Fed MICR / NACHA
+  # format spec / SAP BANKL-US). These CAN drive the verdict because they are
+  # arithmetic, not web evidence; live directory existence stays NOTE-only.
+
+  - id: BNK-040
+    name: routing_format_9d
+    tier: corp
+    source: skill
+    when: {check: routing_format, field: routing_aba}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Routing number {value_masked} is not 9 numeric digits: {detail}."
+    message_ru: "Routing-номер {value_masked} — не 9 цифр: {detail}."
+
+  - id: BNK-041
+    name: routing_checksum
+    tier: corp
+    source: skill
+    when: {check: routing_checksum, field: routing_aba}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Routing number {value_masked} fails the ABA 3-7-1 checksum: {detail}."
+    message_ru: "Routing-номер {value_masked} не проходит контрольную сумму ABA 3-7-1: {detail}."
+
+  - id: BNK-042
+    name: routing_prefix
+    tier: corp
+    source: skill
+    when: {check: routing_prefix, field: routing_aba}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Routing number {value_masked} has a never-assigned Fed prefix: {detail}."
+    message_ru: "Routing-номер {value_masked} имеет никогда не назначаемый префикс ФРС: {detail}."
+
+  - id: BNK-043
+    name: account_sig_digits
+    tier: corp
+    source: skill
+    # NMR, not REJECT: in the document flow a too-short account may be an OCR
+    # truncation — a human decides. Leading zeros are SAP padding, not a defect.
+    when: {check: account_sig_digits, field: account_number, args: {min: 4}}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Account number {value_masked} looks unusable: {detail}."
+    message_ru: "Номер счёта {value_masked} выглядит непригодным: {detail}."
+
+  - id: BNK-044
+    name: routing_wires_format_9d
+    tier: corp
+    source: skill
+    when: {check: routing_format, field: routing_aba_wires}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Wire routing number {value_masked} is not 9 numeric digits: {detail}."
+    message_ru: "Wire-routing {value_masked} — не 9 цифр: {detail}."
+
+  - id: BNK-045
+    name: routing_wires_checksum
+    tier: corp
+    source: skill
+    when: {check: routing_checksum, field: routing_aba_wires}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Wire routing number {value_masked} fails the ABA 3-7-1 checksum: {detail}."
+    message_ru: "Wire-routing {value_masked} не проходит контрольную сумму ABA 3-7-1: {detail}."
+
+  - id: BNK-046
+    name: routing_wires_prefix
+    tier: corp
+    source: skill
+    when: {check: routing_prefix, field: routing_aba_wires}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Wire routing number {value_masked} has a never-assigned Fed prefix: {detail}."
+    message_ru: "Wire-routing {value_masked} имеет никогда не назначаемый префикс ФРС: {detail}."
