@@ -23,7 +23,9 @@ window.mdmdoc = (() => {
         const j = await api(`/api/v1/jobs/${jobId}?after=${offset}`);
         (j.progress || []).forEach(onLine);
         offset = j.progress_len;
-        if (onTick) onTick(j);
+        // a UI-progress fault must never kill the poll loop (E0: a NaN once
+        // reached <progress>.value, threw, and looked like a dead analysis)
+        if (onTick) { try { onTick(j); } catch (e) { console.warn("onTick:", e); } }
         if (j.status === "done") return onDone(j.result || {});
         if (j.status === "canceled") return onError("canceled by operator");
         if (j.status === "error") return onError(j.error || "job failed");
@@ -117,10 +119,16 @@ window.mdmdoc = (() => {
       progRow.hidden = false;
       let pct = j.percent || 0;
       if (j.estimate_s && j.started) {
-        const elapsed = (Date.now() - Date.parse(j.started + "Z")) / 1000;
-        const eta = Math.min(96, Math.round(100 * elapsed / j.estimate_s));
-        pct = Math.max(pct, Math.min(pct + 12, eta));   // ETA glide, capped near the next stage
+        // j.started is already ISO-with-Z (runstore.now_iso) — appending a
+        // second "Z" made Date.parse return NaN and <progress>.value THROW
+        const startedMs = Date.parse(j.started);
+        if (Number.isFinite(startedMs)) {
+          const elapsed = (Date.now() - startedMs) / 1000;
+          const eta = Math.min(96, Math.round(100 * elapsed / j.estimate_s));
+          if (Number.isFinite(eta)) pct = Math.max(pct, Math.min(pct + 12, eta));
+        }
       }
+      if (!Number.isFinite(pct)) pct = 0;
       bar.value = pct;
       stageEl.textContent = (j.stage || "starting") + " · " + pct + "%";
     }

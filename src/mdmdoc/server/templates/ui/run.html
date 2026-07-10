@@ -221,8 +221,10 @@
         <span class="chip chip--{{ f.severity }}">{{ f.severity }}</span>
         <code>{{ f.rule_id }}</code>
         <span class="grow" style="white-space:normal">{{ f.message }}</span>
+        {% if f.real_rule %}
         <button type="button" class="fb-dispute" data-rule="{{ f.rule_id }}"
                 title="dispute this rule — the model will propose a fix">dispute</button>
+        {% endif %}
         {% if f.ev %}
         <a href="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" target="_blank" title="evidence: {{ f.ev }}">
           <img class="ev-thumb ev-thumb--sm" src="/api/v1/runs/{{ run_id }}/evidence/{{ f.ev }}" alt="{{ f.ev }} evidence"

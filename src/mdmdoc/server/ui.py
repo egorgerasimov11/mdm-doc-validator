@@ -152,10 +152,25 @@ def run_page(request: Request, run_id: str, flash: str = ""):
                                       prov.get(fkey), eng_agree.get(fkey))})
         except Exception:
             data_rows = []
+    # only findings whose rule_id is a REAL rules.yaml rule get operator
+    # actions (dispute/vote) — synthetic findings (RULE-GATE, ENGINE-*,
+    # OPERATOR-*, CONF-001, PATTERN-1, SAP-*, TPL-*) are not editable rules
+    import yaml as _yaml
+
+    from .. import rules_io as _rules_io
+    real_rule_ids: set = set()
+    for _dc in ("bank", "w9"):
+        try:
+            _cfg = _yaml.safe_load(_rules_io.rules_text(_dc)) or {}
+            real_rule_ids |= {str(r.get("id")) for r in _cfg.get("rules", []) or []
+                              if isinstance(r, dict)}
+        except Exception:
+            pass
     for f in findings:
         if isinstance(f, dict):
             ev = FIELD_EVIDENCE.get(f.get("field") or "")
             f["ev"] = ev if ev in evidence else None
+            f["real_rule"] = f.get("rule_id") in real_rule_ids
     stage_a_pub = runstore.load(rid, "stage_a.json") or {}
     preview_pages = _preview_pages(meta, stage_a_pub)
     sap_rows = runstore.load(rid, "sap_compare.json") or []
