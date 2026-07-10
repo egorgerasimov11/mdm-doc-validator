@@ -18,9 +18,18 @@ Edit, save, and (optionally) push to the SAP/ABAP side.</p>
 
   <div class="header-row" style="gap:10px;margin-top:10px">
     <button type="button" class="btn" id="save-btn"><strong>Save</strong></button>
+    <button type="button" class="btn" id="download-btn">⭳ Download file</button>
+    <button type="button" class="btn" id="upload-btn">⭱ Upload &amp; replace…</button>
+    <input type="file" id="rules-file" accept=".yaml,.yml,.txt" hidden>
     <button type="button" class="btn" id="regen-btn">Regenerate for SAP →</button>
     <span id="rules-flash" class="meta"></span>
   </div>
+  <p class="meta" style="margin-top:6px">Download the whole rules file, edit it in any
+  text editor (add / change / remove a rule), then Upload &amp; replace. Every section is
+  re-validated on upload — a bad YAML or rule is rejected and nothing is written. New or
+  edited rules land <strong>PENDING</strong> and must be approved in
+  <a href="/ui/rules/approve">Approvals</a>, where each rule is a card you can approve or
+  delete (×).</p>
   <pre id="regen-out" class="meta" style="margin-top:8px"></pre>
 </section>
 
@@ -64,6 +73,53 @@ Edit, save, and (optionally) push to the SAP/ABAP side.</p>
         if (res.ok) say('saved — ' + JSON.stringify(res.j.counts));
         else say((res.j.detail && res.j.detail.message) || 'save failed', true);
       }).catch(function (e) { say('save failed: ' + e, true); });
+  });
+
+  /* --- download the whole rules file --- */
+  document.getElementById('download-btn').addEventListener('click', function () {
+    say('preparing download…');
+    fetch('/api/v1/rules/unified', { headers: headers() })
+      .then(function (r) { return r.text(); })
+      .then(function (text) {
+        var blob = new Blob([text], { type: 'application/x-yaml' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        var stamp = new Date().toISOString().slice(0, 10);
+        a.href = url; a.download = 'mdmdoc-rules-' + stamp + '.yaml';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        say('downloaded — edit it and use Upload & replace to load it back');
+      }).catch(function (e) { say('download failed: ' + e, true); });
+  });
+
+  /* --- upload an edited file and REPLACE the rules --- */
+  var upBtn = document.getElementById('upload-btn');
+  var upFile = document.getElementById('rules-file');
+  upBtn.addEventListener('click', function () { upFile.click(); });
+  upFile.addEventListener('change', function () {
+    var f = upFile.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var text = String(reader.result || '');
+      document.getElementById('rules-yaml').value = text;   // show what will be saved
+      say('uploading ' + f.name + '…');
+      fetch('/api/v1/rules/unified', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ text: text, source: 'upload:' + f.name })
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (res.ok) {
+            say('replaced from ' + f.name + ' — ' + JSON.stringify(res.j.counts) +
+                ' · new/edited rules are PENDING in Approvals');
+          } else {
+            say('rejected: ' + ((res.j.detail && res.j.detail.message) || 'invalid file') +
+                ' — the file is shown above, fix it and upload again', true);
+          }
+        }).catch(function (e) { say('upload failed: ' + e, true); })
+        .then(function () { upFile.value = ''; });
+    };
+    reader.readAsText(f);
   });
 
   document.getElementById('regen-btn').addEventListener('click', function () {
