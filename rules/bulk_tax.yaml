@@ -1,0 +1,131 @@
+# Bulk tax-number validation catalog (V-wave). DATA ONLY — the arithmetic
+# lives in bulk/taxmath.py (checksum names below), the row logic in bulk/tax.py.
+#
+# Per category:
+#   country   ISO2 the category belongs to (SAP convention: first two letters)
+#   name      human name shown in reasons
+#   kind      ssn|ein|itin|vat|fiscal|registration|custom
+#   regex     accepted VALUE shape (after trimming; national prefix optional
+#             unless the regex demands it)
+#   checksum  bulk/taxmath.REGISTRY name (omit = format-only)
+#   target    where it maps in SAP ("Tax Number 1"/"Tax Number 2"/"") — shown
+#             in the guideline; NEVER used to rewrite data
+#   custom    true = customer-specific category (permissive; adjust locally)
+#
+# `signatures` drive the wrong-country detector (rule BULK-T03): a VALUE whose
+# national prefix + shape matches ANOTHER country's signature while sitting in
+# this category is flagged INVALID (real case: DE137196337 stored under US0).
+version: 1
+
+categories:
+  # US doctrine (Egor 2026-07-09/10, same as the /ui/tax tab): the category
+  # digit carries NO authoritative SSN/EIN mapping — every US* category is
+  # judged by the NUMBER's own structure (any of SSN/ITIN/EIN passes).
+  # bulk/tax.py routes country US to _us_any_structure; regexes here unused.
+  US0: {country: US, name: "US tax number", kind: custom, custom: true}
+  US1: {country: US, name: "US tax number (typically SSN)", kind: ssn,
+        target: "Tax Number 1"}
+  US2: {country: US, name: "US tax number (typically EIN)", kind: ein,
+        target: "Tax Number 2"}
+  US3: {country: US, name: "US tax number", kind: custom, custom: true}
+  US4: {country: US, name: "US tax number", kind: custom, custom: true}
+  DE0: {country: DE, name: "German VAT (USt-IdNr)", kind: vat,
+        regex: '^(DE)?\d{9}$', checksum: de_vat}
+  DE1: {country: DE, name: "German tax number (Steuernummer)", kind: fiscal,
+        regex: '^[\d\/]{10,13}$'}
+  GB0: {country: GB, name: "UK VAT registration", kind: vat,
+        regex: '^(GB)?(\d{9}(\d{3})?|(GD|HA)\d{3})$', checksum: gb_vat}
+  IT0: {country: IT, name: "Italian VAT (Partita IVA)", kind: vat,
+        regex: '^(IT)?\d{11}$', checksum: it_vat}
+  IT1: {country: IT, name: "Italian fiscal code (Codice Fiscale)", kind: fiscal,
+        regex: '^[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]$|^\d{11}$'}
+  FR0: {country: FR, name: "French VAT (TVA)", kind: vat,
+        regex: '^(FR)?[0-9A-Z]{2}\d{9}$', checksum: fr_vat}
+  FR1: {country: FR, name: "French SIRET", kind: registration,
+        regex: '^\d{14}$', checksum: luhn}
+  ES0: {country: ES, name: "Spanish NIF/NIE/CIF", kind: fiscal,
+        regex: '^(ES)?[0-9A-Z]\d{7}[0-9A-Z]$', checksum: es_nif}
+  NL0: {country: NL, name: "Dutch VAT (BTW)", kind: vat,
+        regex: '^(NL)?\d{9}B\d{2}$', checksum: nl_vat}
+  PL0: {country: PL, name: "Polish NIP", kind: vat,
+        regex: '^(PL)?\d{10}$', checksum: pl_nip}
+  BE0: {country: BE, name: "Belgian VAT", kind: vat,
+        regex: '^(BE)?[01]?\d{9}$', checksum: be_vat}
+  AT0: {country: AT, name: "Austrian VAT (UID)", kind: vat,
+        regex: '^(AT)?U\d{8}$', checksum: at_vat}
+  CH0: {country: CH, name: "Swiss UID", kind: vat,
+        regex: '^(CHE)?[\d.\-]{9,13}$', checksum: ch_uid}
+  CN0: {country: CN, name: "China USCC (统一社会信用代码)", kind: registration,
+        regex: '^[0-9A-HJ-NP-RTUWXY]{18}$', checksum: cn_uscc}
+  IN0: {country: IN, name: "India GSTIN", kind: vat,
+        regex: '^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$', checksum: in_gstin}
+  IN1: {country: IN, name: "India PAN", kind: fiscal,
+        regex: '^[A-Z]{5}\d{4}[A-Z]$'}
+  JP0: {country: JP, name: "Japan corporate number (法人番号)", kind: registration,
+        regex: '^\d{13}$'}
+  BR1: {country: BR, name: "Brazil CPF (person)", kind: fiscal,
+        regex: '^[\d.\-\/]{11,14}$', checksum: br_cpf}
+  BR2: {country: BR, name: "Brazil CNPJ (entity)", kind: registration,
+        regex: '^[\d.\-\/]{14,18}$', checksum: br_cnpj}
+  CA0: {country: CA, name: "Canada Business Number", kind: registration,
+        regex: '^\d{9}([A-Z]{2}\d{4})?$'}
+  MX0: {country: MX, name: "Mexico RFC", kind: fiscal,
+        regex: '^[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}$'}
+  AU0: {country: AU, name: "Australia ABN", kind: registration,
+        regex: '^\d{11}$', checksum: au_abn}
+  RU0: {country: RU, name: "Russia INN", kind: fiscal,
+        regex: '^\d{10}(\d{2})?$'}
+  KR0: {country: KR, name: "Korea BRN", kind: registration,
+        regex: '^\d{3}-?\d{2}-?\d{5}$'}
+  SG0: {country: SG, name: "Singapore UEN/GST", kind: registration,
+        regex: '^[0-9A-Z]{9,10}$'}
+  AE0: {country: AE, name: "UAE TRN", kind: vat, regex: '^\d{15}$'}
+  SA0: {country: SA, name: "Saudi VAT", kind: vat, regex: '^\d{15}$'}
+  TR0: {country: TR, name: "Turkey VKN", kind: fiscal, regex: '^\d{10}$'}
+  ZA0: {country: ZA, name: "South Africa tax/VAT", kind: fiscal, regex: '^\d{10}$'}
+  SE0: {country: SE, name: "Sweden VAT", kind: vat, regex: '^(SE)?\d{12}$'}
+  DK0: {country: DK, name: "Denmark CVR", kind: vat, regex: '^(DK)?\d{8}$'}
+  NO0: {country: "NO", name: "Norway org number", kind: registration,
+        regex: '^(NO)?\d{9}(MVA)?$'}
+  FI0: {country: FI, name: "Finland VAT/Y-tunnus", kind: vat,
+        regex: '^(FI)?[\d\-]{8,9}$'}
+  IE0: {country: IE, name: "Ireland VAT", kind: vat,
+        regex: '^(IE)?\d[0-9A-Z+*]\d{5}[A-Z]{1,2}$'}
+  PT0: {country: PT, name: "Portugal NIF", kind: fiscal, regex: '^(PT)?\d{9}$'}
+  CZ0: {country: CZ, name: "Czech DIC", kind: vat, regex: '^(CZ)?\d{8,10}$'}
+  SK0: {country: SK, name: "Slovakia IC DPH", kind: vat, regex: '^(SK)?\d{10}$'}
+  HU0: {country: HU, name: "Hungary VAT", kind: vat, regex: '^(HU)?[\d\-]{8,11}$'}
+  RO0: {country: RO, name: "Romania CUI", kind: vat, regex: '^(RO)?\d{2,10}$'}
+  GR0: {country: GR, name: "Greece AFM", kind: vat, regex: '^(EL|GR)?\d{9}$'}
+  LU0: {country: LU, name: "Luxembourg VAT", kind: vat, regex: '^(LU)?\d{8}$'}
+  LT0: {country: LT, name: "Lithuania PVM", kind: vat, regex: '^(LT)?(\d{9}|\d{12})$'}
+  LV0: {country: LV, name: "Latvia PVN", kind: vat, regex: '^(LV)?\d{11}$'}
+  EE0: {country: EE, name: "Estonia KMKR", kind: vat, regex: '^(EE)?\d{9}$'}
+
+# National VAT/registration SIGNATURES for the wrong-country detector (T03):
+# value = <prefix><body-regex> conclusively identifies the ISSUING country.
+signatures:
+  DE: {prefix: DE, body: '^\d{9}$', checksum: de_vat, name: "German VAT"}
+  AT: {prefix: ATU, body: '^\d{8}$', checksum: at_vat, name: "Austrian VAT"}
+  FR: {prefix: FR, body: '^[0-9A-Z]{2}\d{9}$', name: "French VAT"}
+  GB: {prefix: GB, body: '^\d{9}(\d{3})?$', name: "UK VAT"}
+  IT: {prefix: IT, body: '^\d{11}$', checksum: it_vat, name: "Italian VAT"}
+  NL: {prefix: NL, body: '^\d{9}B\d{2}$', name: "Dutch VAT"}
+  ES: {prefix: ES, body: '^[0-9A-Z]\d{7}[0-9A-Z]$', name: "Spanish NIF"}
+  PL: {prefix: PL, body: '^\d{10}$', checksum: pl_nip, name: "Polish NIP"}
+  BE: {prefix: BE, body: '^[01]?\d{9}$', name: "Belgian VAT"}
+  CHE: {prefix: CHE, body: '^\d{9}$', name: "Swiss UID"}
+  SE: {prefix: SE, body: '^\d{12}$', name: "Swedish VAT"}
+  DK: {prefix: DK, body: '^\d{8}$', name: "Danish CVR"}
+  FI: {prefix: FI, body: '^\d{8}$', name: "Finnish VAT"}
+  PT: {prefix: PT, body: '^\d{9}$', name: "Portuguese NIF"}
+  CZ: {prefix: CZ, body: '^\d{8,10}$', name: "Czech DIC"}
+  SK: {prefix: SK, body: '^\d{10}$', name: "Slovak IC DPH"}
+  HU: {prefix: HU, body: '^\d{8,11}$', name: "Hungarian VAT"}
+  RO: {prefix: RO, body: '^\d{2,10}$', name: "Romanian CUI"}
+  EL: {prefix: EL, body: '^\d{9}$', name: "Greek AFM"}
+  LU: {prefix: LU, body: '^\d{8}$', name: "Luxembourg VAT"}
+  LT: {prefix: LT, body: '^(\d{9}|\d{12})$', name: "Lithuanian PVM"}
+  LV: {prefix: LV, body: '^\d{11}$', name: "Latvian PVN"}
+  EE: {prefix: EE, body: '^\d{9}$', name: "Estonian KMKR"}
+  IE: {prefix: IE, body: '^\d[0-9A-Z+*]\d{5}[A-Z]{1,2}$', name: "Irish VAT"}
