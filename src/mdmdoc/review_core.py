@@ -271,6 +271,17 @@ def submit_review(spec: str, sub: dict) -> dict:
         patterns.record(label, run_findings, machine_v or run_meta.get("verdict", ""))
     except Exception:
         pass   # pattern memory must never block a label
+    try:
+        # F5 doc-type profile: every teach action feeds the pattern memory —
+        # idempotent per (run, source), never blocks, embed degrades to []
+        from . import doctype_profiles
+        src = ("taught" if sub.get("teach_only")
+               else "valid-mark" if (label.get("verdict_gold") == "ACCEPT"
+                                     and label.get("verdict_confirmed"))
+               else "label")
+        doctype_profiles.capture(run_id, src, doc_type=label.get("doc_type_gold", ""))
+    except Exception:
+        pass
     return {"label_id": label["label_id"], "doc_sha256": run_id,
             "labels_count": count_labels(),
             "model_diff": label["model_predicted"]["fields_diff"]}

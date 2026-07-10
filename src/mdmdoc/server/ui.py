@@ -360,8 +360,14 @@ def training_page(request: Request):
     except Exception:
         current_model, strong_model = "?", "?"
 
+    try:
+        pattern_study = json.loads(
+            (config.EVAL_DIR / "pattern_study.json").read_text(encoding="utf-8"))
+    except Exception:
+        pattern_study = None
     return templates.TemplateResponse(request, "training.html", _ctx(
         page="training", by_class=by_class, history=history,
+        pattern_study=pattern_study,
         series_json=json.dumps(series), lora_gate=100,
         failures=failures, diff=diff, field_rows=field_rows, recs=recs,
         scenario_rows=scenario_rows, adoption=adoption_state, candidate=candidate,

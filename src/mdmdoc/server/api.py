@@ -886,6 +886,32 @@ def _spawn_rerun(meta: dict, doc_class: str, label: str) -> str:
     return jobs.REGISTRY.submit("check", work, pass_job=True).id
 
 
+@router_teach.post("/train/pattern-study", tags=["teach"])
+def pattern_study(body: dict | None = None) -> "JSONResponse":
+    """F5: one button — walk every document the operator already fed the
+    pipeline and build doc-type profiles for the TRUSTED ones (labeled gold
+    types + 👍-endorsed runs). Long-running, cancelable from Activity; the
+    report lands in eval/pattern_study.json and the History keeps the run."""
+    from .. import doctype_profiles
+    with_vision = bool((body or {}).get("vision"))
+
+    def work(log, job):
+        job.label = "pattern study" + (" (+vision)" if with_vision else "")
+
+        def on_progress(stage, pct):
+            job.stage, job.percent = stage, pct
+
+        return doctype_profiles.study(log=log, cancel=job.cancel,
+                                      on_progress=on_progress,
+                                      with_vision=with_vision)
+
+    job = jobs.REGISTRY.submit("study", work, pass_job=True)
+    from .. import oplog
+    oplog.log("pattern-study", job_id=job.id,
+              detail="started" + (" with vision" if with_vision else ""))
+    return JSONResponse({"job_id": job.id}, status_code=202)
+
+
 @router_teach.post("/runs/{run_id}/mark-valid", tags=["teach"])
 def mark_valid(run_id: str) -> dict:
     """One-click 'this document is VALID' (D11c + E4): a confirmed ACCEPT label
@@ -1018,6 +1044,16 @@ def rate_run(run_id: str, body: dict) -> dict:
     from .. import oplog, ratings
     row = ratings.record(rid, rating)
     oplog.log("rating", run_id=rid, detail=rating)
+    if rating == "up":
+        # F5 live learning: a 👍 says "documents like this are right" — profile
+        # it in a tiny background job so the tap stays instant
+        def work(log):
+            from .. import doctype_profiles
+            r = doctype_profiles.capture(rid, "rated-up")
+            log(f"profiled {rid[:10]} -> {r['doc_type']}" if r else "already profiled / skipped")
+            return {"profiled": bool(r)}
+
+        jobs.REGISTRY.submit("profile", work)
     return {"ok": True, **row}
 
 

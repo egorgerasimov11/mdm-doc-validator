@@ -1331,6 +1331,9 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
         ext_res.doc_type = "w8"
         ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
 
+    # F5: the doc-type prior may fill ONLY this weak fallback — remember when
+    # the type came from `type_hint or "other"` instead of a real answer
+    weak_type_fallback = False
     if raw.raw_text.strip() and not no_llm:
         obj, first_try, model_id = _run_model(raw, "TEXT")
         ext_res.model_id = model_id
@@ -1338,13 +1341,23 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
         if obj is not None:
             model_type = str(obj.get("doc_type", "") or "").strip().lower()
             if not ext_res.doc_type:  # deterministic overrides win
-                ext_res.doc_type = model_type if model_type in types else (raw.type_hint or "other")
+                if model_type in types:
+                    ext_res.doc_type = model_type
+                else:
+                    ext_res.doc_type = raw.type_hint or "other"
+                    weak_type_fallback = True
             ext_res.fields = _fields_from(obj, keys)
         else:
             ext_res.warnings.append("stage-B model returned no valid JSON")
+            if not ext_res.doc_type:
+                weak_type_fallback = True
             ext_res.doc_type = ext_res.doc_type or raw.type_hint or ("other" if doc_class == "bank" else "unknown")
             ext_res.fields = {k: "" for k in keys}
     else:
+        # golden-parity seam (injected_llm) must stay structurally out of the
+        # prior's reach — ABAP build() has no profile ledger to mirror
+        if not ext_res.doc_type and injected_llm is None:
+            weak_type_fallback = True
         ext_res.doc_type = ext_res.doc_type or raw.type_hint or ("other" if doc_class == "bank" else "unknown")
         if no_llm and injected_llm is not None:
             # golden-parity seam: seed simulated model fields (doc_type stays
@@ -1441,6 +1454,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
                              and not raw.bank_letter_pages)
                     and raw.type_hint != "invoice"):
                 ext_res.doc_type = strong_type
+                weak_type_fallback = False   # a real strong answer beats the prior
             _ground_payment_instructions(ext_res, raw)
             _normalize_tin(ext_res)
             llm_snapshot = dict(ext_res.fields)   # merged fast+strong LLM view
@@ -1460,6 +1474,15 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
         else:
             ext_res.warnings.append("strong tier returned no valid JSON — fast result kept")
     ext_res.escalated_because = reasons
+
+    # F5 doc-type prior: the pattern memory may fill the weak fallback (or
+    # flag a disagreement) — placed AFTER the strong tier so a valid strong
+    # answer already disarmed it, and BEFORE the tail guards so the packet
+    # fences keep the last word. Eval gates it off (runctl doctype_prior).
+    from . import doctype_profiles
+    doctype_profiles.apply_prior(ext_res, raw, types,
+                                 weak_fallback=weak_type_fallback,
+                                 engine=engine, quality=quality)
 
     _apply_w9_zone_probe(ext_res, raw)
     _normalize_tin(ext_res)          # zone TIN passes through the date guard too

@@ -301,7 +301,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         try:
             # precedents OFF: eval measures the machine, not stored operator answers
             res = run_check(path, lab["doc_class"], apply_precedent=False, web_evidence=False,
-                            enforce_approvals=False, engine=engine)
+                            enforce_approvals=False, engine=engine,
+                            overrides={"doctype_prior": False})
         except Exception as e:  # noqa: BLE001 — eval must survive any doc
             # a CRASH is an attempted document: it counts in every denominator,
             # is never a hit, and costs like an NMR (fails loudly to a human)

@@ -45,6 +45,22 @@
 {% endif %}
 
 <section>
+  <h2>Pattern study <span class="meta">the doc-type memory learns from the documents you already fed it</span></h2>
+  <p class="meta">Builds "what documents look like" profiles from every TRUSTED document —
+  your labels and 👍-endorsed runs (never the machine's own unconfirmed guesses).
+  Runs in the background: watch or stop it in <a href="/ui/activity">Activity</a>;
+  every run stays in <a href="/ui/history">History</a>. Live teaching (Teach type,
+  Mark valid, 👍) feeds the same memory instantly.</p>
+  <div class="actions">
+    <button type="button" id="btn-study"><strong>Study the corpus</strong></button>
+    <label class="meta"><input type="checkbox" id="study-vision"> + vision descriptors
+      (slower — one vision look per document; the memory then also matches scans by layout)</label>
+    <span class="meta" id="study-note">{% if pattern_study %}last study {{ pattern_study.ts }}:
+      {{ pattern_study.added }} added, {{ pattern_study.profiles_total }} profile(s) total{% endif %}</span>
+  </div>
+</section>
+
+<section>
   <h2>Model adoption <span class="meta">candidate → gated eval → adopt/rollback</span></h2>
   {% if candidate %}
   <p class="meta">candidate <code>{{ candidate.model }}</code> built {{ candidate.built_ts or candidate.ts }}
@@ -197,4 +213,24 @@
   <details><summary>show report.md</summary><pre id="eval-report">loading…</pre></details>
 </section>
 {% endblock %}
-{% block script %}<script>mdmdoc.initTraining();</script>{% endblock %}
+{% block script %}<script>
+mdmdoc.initTraining();
+(function () {
+  var btn = document.getElementById('btn-study');
+  if (!btn) return;
+  btn.onclick = function () {
+    btn.disabled = true;
+    mdmdoc.api('/api/v1/train/pattern-study', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vision: document.getElementById('study-vision').checked }),
+    }).then(function (r) {
+      document.getElementById('study-note').textContent =
+        'study started (job ' + r.job_id.slice(0, 8) + ') — follow it in Activity';
+      btn.disabled = false;
+    }).catch(function (e) {
+      document.getElementById('study-note').textContent = 'ERROR: ' + e.message;
+      btn.disabled = false;
+    });
+  };
+})();
+</script>{% endblock %}
