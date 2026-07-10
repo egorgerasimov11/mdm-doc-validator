@@ -28,3 +28,5 @@ rules/approvals.json
 dataset/oplog.jsonl
 rules/challenges.jsonl
 rules/deleted/
+dataset/ratings.jsonl
+dataset/patterns.jsonl
