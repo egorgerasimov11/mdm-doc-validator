@@ -76,24 +76,103 @@ def install_stdout_router() -> _StdoutRouter:
     return _ROUTER
 
 
+# --- pipeline gate: FIFO queue over the single pipeline slot (D2) --------------
+class PipelineGate:
+    """Fair FIFO admission to the pipeline. Built ON PIPELINE_LOCK so legacy
+    `with jobs.PIPELINE_LOCK:` users (retrain/propose/eval/adoption) keep strict
+    mutual exclusion with gated check jobs. While a ticket WAITS its job stays
+    'queued' with a visible position; waiting is interruptible by the job's
+    cancel event (a queued cancel never runs the pipeline at all)."""
+
+    def __init__(self, lock: threading.Lock):
+        self._lock = lock
+        self._cond = threading.Condition()
+        self._tickets: collections.deque[str] = collections.deque()
+
+    def position(self, ticket: str) -> int | None:
+        """0 = next in line (or holding the slot); None = not queued."""
+        with self._cond:
+            try:
+                return list(self._tickets).index(ticket)
+            except ValueError:
+                return None
+
+    class _Slot:
+        def __init__(self, gate: "PipelineGate", job):
+            self._gate, self._job = gate, job
+            self._ticket = (job.id if job is not None else uuid.uuid4().hex[:12])
+            self._acquired = False
+
+        def __enter__(self):
+            g = self._gate
+            with g._cond:
+                g._tickets.append(self._ticket)
+            try:
+                while True:
+                    if (self._job is not None and self._job.cancel.is_set()):
+                        from .. import runctl
+                        raise runctl.CheckCanceled("canceled while queued")
+                    with g._cond:
+                        at_head = g._tickets and g._tickets[0] == self._ticket
+                    # only the head ticket may contend for the real lock —
+                    # Lock wakeups are unordered, the deque supplies fairness
+                    if at_head and g._lock.acquire(timeout=0.25):
+                        self._acquired = True
+                        return self
+                    if not at_head:
+                        with g._cond:
+                            g._cond.wait(timeout=0.25)
+            except BaseException:
+                self._release_ticket()
+                raise
+
+        def __exit__(self, *exc):
+            if self._acquired:
+                self._gate._lock.release()
+            self._release_ticket()
+            return False
+
+        def _release_ticket(self):
+            g = self._gate
+            with g._cond:
+                try:
+                    g._tickets.remove(self._ticket)
+                except ValueError:
+                    pass
+                g._cond.notify_all()
+
+    def slot(self, job=None) -> "PipelineGate._Slot":
+        return PipelineGate._Slot(self, job)
+
+
 # --- job registry ---------------------------------------------------------------
 @dataclass
 class Job:
     id: str
     kind: str
-    status: str = "queued"            # queued | running | done | error
+    status: str = "queued"            # queued | running | done | error | canceled
     progress: list = field(default_factory=list)
     result: dict | None = None
     error: str | None = None
     created: str = ""
     started: str | None = None
     finished: str | None = None
+    # D2/D3: live progress + cancellation
+    stage: str = ""
+    percent: int = 0
+    estimate_s: int | None = None
+    label: str = ""                   # file name shown in the queue panel
+    cancel: threading.Event = field(default_factory=threading.Event)
 
     def to_dict(self, after: int = 0) -> dict:
         return {"id": self.id, "kind": self.kind, "status": self.status,
                 "progress": self.progress[after:], "progress_len": len(self.progress),
                 "result": self.result, "error": self.error,
-                "created": self.created, "started": self.started, "finished": self.finished}
+                "created": self.created, "started": self.started, "finished": self.finished,
+                "stage": self.stage, "percent": self.percent,
+                "estimate_s": self.estimate_s, "label": self.label,
+                "queue_pos": GATE.position(self.id),
+                "cancelable": self.kind == "check" and self.status in ("queued", "running")}
 
 
 class JobRegistry:
@@ -103,15 +182,19 @@ class JobRegistry:
         self._lock = threading.Lock()
         self._cap = cap
 
-    def submit(self, kind: str, fn, capture_stdout: bool = False) -> Job:
-        """fn(log: Callable[[str], None]) -> dict result."""
+    def submit(self, kind: str, fn, capture_stdout: bool = False,
+               pass_job: bool = False) -> Job:
+        """fn(log) -> dict result; with pass_job=True fn(log, job) — the worker
+        hands its own Job in BEFORE the thread starts (no set-after-start race
+        for cancel/progress wiring)."""
         job = Job(id=uuid.uuid4().hex[:12], kind=kind, created=runstore.now_iso())
         with self._lock:
             self._jobs[job.id] = job
             self._order.append(job.id)
             while len(self._order) > self._cap:
                 old = self._order.pop(0)
-                if self._jobs.get(old) and self._jobs[old].status in ("done", "error"):
+                if self._jobs.get(old) and self._jobs[old].status in ("done", "error",
+                                                                      "canceled"):
                     self._jobs.pop(old, None)
 
         def log(line: str) -> None:
@@ -135,11 +218,16 @@ class JobRegistry:
                                 log(ln)
                 router.set_sink(sink)
             try:
-                job.result = fn(log) or {}
+                job.result = (fn(log, job) if pass_job else fn(log)) or {}
                 job.status = "done"
             except Exception as e:  # noqa: BLE001 — job errors are data
-                job.error = scrub_text(f"{e.__class__.__name__}: {e}")
-                job.status = "error"
+                from .. import runctl
+                if isinstance(e, runctl.CheckCanceled):
+                    job.status = "canceled"
+                    log("canceled by operator")
+                else:
+                    job.error = scrub_text(f"{e.__class__.__name__}: {e}")
+                    job.status = "error"
             finally:
                 if capture_stdout and router:
                     router.clear_sink()
@@ -160,5 +248,15 @@ class JobRegistry:
                 return j
         return None
 
+    def cancel(self, job_id: str) -> str:
+        """Set the cancel flag; returns the job's CURRENT status ('' unknown).
+        A queued job dies at the gate; a running one at its next checkpoint."""
+        j = self._jobs.get(job_id)
+        if j is None:
+            return ""
+        j.cancel.set()
+        return j.status
+
 
 REGISTRY = JobRegistry()
+GATE = PipelineGate(PIPELINE_LOCK)

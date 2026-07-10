@@ -201,17 +201,28 @@ def set_settings(body: dict) -> dict:
 # ---------------------------------------------------------------- check -------
 def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                   sap_image: Path | None = None, quality: bool = False,
-                  web: bool = False, engine: str = "", sap_bp: str = "") -> dict:
+                  web: bool = False, engine: str = "", sap_bp: str = "",
+                  job=None) -> dict:
     mc.reset_host()
     # HARD GATE default ON (Egor's choice); MDMDOC_RULE_GATE=0 is the instant
     # off-switch (no redeploy) if the "everything held for approval" phase is
     # disruptive — set it in the plist env and unload/load.
     gate = os.environ.get("MDMDOC_RULE_GATE", "1").strip().lower() in ("1", "true", "on", "yes")
-    with jobs.PIPELINE_LOCK:
+
+    def on_stage(stage: str, pct: int) -> None:
+        if job is not None:
+            job.stage, job.percent = stage, pct
+
+    # FIFO gate over the single pipeline slot (D2): fair ordering for queued
+    # checks, cancel honored while waiting; legacy `with jobs.PIPELINE_LOCK`
+    # users keep strict mutual exclusion (the gate holds the same lock)
+    with jobs.GATE.slot(job):
         res = run_check(path, doc_class, use_vision=use_vision, lang=lang,
                         sap_image=sap_image, quality=quality,
                         web_evidence=True if web else None, enforce_approvals=gate,
-                        engine=engine or None, sap_bp=sap_bp)
+                        engine=engine or None, sap_bp=sap_bp,
+                        cancel=(job.cancel if job is not None else None),
+                        on_stage=on_stage)
     report = json.loads(res.report_json)
     return {"run_id": res.run_id, "verdict": res.verdict, "report": report,
             "report_md": res.report_md}
@@ -274,19 +285,22 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
         except mc.OllamaUnavailable as e:
             raise api_error(503, "model_host_down", str(e))
 
-    def work(log):
+    def work(log, job):
+        job.estimate_s = est
+        job.label = path.name
         log(f"estimated duration: {human(est)}")
         log(f"document: {path.name}")
         if sap_path:
             log(f"SAP screenshot: {sap_path.name}")
         log(f"running {doc_class} pipeline{' (thorough tier)' if quality else ''}"
             f"{' + external web evidence' if web else ''}…")
-        out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality, web, engine, sap_bp)
+        out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality,
+                            web, engine, sap_bp, job=job)
         out["estimate_s"] = est
         log(f"verdict: {out['verdict']} (run {out['run_id']})")
         return out
 
-    job = jobs.REGISTRY.submit("check", work)
+    job = jobs.REGISTRY.submit("check", work, pass_job=True)
     from fastapi.responses import JSONResponse
     return JSONResponse({"job_id": job.id, "estimate_s": est}, status_code=202)
 
@@ -348,6 +362,23 @@ def job_detail(job_id: str, after: int = 0) -> dict:
     if not j:
         raise api_error(404, "not_found", f"job {job_id} not found")
     return j.to_dict(after=after)
+
+
+@router_core.post("/jobs/{job_id}/cancel", tags=["jobs"])
+def job_cancel(job_id: str) -> dict:
+    """Cooperative cancel (D2): a queued check dies at the gate without ever
+    running; a running one stops at its next pipeline checkpoint (an in-flight
+    model call finishes first). Only check jobs are cancelable."""
+    j = jobs.REGISTRY.get(job_id)
+    if not j:
+        raise api_error(404, "not_found", f"job {job_id} not found")
+    if j.kind != "check":
+        raise api_error(409, "conflict", f"jobs of kind '{j.kind}' are not cancelable")
+    if j.status in ("done", "error", "canceled"):
+        raise api_error(409, "conflict", f"job already {j.status}")
+    jobs.REGISTRY.cancel(job_id)
+    return {"ok": True, "status": j.status,
+            "note": "stopping after the current model call finishes"}
 
 
 # ================================================================= teach =======
