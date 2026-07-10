@@ -137,10 +137,12 @@ def read_rows(path, case: str) -> tuple[list[dict], list[str], str]:
         raise BulkInputError(
             f"no recognizable {case} header row found (need at least: {need}) "
             f"— use the {case} template's Data sheet")
-    canon_hdrs = {_hkey(c) for c in _CASE_ALIASES[case]}
+    # the template's DISPLAY headers are each canon's FIRST alias
+    tpl_hdrs = {_hkey(names[0]) for names in _CASE_ALIASES[case].values()} \
+        | {_hkey(c) for c in _CASE_ALIASES[case]}
     matched = [_hkey(header_row[i]) for i in col_map.values()
                if i < len(header_row or ())]
-    kind = "template" if all(h in canon_hdrs for h in matched) else "raw-export"
+    kind = "template" if all(h in tpl_hdrs for h in matched) else "raw-export"
     rows: list[dict] = []
     for i, row in enumerate(_sheet_rows(path)):
         if i <= header_idx:
