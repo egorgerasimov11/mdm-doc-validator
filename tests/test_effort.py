@@ -109,3 +109,30 @@ def test_api_validates_effort_and_persists_default(tmp_path, monkeypatch):
     assert r.json()["default_effort"] == 4
     r = client.post("/api/v1/settings", json={"default_effort": 0})
     assert r.status_code == 400
+
+
+def test_download_document_roundtrip(tmp_path, monkeypatch):
+    """D5: the original uploaded bytes stream back; 404 when gone."""
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from mdmdoc import runstore
+    from mdmdoc.server.app import create_app
+    monkeypatch.setattr(config, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config, "INBOX_DIR", tmp_path / "inbox")
+    monkeypatch.setattr(runstore, "RUNS_DIR", tmp_path / "runs", raising=False)
+    rid = "ab" * 8
+    d = tmp_path / "runs" / rid
+    d.mkdir(parents=True)
+    orig = tmp_path / "inbox" / f"{rid}__doc.pdf"
+    orig.parent.mkdir(parents=True)
+    orig.write_bytes(b"%PDF-1.4 fake original")
+    (d / "meta.json").write_text(_json.dumps(
+        {"run_id": rid, "path": str(orig), "file_name": "doc.pdf"}))
+    client = TestClient(create_app("full"))
+    r = client.get(f"/api/v1/runs/{rid}/document")
+    assert r.status_code == 200 and r.content == b"%PDF-1.4 fake original"
+    orig.unlink()
+    r = client.get(f"/api/v1/runs/{rid}/document")
+    assert r.status_code == 404

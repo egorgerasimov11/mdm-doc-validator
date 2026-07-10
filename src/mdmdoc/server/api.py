@@ -400,6 +400,30 @@ def job_cancel(job_id: str) -> dict:
 
 
 # ================================================================= teach =======
+@router_teach.get("/runs/{run_id}/document")
+def download_document(run_id: str, src: str = "doc"):
+    """Stream the ORIGINAL analysed document back to the operator (D5). Lives
+    on the teach router for the same reason as /preview: the file holds full
+    sensitive values. src=container returns the uploaded envelope (zip/eml/
+    xlsm) when the run analysed a packet member."""
+    from fastapi.responses import FileResponse
+    rid = runstore.resolve_run(run_id)
+    meta = runstore.load(rid, "meta.json") if rid else None
+    if not meta:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    p = Path(meta.get("path", ""))
+    if src == "container":
+        hits = sorted(config.INBOX_DIR.glob(f"{rid}__*")) if config.INBOX_DIR.exists() else []
+        files = [h for h in hits if h.is_file()]
+        if files:
+            p = files[0]
+    if not p.exists() or not p.is_file():
+        raise api_error(404, "not_found",
+                        "original document is no longer on disk (inbox cleaned?)")
+    return FileResponse(p, filename=meta.get("file_name") or p.name,
+                        headers={"Cache-Control": "no-store"})
+
+
 @router_teach.get("/runs/{run_id}/preview/{page}")
 def preview_page(run_id: str, page: int, src: str = "doc"):
     """On-demand page render of the ORIGINAL document (or the SAP screenshot).

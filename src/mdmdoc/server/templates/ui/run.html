@@ -24,6 +24,7 @@
 <div class="actions">
   <a class="btn" href="/ui/runs/{{ run_id }}/review"><strong>Correct</strong> — teach the model</a>
   <button type="button" id="btn-copy" data-run="{{ run_id }}">Copy report</button>
+  <a class="btn" href="/api/v1/runs/{{ run_id }}/document" download="{{ meta.file_name }}">Download document</a>
   <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.md" download="{{ meta.file_name }}.report.md">Export .md</a>
   <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/report.json" download="{{ meta.file_name }}.report.json">Export .json</a>
   <button type="button" id="btn-sap" data-class="{{ doc_class }}">Compare with SAP…</button>
