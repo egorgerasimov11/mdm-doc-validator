@@ -153,6 +153,9 @@ class RawDoc:
     # P2: a text layer existed but was unreadable (encoded font) — the doc was
     # rerouted to the scan branch; recorded for eval/review observability
     text_layer_garbage: bool = False
+    # P4: the W-8 certification (Part XXX) page index — the signature probe
+    # targets it instead of guessing from the first selected page
+    w8_cert_page: int | None = None
 
     @property
     def run_id(self) -> str:
@@ -379,19 +382,105 @@ def _collect_markers(raw: RawDoc, indexed_texts: list, doc_class: str) -> None:
 _SIG_HINTS = re.compile(r"(?i)sincerely|signature of|sign here|authorized signature|"
                         r"certification|firma|assinatura|unterschrift|подпись")
 
+# --- W-8 required-page targeting (P4) ----------------------------------------
+# A W-8BEN-E is an 8-page form whose evidence lives on SPECIFIC pages: Part I
+# (identification) up front, the chapter-4 certification Part in the middle,
+# and the Part XXX certification/signature at the END. Generic keyword scoring
+# has no W-8 awareness — these patterns pick the required pages from the cheap
+# survey/page texts at zero model cost.
+_W8_DOC_RE = re.compile(r"(?i)w[-_ ]?8[\s-]?ben(-?e)?|certificate of foreign status")
+_W8_PART1_RE = re.compile(r"(?i)identification of beneficial owner")
+_W8_CERT_XXX_RE = re.compile(r"(?i)part\s+xxx\b")
+_W8_SIGNHERE_RE = re.compile(r"(?i)sign\s*here")
+_W8_CERT_WORD_RE = re.compile(r"(?i)\bcertification\b")
+
+
+def _select_w8_pages(scored: list, max_pages: int) -> tuple[list, int]:
+    """scored = [(page_score, idx, text, rot)] over ALL surveyed pages.
+    -> (picks ordered [Part I, certification, best-remaining], cert_idx).
+    part1: first page matching _W8_PART1_RE, else idx 0.
+    cert priority ladder: first Part-XXX page; else first 'Sign Here' page;
+    else the LAST 'Certification' page; else the last surveyed page.
+    best-remaining: highest page_score among the rest (ties -> lowest idx)."""
+    by_idx = {i: (s, i, t, r) for s, i, t, r in scored}
+    idxs = sorted(by_idx)
+    if not idxs:
+        return [], 0
+
+    def _first(rx) -> int | None:
+        for i in idxs:
+            if rx.search(by_idx[i][2] or ""):
+                return i
+        return None
+
+    def _last(rx) -> int | None:
+        for i in reversed(idxs):
+            if rx.search(by_idx[i][2] or ""):
+                return i
+        return None
+
+    part1 = _first(_W8_PART1_RE)
+    part1 = part1 if part1 is not None else idxs[0]
+    cert = _first(_W8_CERT_XXX_RE)
+    if cert is None:
+        cert = _first(_W8_SIGNHERE_RE)
+    if cert is None:
+        cert = _last(_W8_CERT_WORD_RE)
+    if cert is None:
+        cert = idxs[-1]
+    picks = [by_idx[part1]]
+    if cert != part1:
+        picks.append(by_idx[cert])
+    rest = sorted((by_idx[i] for i in idxs if i not in (part1, cert)),
+                  key=lambda x: (-x[0], x[1]))
+    for row in rest:
+        if len(picks) >= max_pages:
+            break
+        picks.append(row)
+    return picks[:max_pages], cert
+
+
+def _w8_detected(path: Path, texts: list, doc_class: str) -> bool:
+    """Deterministic page-SELECTION input (P4) — deliberately separate from
+    raw.type_hint, which stays frozen post-selection (F1 invariant)."""
+    if doc_class != "w9":
+        return False
+    if _W8_DOC_RE.search(path.name):
+        return True
+    return any(_W8_DOC_RE.search(t or "") for t in texts)
+
 
 def _signature_page(path: Path, raw: RawDoc) -> int:
-    """Which page most likely holds the signature. W-9: the certification page
-    (usually 1). Letters: the last page mentioning a signature phrase."""
+    """Which page most likely holds the signature. W-8: the certification
+    (Part XXX) page found during page targeting (P4). W-9: the certification
+    page (usually 1). Letters: the last page mentioning a signature phrase —
+    survey text is consulted too, so SCANS get real hints instead of the
+    blind pages_used fallback; W-9-marked pages of a bank packet are skipped
+    (their signature belongs to the tax form, not the letter — P3/D)."""
+    if raw.w8_cert_page is not None:
+        return raw.w8_cert_page
+    hits: list[int] = []
     try:
         doc = fitz.open(path)
         pages = list(range(min(doc.page_count, SCAN_PAGE_CAP)))
-        hits = [i for i in pages if _SIG_HINTS.search(doc[i].get_text() or "")]
+        for i in pages:
+            text = raw.survey_texts.get(i) or (doc[i].get_text() or "")
+            if _SIG_HINTS.search(text):
+                hits.append(i)
         doc.close()
-        if hits:
-            return hits[0] if raw.doc_class == "w9" else hits[-1]
     except Exception:
         pass
+    if raw.doc_class == "bank" and raw.w9_pages:
+        non_w9 = [i for i in hits if i not in raw.w9_pages]
+        if non_w9:
+            hits = non_w9
+        elif hits:
+            # every hinted page is a W-9 page: prefer a non-W9 page we read
+            fallback = [p for p in raw.pages_used if p not in raw.w9_pages]
+            if fallback:
+                return fallback[-1]
+    if hits:
+        return hits[0] if raw.doc_class == "w9" else hits[-1]
     if raw.pages_used:
         return raw.pages_used[0] if raw.doc_class == "w9" else raw.pages_used[-1]
     return 0
@@ -658,7 +747,10 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             raw.survey_texts = dict(enumerate(texts))
             _collect_markers(raw, list(enumerate(texts)), doc_class)
             scored = [(fields.page_score(t, doc_class), i, t, 0) for i, t in enumerate(texts)]
-            picks = _select_pages(scored, max_pages)
+            if _w8_detected(path, texts, doc_class):
+                picks, raw.w8_cert_page = _select_w8_pages(scored, max_pages)
+            else:
+                picks = _select_pages(scored, max_pages)
             raw.pages_used = [i for _, i, _, _ in picks]
             raw.page_texts = {i: t for _, i, t, _ in picks}
             raw.raw_text = "\n".join(t for _, _, t, _ in picks)
@@ -667,7 +759,10 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             survey = _survey_scanned_pdf(path, render_dir, doc_class)
             raw.survey_texts = {i: t for _, i, t, _ in survey}
             _collect_markers(raw, [(i, t) for _, i, t, _ in survey], doc_class)
-            picks = _select_pages(survey, max_pages)
+            if _w8_detected(path, [t for _, _, t, _ in survey], doc_class):
+                picks, raw.w8_cert_page = _select_w8_pages(survey, max_pages)
+            else:
+                picks = _select_pages(survey, max_pages)
             raw.pages_used = [i for _, i, _, _ in picks]
             _deep_read_pages(path, picks, render_dir, raw, use_vision)
     elif ext in config.IMAGE_EXTS:
@@ -767,7 +862,7 @@ def to_public(raw: RawDoc, vault, policy: str = "masked") -> dict:
         "has_text_layer": raw.has_text_layer, "locked": raw.locked, "editable": raw.editable,
         "pages": raw.pages, "pages_used": raw.pages_used, "rotations": raw.rotations,
         "bank_letter_pages": raw.bank_letter_pages, "invoice_pages": raw.invoice_pages,
-        "w9_pages": raw.w9_pages,
+        "w9_pages": raw.w9_pages, "w8_cert_page": raw.w8_cert_page,
         "type_hint": raw.type_hint, "warnings": raw.warnings,
         "text_layer_garbage": raw.text_layer_garbage,
         "raw_text_excerpt": scrub_text(raw.raw_text[:config.EXCERPT_LIMIT], vault,
