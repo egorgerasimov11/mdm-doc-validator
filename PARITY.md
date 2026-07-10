@@ -87,6 +87,16 @@ ladder (ladder.py — the pipeline controller's bounded second perception pass).
 None of these are stage_b guards except `corroborate_across_pages` (listed
 n/a above); nothing here is a pending port.
 
+## Bulk table validation (V-wave, Python-console-only) — 2026-07-10
+`src/mdmdoc/bulk/` (mass row-bucket validation of SAP table exports: bank /
+tax / postal-region) is a SEPARATE product surface with NO ABAP counterpart
+planned: it validates operator-uploaded spreadsheets in the local console,
+outside the document pipeline and outside the rule-approval gate (row buckets
+are audit facts with cited BULK-### rules, not processing verdicts). Its data
+files rules/bulk_{tax,bank,postal}.yaml are NOT part of the shared rule DATA
+that gen_rules_abap.py carries. The only shared logic is rules/bankmath.py —
+already covered by the document-rules parity entries above.
+
 ## Golden parity corpus (behavioural, beyond marker grep) — 2026-07-09, v2 2026-07-10
 `tools/golden/golden_cases.json` (**11 cases**, corpus v2 with `llm_fields` +
 `expect.verdict`/`expect.findings`) runs through the Python DETERMINISTIC engine
