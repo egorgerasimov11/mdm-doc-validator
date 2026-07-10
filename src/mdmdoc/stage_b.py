@@ -413,22 +413,50 @@ def _fix_statement_period(ext: Extraction, raw: RawDoc) -> None:
 
 
 def _esignature_guard(ext: Extraction, raw: RawDoc) -> None:
-    """A DocuSign/Adobe-Sign envelope IS a signature (electronic) — 'unsigned'
-    would be wrong; the timestamp near it is the signing date."""
-    text_low = (raw.raw_text or "").lower()
-    if ext.doc_class != "bank" or ext.fields.get("signed"):
+    """An e-signature envelope/annotation IS a signature (kind=electronic) —
+    'unsigned' would be wrong. Applies to bank AND w9/w8 (S1: a W-9 with a
+    textual 'Digitally signed by …' line used to false-fire W9-020 because
+    this guard was bank-only). Tokens shared with the text vote (fields.
+    ESIGN_TOKENS); the timestamp near the marker is the signing date."""
+    if ext.fields.get("signed"):
         return
-    if "docusign envelope" in text_low or "docusigned by" in text_low \
-            or "adobe sign" in text_low:
-        ext.fields["signed"] = True
-        ext.fields["signature_evidence"] = \
-            "electronically signed (DocuSign/e-signature envelope present)"
-        ext.provenance["signed"] = {"source": "rule", "page": None}
+    text_low = (raw.raw_text or "").lower()
+    from .fields import ESIGN_TOKENS
+    if not any(t in text_low for t in ESIGN_TOKENS):
+        return
+    ext.fields["signed"] = True
+    ext.fields["signature_kind"] = "electronic"
+    ext.provenance["signed"] = {"source": "rule", "page": None}
+    if ext.doc_class == "bank":
+        from .rules.predicates import _positive_evidence
+        if not _positive_evidence(str(ext.fields.get("signature_evidence") or "")):
+            ext.fields["signature_evidence"] = \
+                "electronically signed (e-signature markers in document text)"
         if not str(ext.fields.get("doc_date") or "").strip():
             m = re.search(r"(\d{4}-\d{2}-\d{2})\s*\|\s*\d{1,2}:\d{2}", raw.raw_text or "")
             if m:
                 ext.fields["doc_date"] = m.group(1)
                 ext.provenance["doc_date"] = {"source": "ocr-regex", "page": None}
+    else:  # w9 / w8: the annotation timestamp is the signing date
+        if not str(ext.fields.get("sign_date") or "").strip():
+            m = re.search(r"(\d{4}[.\-/]\d{2}[.\-/]\d{2})", raw.raw_text or "")
+            if m:
+                ext.fields["sign_date"] = m.group(1)
+                ext.provenance["sign_date"] = {"source": "ocr-regex", "page": None}
+
+
+def _officer_block_guard(ext: Extraction, raw: RawDoc) -> None:
+    """Detect a typed officer block (sign-off line + name + title + contact) —
+    compensating evidence for a system-issued unsigned bank letter (BNK-026).
+    Detection only; the evidence fill happens in _resolve_signature AFTER the
+    final signed state is known (S1)."""
+    if ext.doc_class != "bank":
+        return
+    from .fields import detect_officer_block
+    fired, snippet = detect_officer_block(raw.raw_text or "")
+    if fired:
+        ext.fields["officer_block"] = True
+        ext.officer_snippet = snippet
 
 
 def _ground_payment_instructions(ext: Extraction, raw: RawDoc) -> None:
@@ -582,26 +610,76 @@ def _apply_w9_zone_probe(ext: Extraction, raw: RawDoc) -> None:
                                                          "page": probe_page}
 
 
-def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
-    """The vision verdict on the signature outranks both text tiers: signatures
-    are pixels, not text. Stamp counts for bank letters, not for W-9."""
-    probe = raw.signature_probe
-    if not probe:
-        return
+def _resolve_signature(ext: Extraction, raw: RawDoc) -> None:
+    """The single fold point for every signature channel (S1): text e-sign
+    markers, the vision probe, the typed-officer block. Sets `signed` and
+    `signature_kind` ∈ {wet, stamp, electronic, none, unverified}.
+
+    NO-OVERWRITE RULE: a NEGATIVE probe never touches signature_evidence —
+    that field feeds BNK-021/026 through _positive_evidence, and the real
+    Citizens regression came from the probe's "no handwritten signature"
+    string erasing the text-tier's typed-officer evidence."""
+    from .fields import ESIGN_TOKENS, TYPED_SYSTEM_TOKENS
     from .privacy import scrub_text
+    from .rules.predicates import _positive_evidence
+
+    low = (raw.raw_text or "").lower()
+    text_vote = ("esign" if any(t in low for t in ESIGN_TOKENS)
+                 else "typed-system" if any(t in low for t in TYPED_SYSTEM_TOKENS)
+                 else "none")
+    probe = raw.signature_probe or {}
+    votes = probe.get("votes") or {}
+
+    def _pub(extra: dict | None = None) -> None:
+        ext.signature_probe = {
+            "handwritten_signature": bool(probe.get("handwritten_signature")),
+            "stamp": bool(probe.get("stamp")),
+            "evidence": scrub_text(str(probe.get("evidence") or ""), ext.vault),
+            "page": (probe.get("page", 0) + 1
+                     if isinstance(probe.get("page"), int) else None),
+            "votes": votes, "uncertain": bool(probe.get("uncertain")),
+            **(extra or {})}
+
+    # (E) electronic: the esign guard fired, or the text carries esign markers
+    if ext.fields.get("signature_kind") == "electronic" or text_vote == "esign":
+        ext.fields["signed"] = True
+        ext.fields["signature_kind"] = "electronic"
+        ext.provenance.setdefault("signed", {"source": "rule", "page": None})
+        _pub({"uncertain": False})
+        _finish_signature(ext, text_vote, _positive_evidence)
+        return
+
+    # (P0) no probe ran (invoice/editable/locked/no-vision): text tier stands
+    if not probe:
+        ext.fields.setdefault("signature_kind", "unverified")
+        _finish_signature(ext, text_vote, _positive_evidence)
+        return
+
+    # (P1) vision attempted but unusable: keep the text-tier signed, flag it
     if probe.get("no_visual_verdict"):
-        # Vision was attempted but said NOTHING (model error / unusable reply).
-        # It must not overwrite the text-tier's `signed` with False — keep the
-        # field, surface the uncertainty so the confidence gate can hold back
-        # a blind ACCEPT (CONF-001 weak signal via `uncertain`).
-        ext.signature_probe = {"handwritten_signature": False, "stamp": False,
-                               "evidence": "", "page": None,
-                               "votes": probe.get("votes") or {},
-                               "uncertain": True,
-                               "no_visual_verdict": True}
+        ext.fields["signature_kind"] = "unverified"
+        _pub({"evidence": "", "page": None, "uncertain": True,
+              "no_visual_verdict": True})
         ext.warnings.append("signature vision produced no usable read — signature "
                             "state unverified (text-tier value kept); verify by eye")
+        _finish_signature(ext, text_vote, _positive_evidence)
         return
+
+    # (scoped-out) the probe landed on a W-9 page of a bank packet: its
+    # signature belongs to the tax form, not the letter (P3/D backstop)
+    probe_idx = probe.get("page")
+    if (ext.doc_class == "bank" and isinstance(probe_idx, int)
+            and probe_idx in (raw.w9_pages or [])
+            and any(p not in raw.w9_pages for p in raw.pages_used)):
+        ext.fields["signature_kind"] = "unverified"
+        _pub({"uncertain": True, "scoped_out_w9_page": True})
+        ext.warnings.append(
+            "signature probe landed on the W-9 page of the packet — its "
+            "signature belongs to the W-9 section, not the bank document; "
+            "signed kept from the text tier")
+        _finish_signature(ext, text_vote, _positive_evidence)
+        return
+
     probe_page = probe.get("page", 0) + 1 if isinstance(probe.get("page"), int) else None
     # a stamp whose evidence is a REGULATOR watermark (VIGILADO / Superintendencia
     # margin plate on Colombian letters) is compliance noise, not a signature —
@@ -612,38 +690,81 @@ def _apply_signature_probe(ext: Extraction, raw: RawDoc) -> None:
     if probe.get("stamp") and not stamp_ok:
         ext.warnings.append("signature probe: the 'stamp' evidence is a regulator "
                             "watermark — not counted as a signature")
-    visual = bool(probe.get("handwritten_signature")) or (
-        ext.doc_class == "bank" and stamp_ok)
+    hand = bool(probe.get("handwritten_signature"))
     model_said = ext.fields.get("signed")
     model_said = model_said if isinstance(model_said, bool) else \
         str(model_said).lower() in ("true", "yes")
-    if visual != model_said:
-        ext.warnings.append(f"signature: vision says {visual}, text model said {model_said}")
-    ext.fields["signed"] = visual
-    ext.provenance["signed"] = {"source": "vision-crop", "page": probe_page}
-    # the probe often reads the handwritten date next to the signature
-    sig_date = str(probe.get("date_near_signature") or "").strip()
-    if sig_date and ext.doc_class == "w9" and not str(ext.fields.get("sign_date") or "").strip():
-        ext.fields["sign_date"] = sig_date
-        ext.provenance["sign_date"] = {"source": "vision-crop", "page": probe_page}
     evidence = scrub_text(str(probe.get("evidence") or ""), ext.vault)
-    ext.signature_probe = {"handwritten_signature": bool(probe.get("handwritten_signature")),
-                           "stamp": bool(probe.get("stamp")), "evidence": evidence,
-                           "page": probe_page,
-                           "votes": probe.get("votes") or {},
-                           "uncertain": bool(probe.get("uncertain"))}
-    # low-confidence vision read (band vs page disagreed, or vision contradicts
-    # the deterministic text signal): a plain WARNING so the confidence gate can
-    # hold back a blind ACCEPT. Kept OUT of signature_evidence — that field feeds
-    # BNK-021/026 evidence tokens and must not be polluted with vote strings.
+
+    if hand:                                   # (P2) wet signature seen
+        ext.fields["signed"] = True
+        ext.fields["signature_kind"] = "wet"
+        ext.provenance["signed"] = {"source": "vision-crop", "page": probe_page}
+        if evidence:
+            ext.fields["signature_evidence"] = evidence
+            ext.provenance["signature_evidence"] = {"source": "vision-crop",
+                                                    "page": probe_page}
+        sig_date = str(probe.get("date_near_signature") or "").strip()
+        if sig_date and ext.doc_class in ("w9",) \
+                and not str(ext.fields.get("sign_date") or "").strip():
+            ext.fields["sign_date"] = sig_date
+            ext.provenance["sign_date"] = {"source": "vision-crop", "page": probe_page}
+    elif stamp_ok:                             # (P3) stamp only
+        ext.fields["signature_kind"] = "stamp"
+        if ext.doc_class == "bank":
+            ext.fields["signed"] = True
+            ext.provenance["signed"] = {"source": "vision-crop", "page": probe_page}
+            if evidence:
+                ext.fields["signature_evidence"] = evidence
+                ext.provenance["signature_evidence"] = {"source": "vision-crop",
+                                                        "page": probe_page}
+        else:
+            ext.fields["signed"] = False
+            ext.warnings.append("a stamp is not a signature on a W-9/W-8")
+    else:                                      # (P4) vision says NO wet/stamp
+        ext.fields["signed"] = False
+        ext.fields["signature_kind"] = "none"
+        ext.provenance["signed"] = {"source": "vision-crop", "page": probe_page}
+        # NO-OVERWRITE: signature_evidence deliberately untouched here
+
+    signed_now = bool(ext.fields.get("signed"))
+    if signed_now != model_said:
+        ext.warnings.append(f"signature: vision says {signed_now}, "
+                            f"text model said {model_said}")
+    _pub()
     if probe.get("uncertain"):
-        v = probe.get("votes") or {}
         ext.warnings.append(
-            f"signature vision uncertain (band={v.get('band', '?')}, "
-            f"page={v.get('page', '?')}, text={v.get('text', '?')}) — verify by eye")
-    if ext.doc_class == "bank" and not visual and evidence:
-        ext.fields["signature_evidence"] = evidence
-        ext.provenance["signature_evidence"] = {"source": "vision-crop", "page": probe_page}
+            f"signature vision uncertain (band={votes.get('band', '?')}, "
+            f"page={votes.get('page', '?')}, text={votes.get('text', '?')}) "
+            "— verify by eye")
+    _finish_signature(ext, text_vote, _positive_evidence)
+
+
+def _finish_signature(ext: Extraction, text_vote: str, _positive_evidence) -> None:
+    """Final compensating-evidence fill, AFTER the signed state is settled:
+    an unsigned bank letter with a detected typed officer block (or an
+    explicit computer-generated notice) gets BNK-026-grade evidence — unless
+    the text tier already carries positive evidence (never overwrite it)."""
+    signed = ext.fields.get("signed")
+    signed = signed if isinstance(signed, bool) else \
+        str(signed).lower() in ("true", "yes")
+    ext.fields["signed"] = signed
+    ext.fields.setdefault("signature_kind",
+                          "wet" if signed else "none")
+    if ext.doc_class != "bank" or signed:
+        return
+    cur = str(ext.fields.get("signature_evidence") or "")
+    if _positive_evidence(cur):
+        return
+    if ext.fields.get("officer_block"):
+        snippet = getattr(ext, "officer_snippet", "")
+        ext.fields["signature_evidence"] = \
+            f"typed officer block: {snippet}" if snippet else "typed officer block"
+        ext.provenance["signature_evidence"] = {"source": "rule", "page": None}
+    elif text_vote == "typed-system":
+        ext.fields["signature_evidence"] = \
+            "computer-generated notice (states no signature required)"
+        ext.provenance["signature_evidence"] = {"source": "rule", "page": None}
 
 
 def _attribute_page(raw: RawDoc, value) -> int | None:
@@ -864,10 +985,12 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
 
     _apply_w9_zone_probe(ext_res, raw)
     _normalize_tin(ext_res)          # zone TIN passes through the date guard too
-    _apply_signature_probe(ext_res, raw)
-    # the vision probe judges PIXELS and would overwrite an electronic signature
-    # (DocuSign box reads as 'typed name') — the e-signature fact wins back here
-    _esignature_guard(ext_res, raw)
+    # signature channels fold ONCE at the tail (S1): officer-block detection
+    # first (flag only), then _resolve_signature settles signed/kind across
+    # text esign markers, the vision probe and the compensating evidence —
+    # a negative probe can no longer overwrite the text-tier evidence
+    _officer_block_guard(ext_res, raw)
+    _resolve_signature(ext_res, raw)
     _finalize_provenance(ext_res, raw)
 
     if engine == "dual":

@@ -10,7 +10,7 @@ from mdmdoc import config
 from mdmdoc.fields import Extraction, crosscheck_ids
 from mdmdoc.rules.engine import run_rules
 from mdmdoc.stage_a import RawDoc
-from mdmdoc.stage_b import (_apply_signature_probe, _apply_w9_zone_probe,
+from mdmdoc.stage_b import (_resolve_signature, _apply_w9_zone_probe,
                             _attribute_page, _finalize_provenance)
 
 
@@ -66,7 +66,7 @@ def test_zone_probe_and_signature_probe_provenance():
     e.fields = {"line3_classification": "Individual", "tin_raw": "", "tin_type": "",
                 "signed": False}
     _apply_w9_zone_probe(e, raw)
-    _apply_signature_probe(e, raw)
+    _resolve_signature(e, raw)
     assert e.fields["line3_classification"] == "S corporation"
     assert e.provenance["line3_classification"] == {"source": "zone-probe", "page": 1}
     assert e.provenance["tin_raw"] == {"source": "zone-probe", "page": 1}

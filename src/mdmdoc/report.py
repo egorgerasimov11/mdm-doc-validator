@@ -76,9 +76,14 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
         iban = f.get("iban")
         iban_extra = (f" (country {iban['country']}, len {iban['length']})"
                       if isinstance(iban, dict) and iban.get("present") and iban.get("country") else "")
+        kind = str(f.get("signature_kind") or "")
         signed = "yes" if f.get("signed") else "no"
+        if f.get("signed") and kind in ("wet", "electronic", "stamp"):
+            signed = f"yes ({kind})"
+        elif not f.get("signed") and kind == "unverified":
+            signed = "no (unverified)"
         if not f.get("signed") and f.get("signature_evidence"):
-            signed = f"no ({f['signature_evidence']})"
+            signed = f"{signed.split(' (')[0]} ({f['signature_evidence']})"
         return [
             ("Account holder", _fmt(f.get("account_holder")), "", "account_holder"),
             ("Account type", _fmt(f.get("account_type")), "", "account_type"),
@@ -99,6 +104,8 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
     tin_target = ("Tax Number 1" if tin.get("type") == "SSN"
                   else "Tax Number 2" if tin.get("type") == "EIN" else "")
     signed = _fmt(f.get("signed", False))
+    if f.get("signed") and str(f.get("signature_kind") or "") in ("wet", "electronic"):
+        signed += f" ({f['signature_kind']})"
     if f.get("sign_date"):
         signed += f" ({f['sign_date']})"
     return [

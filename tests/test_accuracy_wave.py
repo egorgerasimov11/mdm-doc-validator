@@ -225,7 +225,7 @@ def test_field_confidence_mapping():
 
 # --- Batch 4: regulator watermark is not a signature stamp -------------------
 def test_regulator_watermark_stamp_not_counted():
-    from mdmdoc.stage_b import _apply_signature_probe
+    from mdmdoc.stage_b import _resolve_signature
     e = Extraction(doc_class="bank", doc_type="bank_letter")
     e.fields = {"signed": False}
     r = RawDoc(path="/x/co.pdf", sha256="4" * 64, ext=".pdf", doc_class="bank")
@@ -233,7 +233,7 @@ def test_regulator_watermark_stamp_not_counted():
                          "evidence": "stamped with VIGILADO and the logo of the "
                                      "Superintendencia Financiera de Colombia",
                          "page": 0}
-    _apply_signature_probe(e, r)
+    _resolve_signature(e, r)
     assert e.fields["signed"] is False
     assert any("regulator watermark" in w for w in e.warnings)
     # a REAL corporate stamp still counts for bank letters
@@ -243,5 +243,5 @@ def test_regulator_watermark_stamp_not_counted():
     r2.signature_probe = {"handwritten_signature": False, "stamp": True,
                           "evidence": "round company stamp next to the signature block",
                           "page": 0}
-    _apply_signature_probe(e2, r2)
+    _resolve_signature(e2, r2)
     assert e2.fields["signed"] is True

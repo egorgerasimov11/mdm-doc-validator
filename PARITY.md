@@ -42,13 +42,15 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 - ground_payment_instructions — ported
 - drop_exemplar_echo — n/a (few-shot exemplar echo is a Python-LLM artifact; ABAP has no few-shot dataset)
 - apply_w9_zone_probe — n/a (vision zone-crop probe; the ABAP path is deterministic/text-only)
-- apply_signature_probe — n/a (vision signature probe; same reason)
+- resolve_signature — n/a (vision-probe fold; its deterministic constituents —
+  esignature_guard [extended to w9/w8] and officer_block_guard — ARE ported)
+- officer_block_guard — ported
 - finalize_provenance — n/a (Python report provenance structure; the ABAP result has no provenance field)
 
 ## Guards (continued, 2026-07-09 accuracy wave)
 - normalize_tin — ported (already listed)
 The signature 3-state change (band/page/text votes + `uncertain`) is inside the
-existing `apply_signature_probe` (n/a — vision). The confidence gate (`confidence.py`
+existing `resolve_signature` (n/a — vision). The confidence gate (`confidence.py`
 → CONF-001) is a Python pipeline layer, not a stage_b guard; ABAP corp v1 is
 deterministic-only and does not carry it (documented n/a — no marker expected).
 MDMDOC_NOW (audit C13) is a Python-only test clock for `date_older_than`; the

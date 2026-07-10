@@ -343,6 +343,66 @@ _TAXFORM_PAGE_MARKS = ("form w-9", "request for taxpayer identification",
                        "substitute form w-9", "substitute w-9",
                        "w-8ben", "certificate of foreign status")
 
+# --- signature text channels (S1) ---------------------------------------------
+# Shared by stage_a (text vote), stage_b (esign guard) and the ABAP twin.
+# [CONST:esign_markers]
+ESIGN_TOKENS = ("docusign envelope", "docusigned by", "adobe sign",
+                "firmado digitalmente", "electronically signed", "digitally signed")
+# [CONST:typed_system_markers]
+TYPED_SYSTEM_TOKENS = ("computer-generated", "computer generated",
+                       "system-generated", "this is a computer")
+
+# Typed officer block (S1): a bank letter that closes with a sign-off line
+# followed by a person name + title + contact/bank identity is SYSTEM-issued
+# but carries compensating evidence (BNK-026), not an unsigned void (BNK-021).
+# Sign-off must sit ALONE on its line — an inline "Sincerely, X Services."
+# closing does not qualify (calibrated against the synthetic corpus).
+# [CONST:officer_signoff]
+_OFFICER_SIGNOFF_RE = re.compile(
+    r"(?im)^\s*(sincerely|best regards|kind regards|warm regards|regards|"
+    r"yours truly|yours sincerely|respectfully(?: yours)?)\s*[,.]?\s*$")
+# [CONST:officer_titles]
+_OFFICER_TITLE_RE = re.compile(
+    r"(?i)vice president|president|manager|director|officer|treasurer|"
+    r"treasury|banker|relationship manager|\bv\.?p\.?\b")
+# [CONST:officer_contact]
+_OFFICER_CONTACT_RE = re.compile(r"(?i)phone|mobile|tel\b|fax|e-?mail|@|www\.|bank")
+
+
+_ORG_LINE_RE = re.compile(r"(?i)\b(bank|banking|services|department|group|"
+                          r"division|team|corporation|company)\b")
+
+
+def _officer_name_line(line: str) -> bool:
+    """A PERSON-name line: 2-4 tokens, every token starts uppercase
+    (dots/initials allowed: 'Jordan Q. Sample J.D.'), no digits, and not an
+    organization line ('Vela Federal Bank Business Banking' must not pass)."""
+    s = line.strip()
+    if not s or any(ch.isdigit() for ch in s) or _ORG_LINE_RE.search(s):
+        return False
+    toks = s.split()
+    if not 2 <= len(toks) <= 4:
+        return False
+    return all(t[:1].isupper() for t in toks)
+
+
+def detect_officer_block(text: str) -> tuple[bool, str]:
+    """-> (found, snippet). Pure/deterministic: a sign-off line alone, then
+    within the next 6 non-empty lines a NAME line + a TITLE line + a
+    CONTACT/bank line (all three required)."""
+    lines = (text or "").splitlines()
+    for i, ln in enumerate(lines):
+        if not _OFFICER_SIGNOFF_RE.match(ln):
+            continue
+        window = [l for l in lines[i + 1:i + 12] if l.strip()][:6]
+        name = next((l.strip() for l in window if _officer_name_line(l)), "")
+        title = next((l.strip() for l in window if _OFFICER_TITLE_RE.search(l)), "")
+        contact = next((l for l in window if _OFFICER_CONTACT_RE.search(l)), "")
+        if name and title and contact:
+            snippet = name if title == name else f"{name} — {title}"
+            return True, snippet[:120]
+    return False, ""
+
 
 def page_markers(text: str) -> dict:
     """Per-page evidence: does this page look like a bank confirmation letter /

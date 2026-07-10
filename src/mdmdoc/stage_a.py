@@ -598,10 +598,10 @@ def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
         }
 
 
-_ESIGN_TOKENS = ("docusign envelope", "docusigned by", "adobe sign",
-                 "firmado digitalmente", "electronically signed", "digitally signed")
-_TYPED_SYSTEM_TOKENS = ("computer-generated", "computer generated",
-                        "system-generated", "this is a computer")
+# shared with stage_b's esign guard and the ABAP twin (S1); kept as module
+# aliases so existing references/tests stay valid
+_ESIGN_TOKENS = fields.ESIGN_TOKENS
+_TYPED_SYSTEM_TOKENS = fields.TYPED_SYSTEM_TOKENS
 
 
 def _text_signature_vote(raw: RawDoc) -> str:

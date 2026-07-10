@@ -121,8 +121,9 @@ def test_signature_no_visual_verdict_keeps_signed_and_flags_uncertain(monkeypatc
 
     e = _bank_ext()
     e.fields["signed"] = True
-    stage_b._apply_signature_probe(e, raw)
+    stage_b._resolve_signature(e, raw)
     assert e.fields["signed"] is True                  # vision said nothing
+    assert e.fields["signature_kind"] == "unverified"
     assert e.signature_probe.get("uncertain") is True  # confidence sees it
     a = confidence.assess(e)
     assert any("signature read uncertain" in r for r in a["reasons"])

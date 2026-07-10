@@ -233,6 +233,78 @@
      "%b %d %Y"
     ]
    }
+  },
+  {
+   "id": "esign_markers",
+   "canon": "same",
+   "py": {
+    "file": "src/mdmdoc/fields.py",
+    "extract": "ESIGN_TOKENS = \\((.*?)\\)",
+    "parse": "py_strs"
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "extract": "lt_esign\\) = VALUE string_table\\((.*?)\\)\\.",
+    "parse": "abap_ticks"
+   }
+  },
+  {
+   "id": "typed_system_markers",
+   "canon": "same",
+   "py": {
+    "file": "src/mdmdoc/fields.py",
+    "extract": "TYPED_SYSTEM_TOKENS = \\((.*?)\\)",
+    "parse": "py_strs"
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "extract": "lv_typed\\) = boolc\\((.*?)\\)\\.",
+    "parse": "abap_ticks"
+   }
+  },
+  {
+   "id": "officer_signoff",
+   "canon": "pinned",
+   "note": "regex dialects differ (py (?im) multiline vs ABAP per-line match)",
+   "py": {
+    "file": "src/mdmdoc/fields.py",
+    "literal": "(sincerely|best regards|kind regards|warm regards|regards|",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "literal": "(sincerely|best regards|kind regards|warm regards|regards|yours truly|yours sincerely|respectfully( yours)?)[,.]?$",
+    "count": 1
+   }
+  },
+  {
+   "id": "officer_titles",
+   "canon": "same",
+   "py": {
+    "file": "src/mdmdoc/fields.py",
+    "literal": "vice president|president|manager|director|officer|treasurer|",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "literal": "vice president|president|manager|director|officer|treasurer|",
+    "count": 1
+   }
+  },
+  {
+   "id": "officer_contact",
+   "canon": "pinned",
+   "note": "tel word-boundary dialect differs (py \\b vs ABAP \\< \\>)",
+   "py": {
+    "file": "src/mdmdoc/fields.py",
+    "literal": "phone|mobile|tel\\b|fax|e-?mail|@|www\\.|bank",
+    "count": 1
+   },
+   "abap": {
+    "file": "src/zcl_mdmdoc_extract.clas.abap",
+    "literal": "phone|mobile|\\<tel\\>|fax|e-?mail|@|www\\.|bank",
+    "count": 1
+   }
   }
  ]
 }
