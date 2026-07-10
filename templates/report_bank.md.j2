@@ -29,6 +29,12 @@ Notes:
 {% if sap_block %}
 {{ sap_block }}
 {% endif %}
+{% if pub.inventory %}
+Also on the document:
+{% for it in pub.inventory %}
+- {{ it.family }} — {{ it.label }}: {{ it.value }}
+{% endfor %}
+{% endif %}
 {% if pub.crosscheck %}
 OCR cross-check: {{ pub.crosscheck | join('; ') }}
 {% endif %}

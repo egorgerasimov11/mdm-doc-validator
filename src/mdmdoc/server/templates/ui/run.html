@@ -262,6 +262,20 @@
   </div>
 </section>
 
+{% if pub.inventory %}
+<section>
+  <h2>Also on the document <span class="meta">(labeled identifiers outside the extraction schema — nothing is dropped silently)</span></h2>
+  <table>
+    <thead><tr><th>family</th><th>label</th><th>value</th></tr></thead>
+    <tbody>
+    {% for it in pub.inventory %}
+      <tr><td>{{ it.family }}</td><td>{{ it.label }}</td><td>{{ it.value }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
 {% if pub.crosscheck %}
 <section>
   <h2>OCR cross-check</h2>

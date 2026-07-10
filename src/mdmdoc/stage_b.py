@@ -144,10 +144,19 @@ def build_prompt(raw: RawDoc, role: str = "TEXT", focus: list[str] | None = None
 
 def _run_model(raw: RawDoc, role: str,
                focus: list[str] | None = None) -> tuple[dict | None, bool, str]:
-    """One tier run -> (fields-bearing obj or None, json_first_try, model_id)."""
+    """One tier run -> (fields-bearing obj or None, json_first_try, model_id).
+    The FAST tier's call is byte-frozen (trainable contract); effort 5 (D4) may
+    widen ONLY the strong tier: extra options (num_predict) and the model's
+    thinking channel, via runctl overrides."""
+    options = {"num_ctx": 16384, "temperature": 0, "seed": 7}
+    think = False
+    if role == "TEXT_STRONG":
+        from . import runctl
+        options.update(runctl.override("strong_model_options") or {})
+        think = bool(runctl.override("strong_think", False))
     obj, first_try = mc.generate_json(role, build_prompt(raw, role, focus=focus),
                                       system=_load_system(raw.doc_class, _is_w8(raw)),
-                                      options={"num_ctx": 16384, "temperature": 0, "seed": 7})
+                                      options=options, think=think)
     mc.unload(role)
     return (obj if isinstance(obj, dict) else None), first_try, mc.resolve(role)
 
@@ -616,6 +625,64 @@ def _record_settlement_issuer(ext: Extraction, raw: RawDoc) -> None:
     if comp["issuer_strong"]:
         ext.fields["settlement_issuer_strong"] = True
         ext.provenance["settlement_issuer_strong"] = {"source": "rule", "page": None}
+
+
+def _collect_inventory(ext: Extraction, raw: RawDoc) -> None:
+    """'Also on the document' (O2): label-anchored inventory of identifiers the
+    schema does not carry — tax IDs, company registrations, every labeled
+    account occurrence, clearing codes, phone/email/address. Nothing visible is
+    dropped silently anymore. Sensitive values are vault-registered (the CN
+    taxpayer ID …233T was previously NOT leak-gated at all) and stored
+    masked/policy-shown; the multi-block account logic flags two DIFFERENT
+    labeled accounts (BNK-031) or corroborates a repeated one."""
+    from . import inventory as inv
+    from .fields import _norm_id
+    from .privacy import TIN_KINDS, display_value, mask
+    items = inv.collect(raw.raw_text or "")
+    if not items:
+        return
+    pub_items: list[dict] = []
+    acct_norms: list[str] = []
+    for it in items:
+        v, kind = it["value"], it["kind"]
+        if kind == "account_number":
+            acct_norms.append(_norm_id(v))
+        if kind in TIN_KINDS:
+            ext.vault.register(kind, v)
+            shown = mask(kind, v)
+        elif kind:
+            ext.vault.register(kind, v)
+            shown = display_value(kind, v, ext.policy)
+        else:
+            shown = v
+        pub_items.append({"family": it["family"], "label": it["label"],
+                          "value": shown})
+    ext.inventory = pub_items
+
+    # multi-block account signal: IBAN-shaped values and values contained in
+    # the extracted IBAN / clearing code are excluded — a European letter that
+    # prints IBAN + Konto is ONE account, not two
+    iban_norm = _norm_id(ext.fields.get("iban") or "")
+    nc_norm = _norm_id(ext.fields.get("national_clearing") or "")
+    nums: list[str] = []
+    for a in acct_norms:
+        if not a or not a.isdigit():
+            continue
+        if nc_norm and a == nc_norm:
+            continue
+        if iban_norm and (a == iban_norm or iban_norm.endswith(a.lstrip("0"))):
+            continue
+        nums.append(a.lstrip("0"))
+    extracted = _norm_id(ext.fields.get("account_number") or "").lstrip("0")
+    if len(set(nums)) >= 2:
+        ext.fields["distinct_accounts"] = True
+        ext.provenance["distinct_accounts"] = {"source": "rule", "page": None}
+        ext.warnings.append(
+            "document carries two or more DIFFERENT labeled account numbers — "
+            "verify which account is actually being requested")
+    elif extracted and nums.count(extracted) >= 2:
+        _cross_note(ext, f"account number corroborated by {nums.count(extracted)} "
+                         "labeled occurrences in the document")
 
 
 def _fix_statement_period(ext: Extraction, raw: RawDoc) -> None:
@@ -1231,7 +1298,10 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
 
     # --- escalation to the strong tier (quality first) -------------------------
     reasons = [] if no_llm else escalation_reasons(ext_res, raw, quality)
-    if reasons and raw.raw_text.strip() and mc.strong_distinct():
+    from . import runctl
+    if (reasons and raw.raw_text.strip() and mc.strong_distinct()
+            and runctl.override("strong_enabled", True)):
+        runctl.checkpoint("strong-tier", 55)
         strong_obj, strong_ok, strong_model = _run_model(raw, "TEXT_STRONG",
                                                          focus=reasons)
         ext_res.strong_json_valid = strong_ok and strong_obj is not None
@@ -1282,6 +1352,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     _officer_block_guard(ext_res, raw)
     _resolve_signature(ext_res, raw)
     _record_settlement_issuer(ext_res, raw)   # needs the officer_block flag
+    _collect_inventory(ext_res, raw)
     _corroborate_across_pages(ext_res, raw)
     _finalize_provenance(ext_res, raw)
 

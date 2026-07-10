@@ -51,6 +51,10 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 - fix_zh_form — ported
 - ground_account_holder — ported
 - ground_national_clearing — ported
+- collect_inventory — n/a (report/UI inventory layer + vault registration; pure
+  label-anchored text regexes — portable later if the ABAP result gains an
+  inventory table; the distinct_accounts FLAG rule BNK-031 ships in the shared
+  rule data on both sides)
 - record_settlement_issuer — n/a (folds the officer_block flag + issuer phrases
   into doc_subtype_evidence for the BNK-027 NOTE; the ABAP result struct has no
   subtype-evidence field — the flag-driven rule itself IS in the shared data)

@@ -541,6 +541,9 @@ class Extraction:
     # G3 issuer-aware evidence for payment_instructions (settlement_issuer
     # components) — informational, feeds BNK-027 (NOTE) via a derived flag
     doc_subtype_evidence: dict = field(default_factory=dict)
+    # O2 'Also on the document': label-anchored identifier inventory — values
+    # already masked/policy-shown at collection time (safe to persist verbatim)
+    inventory: list = field(default_factory=list)
 
     def register_secrets(self) -> None:
         keys = _SENSITIVE_BANK if self.doc_class == "bank" else _SENSITIVE_W9
@@ -613,4 +616,6 @@ class Extraction:
             pub_wrap["doc_type_evidence"] = dict(self.doc_type_evidence)
         if self.doc_subtype_evidence:
             pub_wrap["doc_subtype_evidence"] = dict(self.doc_subtype_evidence)
+        if self.inventory:
+            pub_wrap["inventory"] = [dict(i) for i in self.inventory]
         return pub_wrap

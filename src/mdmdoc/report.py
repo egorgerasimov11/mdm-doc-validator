@@ -227,6 +227,7 @@ def build_json(pub: dict, findings: list[Finding], verdict: str, meta: dict) -> 
         "fields": pub.get("fields", {}),
         "provenance": pub.get("provenance", {}),
         "crosscheck": pub.get("crosscheck", []),
+        "inventory": pub.get("inventory", []),
         "sap_compare": pub.get("sap_compare", []),
         "web_evidence": pub.get("web_evidence", []),
         "warnings": pub.get("warnings", []),

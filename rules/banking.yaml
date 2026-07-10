@@ -146,6 +146,17 @@ rules:
     message: "Payment instructions appear BANK-ISSUED (named bank plus an officer block or an account-held statement) — materially stronger than a supplier's self-declaration; context for the Data Owner."
     message_ru: "Платёжные инструкции выглядят ВЫПУЩЕННЫМИ БАНКОМ (именованный банк + officer block или подтверждение ведения счёта) — существенно сильнее самодекларации поставщика; контекст для Data Owner."
 
+  - id: BNK-031
+    name: distinct_account_numbers
+    tier: experimental
+    source: policy
+    applies_to: [bank_letter, bank_statement, payment_instructions, supplier_letterhead]
+    when: {flag_true: distinct_accounts}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "The document carries two or more DIFFERENT labeled account numbers — verify with the requestor which account is actually being set up."
+    message_ru: "В документе два и более РАЗНЫХ счёта с метками — уточните у заявителя, какой счёт заводится."
+
   - id: BNK-022
     name: partial_screenshot
     tier: corp
