@@ -99,7 +99,8 @@ INVOICE = ("Invoice\nInvoice Date ... Amount Due ... Payment Terms ... Subtotal 
 
 def test_page_markers_detect_letter_and_invoice():
     from mdmdoc.fields import page_markers, page_score
-    assert page_markers(LETTER) == {"bank_letter": True, "invoice": False}
+    m = page_markers(LETTER)
+    assert m["bank_letter"] and not m["invoice"] and not m["w9_form"]
     m = page_markers(INVOICE)
     assert m["invoice"] and not m["bank_letter"]
     # the confirmation letter must outrank the invoice template page

@@ -136,6 +136,10 @@ class RawDoc:
     rotations: dict = field(default_factory=dict)    # page index -> degrees applied
     bank_letter_pages: list = field(default_factory=list)  # 0-based, packet evidence
     invoice_pages: list = field(default_factory=list)
+    w9_pages: list = field(default_factory=list)     # 0-based: W-9/W-8 form pages in a bank packet
+    # cheap per-page survey text for ALL surveyed pages (idx -> text); feeds the
+    # evidence ladder / signature-page hints. In-memory only, NEVER persisted.
+    survey_texts: dict = field(default_factory=dict)
     signature_probe: dict = field(default_factory=dict)    # vision verdict on signature
     w9_probe: dict = field(default_factory=dict)           # zone probes: checkbox + TIN box
     raw_text: str = ""                  # FULL text — in-memory only, scrubbed on persist
@@ -358,7 +362,8 @@ def _read_image_file(path: Path, render_dir: Path, raw: RawDoc, use_vision: bool
 
 def _collect_markers(raw: RawDoc, indexed_texts: list, doc_class: str) -> None:
     """Per-page packet evidence: which pages look like a bank confirmation
-    letter and which like an invoice. Drives packet-aware classification."""
+    letter, an invoice, or a W-9-family tax form. Drives packet-aware
+    classification and page-scoped signature handling (P3)."""
     if doc_class != "bank":
         return
     for i, t in indexed_texts:
@@ -367,6 +372,8 @@ def _collect_markers(raw: RawDoc, indexed_texts: list, doc_class: str) -> None:
             raw.bank_letter_pages.append(i)
         if m["invoice"]:
             raw.invoice_pages.append(i)
+        if m["w9_form"]:
+            raw.w9_pages.append(i)
 
 
 _SIG_HINTS = re.compile(r"(?i)sincerely|signature of|sign here|authorized signature|"
@@ -648,6 +655,7 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
             # text layer: score every page, keep the most relevant ones,
             # best page first so it never falls off the Stage-B budget
             raw.has_text_layer = True
+            raw.survey_texts = dict(enumerate(texts))
             _collect_markers(raw, list(enumerate(texts)), doc_class)
             scored = [(fields.page_score(t, doc_class), i, t, 0) for i, t in enumerate(texts)]
             picks = _select_pages(scored, max_pages)
@@ -657,6 +665,7 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
         else:
             # scanned: cheap survey of ALL pages (with rotation retry), deep-read the best
             survey = _survey_scanned_pdf(path, render_dir, doc_class)
+            raw.survey_texts = {i: t for _, i, t, _ in survey}
             _collect_markers(raw, [(i, t) for _, i, t, _ in survey], doc_class)
             picks = _select_pages(survey, max_pages)
             raw.pages_used = [i for _, i, _, _ in picks]
@@ -665,6 +674,7 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
         raw.pages = 1
         raw.pages_used = [0]
         _read_image_file(path, render_dir, raw, use_vision)
+        raw.survey_texts = {0: raw.tesseract_text}
     else:
         raw.warnings.append(f"unsupported extension {ext}")
         return raw
@@ -757,6 +767,7 @@ def to_public(raw: RawDoc, vault, policy: str = "masked") -> dict:
         "has_text_layer": raw.has_text_layer, "locked": raw.locked, "editable": raw.editable,
         "pages": raw.pages, "pages_used": raw.pages_used, "rotations": raw.rotations,
         "bank_letter_pages": raw.bank_letter_pages, "invoice_pages": raw.invoice_pages,
+        "w9_pages": raw.w9_pages,
         "type_hint": raw.type_hint, "warnings": raw.warnings,
         "text_layer_garbage": raw.text_layer_garbage,
         "raw_text_excerpt": scrub_text(raw.raw_text[:config.EXCERPT_LIMIT], vault,

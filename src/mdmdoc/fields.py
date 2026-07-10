@@ -336,16 +336,26 @@ def invoice_marks(text: str) -> int:
     return n
 
 
+# Tax-form page markers (P3): a W-9/W-8 page inside a BANK packet is not bank
+# evidence — its signature must not leak into the banking section, and the
+# signature probe should prefer non-tax-form pages.
+_TAXFORM_PAGE_MARKS = ("form w-9", "request for taxpayer identification",
+                       "substitute form w-9", "substitute w-9",
+                       "w-8ben", "certificate of foreign status")
+
+
 def page_markers(text: str) -> dict:
     """Per-page evidence: does this page look like a bank confirmation letter /
-    an invoice? A packet is classified by its STRONGEST banking evidence — an
-    invoice page elsewhere must not poison a packet that contains a bank letter."""
+    an invoice / a W-9-family tax form? A packet is classified by its STRONGEST
+    banking evidence — an invoice page elsewhere must not poison a packet that
+    contains a bank letter."""
     t = (text or "").lower()
     letter_hits = sum(1 for p in _BANK_LETTER_PHRASES if p in t)
     bank_letter = letter_hits >= 2 or "account confirmation" in t \
         or "please accept this letter" in t or "this letter is to confirm" in t
     invoice = bool(_INVOICE_HEADER_RE.search(text or "")) or invoice_marks(text) >= 2
-    return {"bank_letter": bank_letter, "invoice": invoice}
+    w9_form = any(m in t for m in _TAXFORM_PAGE_MARKS)
+    return {"bank_letter": bank_letter, "invoice": invoice, "w9_form": w9_form}
 
 
 def page_score(text: str, doc_class: str) -> int:
