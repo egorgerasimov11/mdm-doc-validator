@@ -36,7 +36,14 @@ def run_bulk(path: Path, case: str = "auto", refs: list | None = None,
     """-> (BulkResult, artifacts{result_xlsx, report_json, report_md, bulk_id}).
     progress: optional callable(str) for live job logs."""
     path = Path(path)
-    say = progress or (lambda s: None)
+    _raw_say = progress or (lambda s: None)
+
+    def say(msg: str) -> None:
+        # cooperative cancel between row batches / web lookups (no-op when no
+        # RunControl is active — CLI and tests run without one)
+        from .. import runctl
+        runctl.checkpoint("bulk")
+        _raw_say(msg)
     if case in ("auto", "", None):
         case = reader.detect_case(path)
         say(f"detected case: {case}")

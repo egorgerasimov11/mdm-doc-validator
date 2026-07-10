@@ -26,7 +26,8 @@ router_core = APIRouter(prefix="/api/v1", dependencies=[Depends(require_token)])
 router_teach = APIRouter(prefix="/api/v1", dependencies=[Depends(require_token)],
                          tags=["teach"])
 
-ARTIFACT_ALLOWLIST = {"meta.json", "stage_a.json", "extraction.json",
+ARTIFACT_ALLOWLIST = {"bulk_report.json", "bulk_report.md",
+                      "meta.json", "stage_a.json", "extraction.json",
                       "findings.json", "report.json", "report.md", "sap_compare.json",
                       "web_evidence.json", "reasoning.md", "template_compare.json"}
 
@@ -388,6 +389,71 @@ def check_routing(routing: str = Form(""), account: str = Form(""),
             "web": web_rows, "web_hint": web_hint}
 
 
+# ---------------------------------------------------------------- bulk --------
+@router_teach.post("/bulk", tags=["bulk"])
+def bulk(file: UploadFile = File(...), case: str = Form("auto"),
+         web: bool = Form(False),
+         refs: list[UploadFile] = File(default=[])):
+    """MASS table validation (V-wave): a canonical template or a raw SE16N
+    export -> per-row buckets + a full-value result workbook in inbox/ and
+    masked bulk_report artifacts under runs/. Always async (202 + job)."""
+    if case not in ("auto", "bank", "tax", "region"):
+        raise api_error(400, "bad_request",
+                        "case must be auto, bank, tax or region")
+    name = file.filename or "table.xlsx"
+    if Path(name).suffix.lower() not in (".xlsx", ".xlsm"):
+        raise api_error(400, "bad_request", "bulk input must be .xlsx/.xlsm")
+    path = save_upload("bulk__" + name, file.file.read())
+    ref_paths = [save_upload("bulkref__" + (r.filename or "ref.xlsx"),
+                             r.file.read()) for r in refs or []]
+
+    def work(log, job):
+        job.label = name
+        from ..bulk import run_bulk
+        from ..bulk.reader import BulkInputError
+        try:
+            with jobs.GATE.slot(job):
+                res, arts = run_bulk(path, case=case, refs=ref_paths, web=web,
+                                     progress=log)
+        except BulkInputError as e:
+            raise RuntimeError(str(e)) from e
+        out = {"bulk_id": arts["bulk_id"], "case": res.case,
+               "summary": res.summary(),
+               "result_name": Path(arts["result_xlsx"]).name}
+        log(f"buckets: {res.counts()}")
+        return out
+
+    job = jobs.REGISTRY.submit("bulk", work, pass_job=True)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"job_id": job.id}, status_code=202)
+
+
+@router_teach.get("/bulk/templates/{case}", tags=["bulk"])
+def bulk_template(case: str):
+    from fastapi.responses import FileResponse
+    if case not in ("bank", "tax", "region"):
+        raise api_error(404, "not_found", "unknown template")
+    fname = {"bank": "banking_template.xlsx", "tax": "tax_template.xlsx",
+             "region": "postal_region_template.xlsx"}[case]
+    p = config.TEMPLATES_DIR / "bulk" / fname
+    if not p.exists():
+        raise api_error(404, "not_found",
+                        "template not generated — run tools/gen_bulk_templates.py")
+    return FileResponse(p, filename=fname, headers={"Cache-Control": "no-store"})
+
+
+@router_teach.get("/bulk/{bulk_id}/result", tags=["bulk"])
+def bulk_result(bulk_id: str):
+    """The FULL-VALUE validated workbook from inbox/ (operator's own data)."""
+    from fastapi.responses import FileResponse
+    rid = "".join(c for c in bulk_id if c in "0123456789abcdef")
+    hits = sorted(config.INBOX_DIR.glob(f"{rid}__*_validated.xlsx"))
+    if not hits:
+        raise api_error(404, "not_found", f"no bulk result for {bulk_id}")
+    return FileResponse(hits[-1], filename=hits[-1].name.split("__", 1)[-1],
+                        headers={"Cache-Control": "no-store"})
+
+
 # ---------------------------------------------------------------- runs --------
 @router_core.get("/runs", tags=["runs"])
 def runs(limit: int = 50, doc_class: str | None = None) -> list[dict]:
@@ -455,7 +521,7 @@ def job_cancel(job_id: str) -> dict:
     j = jobs.REGISTRY.get(job_id)
     if not j:
         raise api_error(404, "not_found", f"job {job_id} not found")
-    if j.kind != "check":
+    if j.kind not in ("check", "bulk"):
         raise api_error(409, "conflict", f"jobs of kind '{j.kind}' are not cancelable")
     if j.status in ("done", "error", "canceled"):
         raise api_error(409, "conflict", f"job already {j.status}")

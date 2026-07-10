@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — bulk validation{% endblock %}
+{% block content %}
+<h1>Bulk validation</h1>
+<p class="meta">Validate THOUSANDS of rows from SAP exports: bank details, tax
+numbers, postal codes / regions. Upload the matching template (strict headers)
+or a raw SE16N export — headers are recognized either way. Verdicts per row:
+VALID / SUSPICIOUS / INVALID / SKIPPED with cited BULK-### rules.</p>
+
+<section class="bulk-cards">
+  <div class="card">
+    <h2>Banking <span class="meta">BUT0BK</span></h2>
+    <p class="meta">ABA 3-7-1 checksum, Fed prefixes, IBAN mod-97, SWIFT,
+    national key shapes, duplicates. Optional live registry check.</p>
+    <a class="btn" href="/api/v1/bulk/templates/bank">Download template</a>
+  </div>
+  <div class="card">
+    <h2>Tax numbers <span class="meta">BP tax categories</span></h2>
+    <p class="meta">~45-country catalog: format + checksum per category,
+    wrong-country detection (a DE VAT under US0), masked values, duplicates.</p>
+    <a class="btn" href="/api/v1/bulk/templates/tax">Download template</a>
+  </div>
+  <div class="card">
+    <h2>Postal / region <span class="meta">addresses</span></h2>
+    <p class="meta">Region membership against your attached T005S export +
+    postal-code format per country. Attach T005S (and optionally T005U).</p>
+    <a class="btn" href="/api/v1/bulk/templates/region">Download template</a>
+  </div>
+</section>
+
+<section>
+  <div class="actions">
+    <span class="seg" id="bulk-case-seg">
+      <button type="button" class="active" data-v="auto">Auto-detect</button>
+      <button type="button" data-v="bank">Banking</button>
+      <button type="button" data-v="tax">Tax</button>
+      <button type="button" data-v="region">Postal/Region</button>
+    </span>
+    <label class="meta" id="bulk-web-box"><input type="checkbox" id="bulk-web">
+      live registry check (bank; unique routings, cached, slower)</label>
+    <button type="button" id="bulk-ref-attach">+ reference (T005S / T005U, for regions)</button>
+    <span class="meta" id="bulk-ref-names"></span>
+    <input type="file" id="bulk-ref-input" accept=".xlsx,.xlsm" multiple hidden>
+  </div>
+  <div class="drop" id="bulk-drop">Drop the filled template or a raw SE16N export (.xlsx/.xlsm) here — or click to choose</div>
+  <input type="file" id="bulk-file-input" accept=".xlsx,.xlsm" hidden>
+  <div class="actions" id="bulk-progress-row" hidden>
+    <progress id="bulk-progress" max="100" value="0" style="flex:1"></progress>
+    <span class="meta" id="bulk-stage"></span>
+    <button type="button" id="bulk-cancel" hidden>Cancel</button>
+  </div>
+  <pre id="bulk-log" hidden></pre>
+</section>
+
+<section id="bulk-result" hidden>
+  <h2>Result <span class="meta" id="bulk-result-file"></span></h2>
+  <div class="actions">
+    <a class="btn" id="bulk-dl-result" href="#">Download validated workbook (full values)</a>
+    <a class="btn" id="bulk-dl-report" href="#">Report .md (masked)</a>
+    <a class="btn" id="bulk-dl-json" href="#">Report .json (masked)</a>
+  </div>
+  <table class="cmp-table" id="bulk-counts"><tbody></tbody></table>
+  <h3>Top rules</h3>
+  <table class="cmp-table" id="bulk-top"><tbody></tbody></table>
+  <h3>First problem rows <span class="meta">masked values — the full data is in the workbook</span></h3>
+  <div style="overflow-x:auto">
+    <table class="cmp-table" id="bulk-problems">
+      <thead><tr><th>Row</th><th>Partner</th><th>Bucket</th><th>Rules</th><th>Reasons</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<script>mdmdoc.initBulk && mdmdoc.initBulk();</script>
+{% endblock %}

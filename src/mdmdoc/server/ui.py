@@ -389,6 +389,11 @@ def _tax_history() -> list[dict]:
     return out
 
 
+@router_ui.get("/ui/bulk", response_class=HTMLResponse)
+def bulk_page(request: Request):
+    return templates.TemplateResponse(request, "bulk.html", _ctx(page="bulk"))
+
+
 @router_ui.get("/ui/tax", response_class=HTMLResponse)
 def tax_page(request: Request):
     return templates.TemplateResponse(request, "tax.html", _ctx(

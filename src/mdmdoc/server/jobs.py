@@ -172,7 +172,8 @@ class Job:
                 "stage": self.stage, "percent": self.percent,
                 "estimate_s": self.estimate_s, "label": self.label,
                 "queue_pos": GATE.position(self.id),
-                "cancelable": self.kind == "check" and self.status in ("queued", "running")}
+                "cancelable": self.kind in ("check", "bulk")
+                and self.status in ("queued", "running")}
 
 
 class JobRegistry:

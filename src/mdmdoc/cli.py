@@ -29,6 +29,30 @@ def _clean_path(parts) -> str:
     return raw
 
 
+def _cmd_bulk(args) -> int:
+    from pathlib import Path
+
+    from .bulk import run_bulk
+    from .bulk.reader import BulkInputError
+    try:
+        res, arts = run_bulk(Path(args.path), case=args.case,
+                             refs=[Path(r) for r in args.ref],
+                             web=args.web, progress=print)
+    except BulkInputError as e:
+        print(f"bulk input error: {e}")
+        return 2
+    print()
+    for b, n in res.counts().items():
+        print(f"{b:<11} {n}")
+    for rid, n in res.top_reasons():
+        print(f"  {rid}: {n} row(s)")
+    for note in res.notes:
+        print(f"note: {note}")
+    print(f"\nresult workbook: {arts['result_xlsx']}")
+    print(f"masked report:   {arts['report_md']}")
+    return 0
+
+
 def _cmd_check(args, doc_class: str) -> int:
     from .pipeline import UnreadableDocument, run_check
     from .verdict import exit_code
@@ -349,6 +373,17 @@ def main(argv: list[str] | None = None) -> int:
                         "scorers (strict fidelity + lenient column) — no model calls; "
                         "--tag records the anchor in history")
     p.set_defaults(func=_cmd_eval)
+
+    p = sub.add_parser("bulk", help="MASS table validation: bank details / tax "
+                       "numbers / postal-region from a template or raw SE16N export")
+    p.add_argument("path", help="xlsx/xlsm — filled template or raw export")
+    p.add_argument("--case", default="auto",
+                   choices=["auto", "bank", "tax", "region"])
+    p.add_argument("--ref", action="append", default=[],
+                   help="reference export (T005S/T005U) — repeatable")
+    p.add_argument("--web", action="store_true",
+                   help="bank case: live routing-existence check (cached)")
+    p.set_defaults(func=_cmd_bulk)
 
     p = sub.add_parser("synth-gen",
                        help="(re)generate the PII-free synthetic eval corpus "

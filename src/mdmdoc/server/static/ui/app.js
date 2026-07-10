@@ -282,6 +282,104 @@ window.mdmdoc = (() => {
     };
   }
 
+  /* ---------- bulk page (V-wave) ----------------------------------------- */
+  function initBulk() {
+    const drop = document.getElementById("bulk-drop");
+    if (!drop) return;
+    const input = document.getElementById("bulk-file-input");
+    const log = document.getElementById("bulk-log");
+    const seg = document.getElementById("bulk-case-seg");
+    const webBox = document.getElementById("bulk-web");
+    const refBtn = document.getElementById("bulk-ref-attach");
+    const refInput = document.getElementById("bulk-ref-input");
+    const refNames = document.getElementById("bulk-ref-names");
+    const progRow = document.getElementById("bulk-progress-row");
+    const bar = document.getElementById("bulk-progress");
+    const stageEl = document.getElementById("bulk-stage");
+    const cancelBtn = document.getElementById("bulk-cancel");
+    let refs = [];
+
+    seg.querySelectorAll("button").forEach(b => b.onclick = () => {
+      seg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+    });
+    const caseOf = () => seg.querySelector(".active").dataset.v;
+    const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+
+    refBtn.onclick = () => refInput.click();
+    refInput.onchange = () => {
+      refs = [...refInput.files];
+      refNames.textContent = refs.length ? refs.map(f => f.name).join(", ") + " ✓" : "";
+    };
+
+    async function send(file) {
+      log.hidden = false; log.textContent = "";
+      say(`uploading ${file.name} (case: ${caseOf()})…`);
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("case", caseOf());
+      if (webBox && webBox.checked) fd.append("web", "true");
+      refs.forEach(r => fd.append("refs", r));
+      try {
+        const { job_id } = await api("/api/v1/bulk", { method: "POST", body: fd });
+        progRow.hidden = false; cancelBtn.hidden = false;
+        cancelBtn.onclick = async () => {
+          cancelBtn.disabled = true;
+          try { await api(`/api/v1/jobs/${job_id}/cancel`, { method: "POST" }); }
+          catch (e) { /* already done */ }
+        };
+        let n = 0;
+        pollJob(job_id, (l) => { say(l); n += 1; bar.value = Math.min(95, n * 6); },
+          (res) => { cancelBtn.hidden = true; bar.value = 100; renderResult(res); },
+          (err) => { cancelBtn.hidden = true; say("ERROR: " + err); },
+          (j) => { if (j.stage) stageEl.textContent = j.stage; });
+      } catch (e) { say("ERROR: " + e.message); }
+    }
+
+    async function renderResult(res) {
+      const box = document.getElementById("bulk-result");
+      box.hidden = false;
+      document.getElementById("bulk-result-file").textContent =
+        `${res.summary.source_file} — ${res.case} (${res.summary.source_kind}), ${res.summary.total} rows`;
+      document.getElementById("bulk-dl-result").href = `/api/v1/bulk/${res.bulk_id}/result`;
+      document.getElementById("bulk-dl-report").href = `/api/v1/runs/${res.bulk_id}/artifacts/bulk_report.md`;
+      document.getElementById("bulk-dl-json").href = `/api/v1/runs/${res.bulk_id}/artifacts/bulk_report.json`;
+      const counts = document.querySelector("#bulk-counts tbody");
+      counts.innerHTML = "";
+      Object.entries(res.summary.counts).forEach(([b, n]) => {
+        counts.innerHTML += `<tr><td>${b}</td><td>${n}</td></tr>`;
+      });
+      const top = document.querySelector("#bulk-top tbody");
+      top.innerHTML = "";
+      (res.summary.top_rules || []).forEach(t => {
+        top.innerHTML += `<tr><td><code>${t.rule_id}</code></td><td>${t.rows} rows</td></tr>`;
+      });
+      try {
+        const rep = await api(`/api/v1/runs/${res.bulk_id}/artifacts/bulk_report.json`);
+        const tb = document.querySelector("#bulk-problems tbody");
+        tb.innerHTML = "";
+        (rep.problem_rows || []).slice(0, 200).forEach(r => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${r.row}</td><td>${r.partner}</td>` +
+            `<td><span class="chip chip--${r.bucket === "INVALID" ? "CRITICAL" : r.bucket === "SUSPICIOUS" ? "WARNING" : "NOTE"}">${r.bucket}</span></td>` +
+            `<td><code>${(r.rules || []).join(", ")}</code></td><td></td>`;
+          tr.lastElementChild.textContent = (r.reasons || []).join(" | ");
+          tb.appendChild(tr);
+        });
+      } catch (e) { say("report fetch failed: " + e.message); }
+    }
+
+    drop.onclick = () => input.click();
+    input.onchange = () => input.files[0] && send(input.files[0]);
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("hover"); };
+    drop.ondragleave = () => drop.classList.remove("hover");
+    drop.ondrop = (e) => {
+      e.preventDefault(); drop.classList.remove("hover");
+      const f = e.dataTransfer.files[0];
+      if (f) send(f);
+    };
+  }
+
   /* ---------- run page: lazy artifacts ----------------------------------- */
   function initArtifacts() {
     document.querySelectorAll("details[data-artifact]").forEach(d => {
@@ -817,5 +915,5 @@ window.mdmdoc = (() => {
 
   return { api, pollJob, initDropZone, initTplCompare, initValidRate, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
-           initRetrainWatch };
+           initRetrainWatch, initBulk };
 })();
