@@ -111,3 +111,58 @@ rules:
     severity: WARNING
     verdict_effect: WARNING
     message: "W-9 appears unsigned — note for review (blocking only if packet rules say so)."
+
+  # --- W-8 family (subtype schema: legal_name/chapter statuses/foreign_tin) ---
+  # All five are experimental + PENDING by design (quality wave QW8-B): the
+  # approved W9-030 already sends every W-8 to manual review, so shipping these
+  # changes NO verdict until Egor approves them (and decides W9-030's fate).
+
+  - id: W8-001
+    name: w8_unsigned
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {flag_false: signed}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "W-8 Certification Part is not signed — an unsigned W-8 is not valid foreign-status evidence."
+
+  - id: W8-002
+    name: w8_no_legal_name
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {field_missing: legal_name}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "W-8 Part I beneficial-owner name is missing/unreadable — it must feed SAP Name 1."
+
+  - id: W8-003
+    name: w8_ch4_cert_missing
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {check: w8_ch4_cert_missing, field: chapter4_status}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Chapter-4 (FATCA) status is claimed without a completed certification part: {detail}."
+
+  - id: W8-004
+    name: w8_stale
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {check: date_older_than, field: sign_date, args: {years: 3}}
+    severity: NOTE
+    verdict_effect: null
+    message: "W-8 signature date {value} is older than ~3 years — W-8 forms expire after the third full calendar year; consider requesting a fresh one."
+
+  - id: W8-005
+    name: w8_undated
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {field_missing: sign_date}
+    severity: NOTE
+    verdict_effect: null
+    message: "W-8 carries no signature date — expiry cannot be tracked."

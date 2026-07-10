@@ -75,7 +75,7 @@ def python_predicates(py_root: Path = PY_ROOT) -> set[str]:
     m = re.search(r"REGISTRY\s*=\s*\{(.*?)\}", text, re.S)
     if not m:
         raise RuntimeError("could not find REGISTRY in predicates.py")
-    return set(re.findall(r'"([a-z_]+)"\s*:', m.group(1)))
+    return set(re.findall(r'"([a-z0-9_]+)"\s*:', m.group(1)))
 
 
 def abap_check_names(abap_root: Path = ABAP_ROOT) -> set[str]:
@@ -83,7 +83,7 @@ def abap_check_names(abap_root: Path = ABAP_ROOT) -> set[str]:
     WHEN-labels of zcl_mdmdoc_rules.clas.abap (``WHEN `name`.``) minus the
     when-operators."""
     text = (abap_root / "src" / "zcl_mdmdoc_rules.clas.abap").read_text()
-    labels = set(re.findall(r"WHEN\s+`([a-z_]+)`", text))
+    labels = set(re.findall(r"WHEN\s+`([a-z0-9_]+)`", text))
     return labels - _ABAP_WHEN_OPERATORS
 
 

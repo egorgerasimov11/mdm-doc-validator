@@ -195,6 +195,18 @@ def date_older_than(value, flds, args, tables):
     return False, ""
 
 
+def w8_ch4_cert_missing(value, flds, args, tables):
+    """W-8BEN-E: Part I claims a chapter-4 (FATCA) status but no matching
+    certification Part is completed — the claim is unsupported. Fires only on
+    the W-8 schema (both fields exist); silent when no status is claimed."""
+    status = str(flds.get("chapter4_status") or "").strip()
+    cert = str(flds.get("chapter4_cert_section") or "").strip()
+    if not status or cert:
+        return False, ""
+    return True, (f"chapter-4 status '{status}' is claimed but no "
+                  "certification part is completed")
+
+
 # [CONST:ev_positive_phrases]
 _EV_POSITIVE = ("computer generated", "computer-generated", "system generated",
                 "system-generated", "electronically", "electronic confirmation",
@@ -267,4 +279,5 @@ REGISTRY = {
     "individual_with_business_name_and_ein": individual_with_business_name_and_ein,
     "line_swap_suspect": line_swap_suspect,
     "date_older_than": date_older_than,
+    "w8_ch4_cert_missing": w8_ch4_cert_missing,
 }

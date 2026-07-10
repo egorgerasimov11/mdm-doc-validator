@@ -28,6 +28,7 @@ is listed under "Pending ABAP logic ports".
 - individual_with_business_name_and_ein
 - line_swap_suspect
 - date_older_than
+- w8_ch4_cert_missing
 
 ## Guards (stage_b deterministic guards ↔ `zcl_mdmdoc_extract` `[GUARD:x]` markers)
 Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`),

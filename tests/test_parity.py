@@ -29,7 +29,7 @@ def _need_abap() -> None:
 PREDICATES = {"unsigned_no_evidence", "unsigned_typed_block", "field_empty",
               "no_bank_ids", "swift_valid", "iban_valid", "ein_shape",
               "tin_type_vs_classification", "individual_with_business_name_and_ein",
-              "line_swap_suspect", "date_older_than"}
+              "line_swap_suspect", "date_older_than", "w8_ch4_cert_missing"}
 
 
 def test_python_predicates_match_registry():
