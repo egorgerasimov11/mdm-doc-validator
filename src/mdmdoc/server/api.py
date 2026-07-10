@@ -77,26 +77,46 @@ def config_mode() -> str:
     return os.environ.get("MDMDOC_MODE", "full")
 
 
-def _rules_path(doc_class: str) -> Path:
+def _rules_text(doc_class: str) -> str:
     from .. import rules_io
-    return rules_io.rules_path(doc_class)
+    return rules_io.rules_text(doc_class)
 
 
 @router_core.get("/rules", tags=["system"])
 def get_rules(doc_class: str = "bank") -> dict:
     import yaml
-    p = _rules_path(doc_class)
-    if not p.exists():
-        raise api_error(404, "not_found", f"rules file for {doc_class} not found")
-    return yaml.safe_load(p.read_text()) or {}
+    text = _rules_text(doc_class)
+    if not text:
+        raise api_error(404, "not_found", f"rules for {doc_class} not found")
+    return yaml.safe_load(text) or {}
 
 
 @router_core.get("/rules/raw", response_class=PlainTextResponse, tags=["system"])
 def get_rules_raw(doc_class: str = "bank") -> str:
-    p = _rules_path(doc_class)
-    if not p.exists():
-        raise api_error(404, "not_found", f"rules file for {doc_class} not found")
-    return p.read_text()
+    text = _rules_text(doc_class)
+    if not text:
+        raise api_error(404, "not_found", f"rules for {doc_class} not found")
+    return text
+
+
+@router_teach.get("/rules/unified", response_class=PlainTextResponse, tags=["teach"])
+def get_rules_unified() -> str:
+    """The ONE physical rules file (D9) — every class section in one text."""
+    from .. import rules_io
+    text = rules_io.unified_text()
+    if not text:
+        raise api_error(404, "not_found", "unified rules file not found")
+    return text
+
+
+@router_teach.post("/rules/unified", tags=["teach"])
+def save_rules_unified(body: dict) -> dict:
+    from .. import rules_io
+    try:
+        counts = rules_io.save_unified(str(body.get("text", "")))
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    return {"ok": True, "counts": counts}
 
 
 # ---- rule authoring (operator-only): edit / delete / regenerate for SAP ------
@@ -132,7 +152,7 @@ def approve_rule(doc_class: str, body: dict) -> dict:
     decision = body.get("decision", "approved")
     if decision not in ("approved", "rejected", "pending"):
         raise api_error(400, "bad_request", "decision must be approved/rejected/pending")
-    cfg = yaml.safe_load(_rules_path(doc_class).read_text() or "") or {}
+    cfg = yaml.safe_load(_rules_text(doc_class) or "") or {}
     by_id = {str(r.get("id")): r for r in cfg.get("rules", []) if isinstance(r, dict)}
     if body.get("all_pending"):
         store = rule_approvals.load()

@@ -152,7 +152,7 @@ def apply_change(text: str, action: str, rule: dict, rule_id: str = "") -> str:
 # ------------------------------------------------------------- validation -----
 def _doc_types(doc_class: str) -> set[str]:
     try:
-        cfg = yaml.safe_load(rules_io.rules_path(doc_class).read_text()) or {}
+        cfg = yaml.safe_load(rules_io.rules_text(doc_class)) or {}
         return set(cfg.get("doc_types", []) or [])
     except Exception:
         return set()
@@ -270,7 +270,7 @@ def propose(run_id: str, feedback: str, rule_id: str = "") -> dict:
     specific fired rule the operator clicked 'dispute' on. Never writes."""
     from . import config, model_client as mc
     ctx = _load_ctx(run_id)
-    cur_yaml = rules_io.rules_path(ctx["doc_class"]).read_text()
+    cur_yaml = rules_io.rules_text(ctx["doc_class"])
     system = (config.PROMPTS_DIR / "system_rule_propose.txt").read_text()
     obj, _ok = mc.generate_json("TEXT_STRONG", _prompt(feedback, ctx, cur_yaml, rule_id),
                                 system=system,

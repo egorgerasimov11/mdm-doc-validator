@@ -3,16 +3,13 @@
 {% block content %}
 <h1>Rules</h1>
 <p class="meta">The model only classifies and extracts — <strong>verdicts come only from these
-rules</strong>. Edit the YAML, save, and (optionally) push to the SAP/ABAP side. Delete a rule by
-removing its block; replace a whole "skill" by pasting a new file.</p>
+rules</strong>. This is the ONE physical rules file: every class section
+('--- # doc_class: …'), every learned and skill-sourced rule, in one place.
+Edit, save, and (optionally) push to the SAP/ABAP side.</p>
 
 <section>
   <div class="header-row" style="gap:12px">
-    <span class="seg" data-doc>
-      <button type="button" class="{{ 'active' if doc_class == 'bank' }}" data-v="bank">banking</button>
-      <button type="button" class="{{ 'active' if doc_class == 'w9' }}" data-v="w9">W-9</button>
-    </span>
-    <span class="meta">{{ doc_class }} — {{ rule_count }} rule(s)</span>
+    <span class="meta">{{ rule_count }} rule(s) across all sections</span>
   </div>
 
   <textarea id="rules-yaml" spellcheck="false"
@@ -41,18 +38,14 @@ removing its block; replace a whole "skill" by pasting a new file.</p>
   var flash = document.getElementById('rules-flash');
   function say(msg, bad) { flash.textContent = msg; flash.className = 'meta' + (bad ? ' bad' : ''); }
 
-  document.querySelectorAll('[data-doc] button').forEach(function (b) {
-    b.addEventListener('click', function () { location.href = '/ui/rules?doc_class=' + b.dataset.v; });
-  });
-
   document.getElementById('save-btn').addEventListener('click', function () {
     say('saving…');
-    fetch('/api/v1/rules/' + docClass + '/raw', {
+    fetch('/api/v1/rules/unified', {
       method: 'POST', headers: headers(),
-      body: JSON.stringify({ yaml: document.getElementById('rules-yaml').value })
+      body: JSON.stringify({ text: document.getElementById('rules-yaml').value })
     }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
-        if (res.ok) say('saved — ' + res.j.rules + ' rule(s)');
+        if (res.ok) say('saved — ' + JSON.stringify(res.j.counts));
         else say((res.j.detail && res.j.detail.message) || 'save failed', true);
       }).catch(function (e) { say('save failed: ' + e, true); });
   });

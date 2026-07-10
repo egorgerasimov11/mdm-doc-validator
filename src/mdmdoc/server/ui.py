@@ -322,18 +322,23 @@ def debug_page(request: Request):
 def rules_page(request: Request, doc_class: str = "bank"):
     """Edit the verdict rules (rules/*.yaml) — the model never decides verdicts.
     Save writes the YAML; 'Regenerate for SAP' pushes them to the ABAP side."""
-    from .api import _rules_path
+    from .. import rules_io
     doc_class = "w9" if doc_class == "w9" else "bank"
-    p = _rules_path(doc_class)
-    text = p.read_text() if p.exists() else ""
+    text = rules_io.unified_text() or rules_io.rules_text(doc_class)
+    unified = bool(rules_io.unified_text())
     n = 0
     try:
         import yaml
-        n = len((yaml.safe_load(text) or {}).get("rules") or [])
+        if unified:
+            n = sum(len((yaml.safe_load(b) or {}).get("rules") or [])
+                    for b in rules_io._split_sections(text).values())
+        else:
+            n = len((yaml.safe_load(text) or {}).get("rules") or [])
     except Exception:  # rendering must never fail on bad YAML
         pass
     return templates.TemplateResponse(request, "rules.html", _ctx(
-        page="rules", doc_class=doc_class, yaml_text=text, rule_count=n))
+        page="rules", doc_class=doc_class, yaml_text=text, rule_count=n,
+        unified=unified))
 
 
 @router_ui.get("/ui/rules/approve", response_class=HTMLResponse)
@@ -343,9 +348,9 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
     import yaml
 
     from .. import rule_approvals
-    from .api import _rules_path
+    from .. import rules_io
     doc_class = "w9" if doc_class == "w9" else "bank"
-    cfg = yaml.safe_load(_rules_path(doc_class).read_text() or "") or {}
+    cfg = yaml.safe_load(rules_io.rules_text(doc_class) or "") or {}
     store = rule_approvals.load()
     rows = []
     for r in cfg.get("rules", []) or []:

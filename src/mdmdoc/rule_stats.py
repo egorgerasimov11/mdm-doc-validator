@@ -162,8 +162,8 @@ def build(runs_dir: Path | None = None, labels_path: Path | None = None) -> dict
     rows = collect(runs_dir, labels_path)
     rules_by_class = {}
     for dc in ("bank", "w9"):
-        p = rules_io.rules_path(dc)
-        cfg = yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}
+        text = rules_io.rules_text(dc)
+        cfg = yaml.safe_load(text) if text else {}
         rules_by_class[dc] = [r for r in (cfg or {}).get("rules", []) if isinstance(r, dict)]
     stats = compute(rows, rules_by_class, approvals=rule_approvals.load())
     return {"ts": runstore.now_iso(), "per_rule": stats, "proposals": propose(stats)}

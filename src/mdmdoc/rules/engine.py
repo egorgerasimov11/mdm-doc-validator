@@ -40,8 +40,8 @@ class Finding:
 
 
 def load_rules(doc_class: str) -> dict:
-    p = config.RULES_DIR / ("banking.yaml" if doc_class == "bank" else "w9.yaml")
-    return yaml.safe_load(p.read_text()) or {}
+    from .. import rules_io
+    return yaml.safe_load(rules_io.rules_text(doc_class)) or {}
 
 
 def _field_str(flds: dict, name: str) -> str:
