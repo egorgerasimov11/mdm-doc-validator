@@ -716,3 +716,76 @@ only then MDG BAdI activation).
 9. Python and ABAP are two targets of one logic — rule data auto-syncs, logic
    hand-ports with receipts, `check_parity.py` fails loudly on drift.
 10. No component ever auto-starts an Ollama server.
+
+## 14. The D-wave: operator console + a learning loop that actually learns (2026-07-10)
+
+### 14.1 Run control plane (`runctl.py`)
+`run_check(cancel=, on_stage=, overrides=, effort=, template_path=)` binds a
+`RunControl` into a **ContextVar** for the duration of the run — thread-isolated
+by construction (each server job is its own thread), zero env mutation.
+`runctl.checkpoint(stage, pct)` reports progress and raises `CheckCanceled`
+cooperatively; checkpoints sit between pipeline stages, between vision calls
+and before the strong tier. A canceled run writes **no artifacts**.
+Config knobs (`sig_vision_cap`, `ladder_*`, `time_budget_s`) resolve
+`run override > env > default`.
+
+### 14.2 Queue, cancel, progress
+`jobs.PipelineGate` (over the same `PIPELINE_LOCK`) gives check jobs FAIR FIFO
+admission with visible positions; `POST /api/v1/jobs/{id}/cancel` kills a
+queued job instantly and a running one at its next checkpoint (an in-flight
+Ollama call finishes first). The dashboard shows a live queue panel (position,
+stage, per-job progress, Cancel) and a `<progress>` bar driven by checkpoint
+percents + the estimate ETA. Multi-file drops enqueue one job per file.
+
+### 14.3 Effort slider (replaces thorough/engine controls)
+`config.effort_profile(1..5)`: 1 deterministic instant → 3 today's auto
+(byte-identical) → 5 llm-first + extended strong-tier thinking
+(`num_predict` 4096, `think=true`) + all signature probes + a deeper ladder.
+The FAST tier's model call is **byte-frozen** (regression-tested) — effort may
+widen only the strong tier. `settings.json: default_effort`; `meta.effort`.
+
+### 14.4 Reasoning export
+Every run writes `reasoning.md` — the full decision trace (perception, tiers,
+every guard warning, signature votes/trail, ladder, confidence reasons, a
+table of EVERY rule evaluated incl. approval-gate skips via
+`run_rules(trace=[])`, compare tables, the verdict fold). Always MASKED and
+strict-scrubbed: its purpose is to be pasted into an external LLM for critique.
+
+### 14.5 Containers and the template stream
+`.msg` parses for real now (olefile MAPI reader); `.xlsx/.xlsm` with
+`xl/embeddings` become CONTAINERS (the request workbook's embedded support
+docs are the evidence); a request-form workbook with no embedded docs raises a
+clear error pointing at the Template slot. `template_form.py` parses the
+filled request workbook (generic label→value scan, no pinned coordinates) and
+`sap_compare.compare(prefix="TPL")` renders a second compare stream
+(`TPL-00x` findings, fail-closed `TPL-014`, `template_compare.json`).
+
+### 14.6 Unified rules file + skill sources
+`rules/rules.yaml` — the ONE physical rules file: multi-document YAML with
+`--- # doc_class: X` sections whose text stays byte-identical to the old
+per-class files (approval hashes and comments survive; the textual splice
+tooling is unchanged). `rules_io.rules_text/save_rules/save_unified` are the
+only readers/writers; a legacy two-file checkout still works as a fallback.
+`skill_import.py` attaches ANY skill as a rule source: checker skills parse
+deterministically, arbitrary text goes through the strong model; every
+imported rule lands PENDING (`source: skill:<name>`), re-import replaces only
+that skill's own marked segment.
+
+### 14.7 The closed learning loop
+* fresh few-shot exemplars inject at runtime for EVERY model including the
+  baked `mdmdoc-extract` (deduped against `models/exemplar_values.json`) — a
+  correction reaches the NEXT document immediately;
+* a label NOTE is auto-classified (`learning.note_to_rule`): a clean ADDITIVE
+  rule proposal is appended as PENDING (source operator, tier learned);
+  anything touching existing rules queues in `rules/proposals.jsonl`;
+* "Mark valid ✓" = a confirmed ACCEPT label in one click;
+* `dataset/patterns.jsonl` records a PII-free shape fingerprint per label;
+  ≥3 matching valid-marks add a `PATTERN-1` NOTE and damp ONE weak confidence
+  signal (medium→high only — hard signals and verdicts are untouched);
+* 👍/👎 (`dataset/ratings.jsonl`): a 👎 tops the training queue and flags the run;
+* `error_source` finally routes: `err_<source>` scenario tags + `rule_wrong`
+  feeds the note-to-rule channel.
+
+Invariant unchanged everywhere: **verdicts come only from human-approved
+rules** — every learning channel produces PENDING artifacts or informational
+signals, never a verdict change.
