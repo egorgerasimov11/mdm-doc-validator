@@ -113,7 +113,12 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
 
     container_note = ""
     runctl.checkpoint("resolve", 2)
-    if path.suffix.lower() == ".zip" or path.suffix.lower() in (".eml", ".msg"):
+    _sfx = path.suffix.lower()
+    _is_wb_container = False
+    if _sfx in (".xlsx", ".xlsm"):
+        from . import office_embed
+        _is_wb_container = office_embed.workbook_has_embeddings(path)
+    if _sfx == ".zip" or _sfx in (".eml", ".msg") or _is_wb_container:
         path, container_note = _resolve_container(path, run_id)
     if doc_class in ("auto", ""):
         doc_class = stage_a.sniff_doc_class(path)
@@ -413,7 +418,7 @@ def _resolve_container(cpath: Path, run_id: str) -> tuple[Path, str]:
     outranks the bare email body (the invoice IS the evidence to judge). The
     report states what was chosen and what was skipped. Full multi-document
     batch mode is on the roadmap."""
-    from . import fields as fdefs, ocr
+    from . import fields as fdefs, ocr, office_embed
     out = config.INBOX_DIR / f"{run_id}__packet"
     ext0 = cpath.suffix.lower()
     if ext0 == ".zip":
@@ -421,13 +426,33 @@ def _resolve_container(cpath: Path, run_id: str) -> tuple[Path, str]:
         out.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(cpath) as z:
             z.extractall(out)  # ZipFile.extract sanitizes absolute/.. member names
-    else:  # .eml / .msg — analyse the attached documents, not the mail body
+    elif ext0 in (".xlsx", ".xlsm"):
+        # SAP request workbook carrying its support documents as embedded OLE
+        # objects (xl/embeddings) — the documents are the evidence, not the form
+        saved = office_embed.extract_workbook_embeddings(cpath, out)
+        if not saved:
+            raise UnreadableDocument(
+                "workbook contains no embedded documents — attach the actual "
+                "bank/W-9 document, or upload this workbook in the Template "
+                "slot to compare its values against a document")
+    elif ext0 == ".msg":
+        # real MAPI parsing (the stdlib email module cannot read OLE .msg —
+        # this path silently yielded nothing before D7)
+        office_embed.extract_msg_attachments(cpath, out)
+        if not out.exists() or not any(out.iterdir()):
+            return cpath, ""  # plain message without document attachments
+    else:  # .eml — analyse the attached documents, not the mail body
         _extract_eml_attachments(cpath, out)
         if not out.exists():
             return cpath, ""  # plain email without document attachments
     # emails inside a zip carry their documents as attachments — expand them too
-    for eml in list(out.rglob("*.eml")) + list(out.rglob("*.msg")):
+    for eml in list(out.rglob("*.eml")):
         _extract_eml_attachments(eml, out / (eml.stem[:40] + "_attachments"))
+    for msg in list(out.rglob("*.msg")):
+        office_embed.extract_msg_attachments(msg, out / (msg.stem[:40] + "_attachments"))
+    for wb in list(out.rglob("*.xlsx")) + list(out.rglob("*.xlsm")):
+        if office_embed.workbook_has_embeddings(wb):
+            office_embed.extract_workbook_embeddings(wb, out / (wb.stem[:40] + "_embedded"))
 
     docs = []
     for p in sorted(out.rglob("*")):
@@ -441,7 +466,7 @@ def _resolve_container(cpath: Path, run_id: str) -> tuple[Path, str]:
         if ext0 in config.EMAIL_EXTS:
             return cpath, ""
         raise UnreadableDocument(
-            "zip contains no readable document (pdf/image/eml) — extract it manually")
+            "container holds no readable document (pdf/image/eml) — extract it manually")
 
     def _peek_text(p: Path) -> str:
         """Text layer, else ONE fast OCR of page 1 — the packet choice needs eyes."""

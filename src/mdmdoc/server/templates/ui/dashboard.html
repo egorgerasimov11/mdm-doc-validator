@@ -32,8 +32,8 @@
       <span id="engine-default-state"></span>
     </span>
   </div>
-  <div class="drop" id="drop">Drop PDFs, images, .eml or .zip here (several files = analysis queue) — or click to choose</div>
-  <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.eml,.zip" multiple hidden>
+  <div class="drop" id="drop">Drop PDFs, images, .eml/.msg, .zip or a request workbook (.xlsx/.xlsm with embedded docs) — several files form the analysis queue</div>
+  <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.eml,.msg,.zip,.xlsx,.xlsm" multiple hidden>
   <div class="actions" id="sap-row">
     <button type="button" id="sap-attach">+ SAP data (screenshot or table export, optional)</button>
     <input type="text" id="sap-bp" placeholder="BP # (optional)" style="width:9em" hidden>
@@ -56,6 +56,23 @@
         <a class="meta" href="/ui/debug">log →</a></li>
     {% endfor %}
   </ul>
+</section>
+
+<section>
+  <h2>Bank keys quick check <span class="meta">US routing + account, no document</span></h2>
+  <div class="actions" id="bankcheck-row">
+    <input type="text" id="bc-routing" placeholder="routing number (9 digits)" style="width:14em">
+    <input type="text" id="bc-account" placeholder="account number (optional)" style="width:14em">
+    <input type="text" id="bc-bank" placeholder="bank name (optional)" style="width:12em">
+    <label class="meta"><input type="checkbox" id="bc-web" checked> live directory check 🌐</label>
+    <button type="button" id="bc-run">Validate</button>
+  </div>
+  <div id="bc-result" hidden>
+    <p><span class="dot" id="bc-dot"></span> <strong id="bc-verdict"></strong>
+       <span class="meta" id="bc-next"></span></p>
+    <p class="meta" id="bc-hint" hidden></p>
+    <ul class="timeline" id="bc-findings"></ul>
+  </div>
 </section>
 
 <section>
