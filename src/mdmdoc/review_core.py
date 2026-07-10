@@ -228,7 +228,11 @@ def build_label(run_id: str, sub: dict) -> tuple[dict, list[str]]:
         "doc_class": doc_class,
         "doc_type_gold": str(sub.get("doc_type_gold") or pub.get("doc_type", "")),
         "fields_gold": gold_fields,
-        "verdict_gold": str(sub.get("verdict_gold") or rep.get("verdict", "")),
+        # teach_only (F4): no verdict opinion — an empty gold means "type only";
+        # the precedent then falls back to the LIVE machine verdict and eval
+        # skips verdict scoring for this label instead of inventing one
+        "verdict_gold": ("" if sub.get("teach_only")
+                         else str(sub.get("verdict_gold") or rep.get("verdict", ""))),
         "stage_a_excerpt": excerpt,
         "regex_candidates_masked": cand_masked,
         "model_predicted": {"doc_type": pub.get("doc_type"), "fields_diff": model_diff},

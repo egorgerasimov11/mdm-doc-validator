@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import config, dataset, model_client as mc, ratings, review_core, runstore
+from .. import config, dataset, fields as _fields_mod, model_client as mc, ratings, review_core, runstore
 from ..evidence import FIELD_EVIDENCE, resolve_all as resolve_evidence
 from ..report import _data_rows
 from . import jobs
@@ -189,6 +189,9 @@ def run_page(request: Request, run_id: str, flash: str = ""):
         doc_class=meta.get("doc_class", "bank"), label=label,
         gate_stale=_gate_is_stale(findings, meta.get("doc_class", "bank")),
         pending_rules=meta.get("pending_rules") or [],
+        class_doc_types=(_fields_mod.BANK_DOC_TYPES
+                         if meta.get("doc_class", "bank") == "bank"
+                         else _fields_mod.W9_DOC_TYPES),
         challenge_counts=__import__("mdmdoc.challenges",
                                     fromlist=["counts"]).counts(),
         run_is_test=runstore.is_test(meta),

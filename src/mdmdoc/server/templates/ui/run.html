@@ -27,7 +27,13 @@
   {% if run_is_test %}<span class="tag" id="test-tag" title="filed under Test runs — hidden from the Documents list">test run</span>{% endif %}
 </div>
 <p style="margin:0 0 4px">{{ report.next_step }}</p>
-<p class="meta">{{ meta.file_name }} · {{ report.doc_type }} · {{ meta.model }}{% if pub.tier == 'strong' %} · <span class="tag" title="escalated: {{ pub.escalated_because | join(', ') }}">strong tier</span>{% endif %}{% if meta.engine_effective %} ·
+<p class="meta">{{ meta.file_name }} ·
+  <span id="type-teach" data-run="{{ run_id }}" title="the document type the pipeline decided — pick the RIGHT one and press Teach if it is wrong; the model remembers the shape and the document re-runs">
+    <select id="type-select">
+      {% for t in class_doc_types %}<option value="{{ t }}" {{ 'selected' if t == report.doc_type }}>{{ t }}</option>{% endfor %}
+    </select>
+    <button type="button" id="btn-teach-type" hidden>Teach type ✓</button>
+  </span> · {{ meta.model }}{% if pub.tier == 'strong' %} · <span class="tag" title="escalated: {{ pub.escalated_because | join(', ') }}">strong tier</span>{% endif %}{% if meta.engine_effective %} ·
   <span class="tag" title="analysis engine{% if meta.engine_requested and meta.engine_requested != meta.engine_effective %} — requested {{ meta.engine_requested }}, degraded (LLM host unreachable){% endif %}">engine: {{ meta.engine_effective }}{% if meta.engine_requested and meta.engine_requested != meta.engine_effective %} ⚠{% endif %}</span>{% endif %} ·
   {{ meta.duration_s }}s · {{ meta.ts }}{% if labeled %} · <span class="tag">labeled ✓</span>{% endif %}</p>
 
@@ -190,12 +196,14 @@
 
   {% if pub.inventory %}
   <section>
-    <h2>Also on the document <span class="meta">(labeled identifiers outside the extraction schema — nothing is dropped silently)</span></h2>
+    <h2>Also on the document <span class="meta">(every labeled fact outside the extraction schema — nothing is dropped silently)</span></h2>
     <table>
       <thead><tr><th>family</th><th>label</th><th>value</th></tr></thead>
       <tbody>
       {% for it in pub.inventory %}
-        <tr><td>{{ it.family }}</td><td>{{ it.label }}</td><td>{{ it.value }}</td></tr>
+        <tr><td>{{ it.family }}</td><td>{{ it.label }}</td>
+          <td>{{ it.value }}{% if it.matches %} <span class="tag ok" title="same value the pipeline extracted into this field — shown for completeness, not news">= {{ it.matches }}</span>{% endif %}
+          {%- if it.note %} <span class="hint">{{ it.note }}</span>{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -426,6 +434,6 @@
 {% block script %}<script>
   /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest.
      initRunTabs runs FIRST so the panels exist before initProposeFix wires disputes. */
-  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initGatePanel","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch","initRerun","initTestToggle"]
+  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initGatePanel","initTeachType","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch","initRerun","initTestToggle"]
     .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
 </script>{% endblock %}

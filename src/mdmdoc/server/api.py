@@ -866,6 +866,26 @@ def submit_label(run_id: str, sub: ReviewSubmission) -> dict:
     return {**result, "retrain_job_id": job.id}
 
 
+def _spawn_rerun(meta: dict, doc_class: str, label: str) -> str:
+    """Background re-run of a run's ORIGINAL document (mark-valid / teach-type
+    aftermath): the fresh run shows the operator the effect of what they just
+    taught. Returns the job id, or "" when the original file is gone."""
+    p = Path(meta.get("path", ""))
+    if not p.exists():
+        return ""
+    is_test = runstore.is_test(meta)
+
+    def work(log, job):
+        job.label = f"{label}: {p.name}"
+        log(f"{label} — re-running with your teaching applied…")
+        out = _run_pipeline(p, doc_class, meta.get("lang", "en"), True,
+                            job=job, is_test=is_test)
+        log(f"new verdict: {out['verdict']} (run {out['run_id']})")
+        return out
+
+    return jobs.REGISTRY.submit("check", work, pass_job=True).id
+
+
 @router_teach.post("/runs/{run_id}/mark-valid", tags=["teach"])
 def mark_valid(run_id: str) -> dict:
     """One-click 'this document is VALID' (D11c + E4): a confirmed ACCEPT label
@@ -906,23 +926,48 @@ def mark_valid(run_id: str) -> dict:
                            "source": str(r.get("source", "") or ""),
                            "tier": str(r.get("tier", "") or "")})
 
-    rerun_job_id = ""
-    p = Path(meta.get("path", ""))
-    if p.exists():
-        is_test = runstore.is_test(meta)
-
-        def work(log, job):
-            job.label = f"re-run after mark-valid: {p.name}"
-            log("re-running with your valid-mark precedent applied…")
-            out = _run_pipeline(p, doc_class, meta.get("lang", "en"), True,
-                                job=job, is_test=is_test)
-            log(f"new verdict: {out['verdict']} (run {out['run_id']})")
-            return out
-
-        job = jobs.REGISTRY.submit("check", work, pass_job=True)
-        rerun_job_id = job.id
+    rerun_job_id = _spawn_rerun(meta, doc_class, "re-run after mark-valid")
     return {**result, "marked_valid": True, "challenged": challenged,
             "rerun_job_id": rerun_job_id}
+
+
+@router_teach.post("/runs/{run_id}/teach-type", tags=["teach"])
+def teach_type(run_id: str, body: dict) -> dict:
+    """F4: the operator picks the CORRECT document type from the dropdown —
+    one light label (doc_type_gold only, no verdict opinion, no retrain), the
+    pattern memory learns the shape, and the document re-runs in the background
+    so the page shows the type flip immediately."""
+    from ..fields import BANK_DOC_TYPES, W9_DOC_TYPES
+    rid = runstore.resolve_run(run_id)
+    meta = runstore.load(rid, "meta.json") if rid else None
+    if not meta:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    doc_class = meta.get("doc_class", "bank")
+    known = BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES
+    doc_type = str(body.get("doc_type") or "").strip()
+    if doc_type not in known:
+        raise api_error(400, "bad_request",
+                        f"doc_type must be one of {', '.join(known)}")
+    sub = ReviewSubmission(doc_type_gold=doc_type, teach_only=True,
+                           retrain=False, notes="", scenarios=[])
+    try:
+        result = review_core.submit_review(rid, sub.model_dump())
+    except review_core.RunNotFound:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    from .. import oplog
+    oplog.log("teach-type", run_id=rid, doc_class=doc_class,
+              detail=f"taught doc_type {doc_type}")
+    try:                                # doc-type profile (F5) — soft until it ships
+        from .. import doctype_profiles
+        doctype_profiles.capture(rid, source="taught")
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    rerun_job_id = _spawn_rerun(meta, doc_class, "re-run after teach-type")
+    return {**result, "taught": doc_type, "rerun_job_id": rerun_job_id}
 
 
 @router_teach.post("/runs/{run_id}/findings/{rule_id}/vote", tags=["teach"])

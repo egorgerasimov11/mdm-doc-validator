@@ -292,6 +292,27 @@ window.mdmdoc = (() => {
     }
   }
 
+  /* ---------- run page: teach the document TYPE (F4) --------------------- */
+  function initTeachType() {
+    const box = document.getElementById("type-teach");
+    if (!box) return;
+    const sel = document.getElementById("type-select");
+    const btn = document.getElementById("btn-teach-type");
+    const initial = sel.value;
+    sel.onchange = () => { btn.hidden = sel.value === initial; };
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        const res = await api(`/api/v1/runs/${box.dataset.run}/teach-type`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ doc_type: sel.value }),
+        });
+        btn.textContent = "Taught ✓";
+        if (res.rerun_job_id) watchValidRerun(res.rerun_job_id);
+      } catch (e) { btn.textContent = "ERROR: " + e.message; btn.disabled = false; }
+    };
+  }
+
   /* ---------- run page: mark-valid aftermath (E4) ------------------------ */
   // the rules the valid-mark overrode, each with a way to act on it NOW
   function showChallenged(challenged, cls) {
@@ -1179,7 +1200,7 @@ window.mdmdoc = (() => {
   }
   initActivityBadge();
 
-  return { api, pollJob, initDropZone, initTplCompare, initValidRate, initGatePanel, initArtifacts, initReview, initTraining,
+  return { api, pollJob, initDropZone, initTplCompare, initValidRate, initGatePanel, initTeachType, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
            initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun, initTestToggle };
 })();

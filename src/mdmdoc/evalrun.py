@@ -284,6 +284,7 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
 
     rows = []
     type_hits = verdict_hits = json_ok = 0
+    verdict_goldless = 0            # teach-only labels: type gold, no verdict gold
     invoice_total = invoice_false_accept = 0
     precedent_relax = precedent_relax_unconfirmed = 0
     field_stats: dict = {}
@@ -327,7 +328,10 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         type_hits += int(pred_type == gold_type)
         confusion.setdefault(gold_type, {}).setdefault(pred_type, 0)
         confusion[gold_type][pred_type] += 1
-        verdict_hits += int(res.verdict == lab.get("verdict_gold"))
+        if lab.get("verdict_gold"):
+            verdict_hits += int(res.verdict == lab.get("verdict_gold"))
+        else:
+            verdict_goldless += 1
         json_ok += int(bool(res.pub.get("json_valid_first_try")))
         if gold_type == "invoice":
             invoice_total += 1
@@ -360,9 +364,12 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
                      "verdict_direction": direction,
                      "tier": res.pub.get("tier", "fast"),
                      "type_ok": pred_type == gold_type,
-                     "verdict_ok": res.verdict == lab.get("verdict_gold"),
+                     "verdict_ok": (res.verdict == lab.get("verdict_gold")
+                                    if lab.get("verdict_gold") else None),
                      "scenarios": lab.get("scenarios") or [],
-                     "ok": (pred_type == gold_type and res.verdict == lab.get("verdict_gold")
+                     "ok": (pred_type == gold_type
+                            and (not lab.get("verdict_gold")
+                                 or res.verdict == lab.get("verdict_gold"))
                             and all(row_fields.values())),
                      "fields": row_fields,
                      "fields_lenient": row_fields_lenient})
@@ -380,7 +387,8 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
     n = n_scored + len(crash_rows)
     leaks = _leak_sweep()
     vpairs = [tuple(r["verdict"].split("/", 1))
-              for r in scored_rows + crash_rows if "/" in r.get("verdict", "")]
+              for r in scored_rows + crash_rows if "/" in r.get("verdict", "")
+              and r["verdict"].split("/", 1)[1]]     # goldless: type-only label
     vm = verdict_metrics(vpairs)
     # gold-review queue: the machine was STRICTER than the gold — often the gold
     # label is stale (the machine improved past it), so re-review the LABEL.
@@ -394,7 +402,9 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         "skipped_missing": skipped_missing,
         "doc_type_accuracy": round(type_hits / n, 3) if n else 0,
         "doc_type_accuracy_ci": _wilson(type_hits, n),
-        "verdict_accuracy": round(verdict_hits / n, 3) if n else 0,
+        "verdict_accuracy": (round(verdict_hits / (n - verdict_goldless), 3)
+                             if n - verdict_goldless else 0),
+        "verdict_goldless": verdict_goldless,
         "verdict_accuracy_ci": vm["verdict_accuracy_ci"],
         "unsafe_error_rate": vm["unsafe_error_rate"],
         "safe_disagreement_rate": vm["safe_disagreement_rate"],
@@ -588,7 +598,8 @@ def run_rescore(tag: str = "", record: bool = False) -> int:
     # verdict cost metrics from the stored (pred/gold) pairs — same asymmetric
     # scorer as the full eval, computed with zero model calls
     vpairs = [tuple(r["verdict"].split("/", 1)) for r in data.get("rows", [])
-              if isinstance(r, dict) and "error" not in r and "/" in r.get("verdict", "")]
+              if isinstance(r, dict) and "error" not in r and "/" in r.get("verdict", "")
+              and r["verdict"].split("/", 1)[1]]
     vm = verdict_metrics(vpairs)
     print(f"rescored {scored_rows} stored prediction(s) from "
           f"{data.get('tag') or data.get('ts', 'last eval')}")

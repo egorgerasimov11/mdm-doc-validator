@@ -24,6 +24,10 @@ class ReviewSubmission(BaseModel):
     # explicit opt-in required for a precedent that RELAXES the machine verdict
     # (rule REJECT/NMR -> stored ACCEPT); tightening precedents don't need it
     verdict_confirmed: bool = False
+    # F4 teach-type: the label asserts ONLY the doc type — verdict_gold stays
+    # empty so the precedent never pins yesterday's machine verdict and eval
+    # scores the type without inventing a verdict opinion
+    teach_only: bool = False
 
 
 class FeedbackIn(BaseModel):
