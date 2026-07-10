@@ -1,27 +1,27 @@
 {
  "seed": 20260709,
  "generator_version": 2,
- "count": 51,
- "truth_vs_deterministic_agreement": 0.451,
+ "count": 52,
+ "truth_vs_deterministic_agreement": 0.442,
  "matrix": {
   "synth_bank_letter": 24,
   "synth_bank_statement": 4,
   "synth_iban_invalid": 9,
-  "synth_iban_valid": 31,
+  "synth_iban_valid": 32,
   "synth_invoice": 3,
   "synth_lang_de": 8,
   "synth_lang_en": 23,
   "synth_lang_es": 8,
-  "synth_lang_zh": 1,
+  "synth_lang_zh": 2,
   "synth_letter_role": 1,
   "synth_no_holder": 5,
   "synth_officer_block": 1,
   "synth_other": 1,
   "synth_packet3": 1,
-  "synth_payment_instructions": 3,
+  "synth_payment_instructions": 4,
   "synth_sig_esig": 6,
   "synth_sig_typed": 12,
-  "synth_sig_unsigned": 22,
+  "synth_sig_unsigned": 23,
   "synth_ssi_issuer": 1,
   "synth_supplier_letterhead": 3,
   "synth_tin_ein": 5,
@@ -35,6 +35,7 @@
   "synth_w9_boxed": 2,
   "synth_w9_conflict": 1,
   "synth_w9_esig": 1,
-  "synth_zh": 1
+  "synth_zh": 1,
+  "synth_zh_cnaps": 1
  }
 }

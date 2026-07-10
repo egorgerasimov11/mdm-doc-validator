@@ -243,6 +243,9 @@ def _spec_list(rng: random.Random) -> list[dict]:
     specs.append({"template": "zh_notice", "lang": "zh", "cc": "DE",
                   "holder": "假冒贸易有限公司",
                   "validity": "valid", "sig": "unsigned"}); i += 1
+    specs.append({"template": "zh_cnaps", "lang": "zh", "cc": "DE",
+                  "holder": "假冒服务有限公司",
+                  "validity": "valid", "sig": "unsigned"}); i += 1
     return specs
 
 
@@ -447,6 +450,14 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
                 "Please use these settlement instructions for all future payments.",
                 "Sincerely,", person, "Vice President", "Tel: +33 1 55 00 00 00", bank])
             doc_type = "payment_instructions"
+        elif tpl == "zh_cnaps":
+            zc_acct = "3531" + "".join(rng.choice("0123456789") for _ in range(13))
+            zc_cnaps = "3031" + "".join(rng.choice("0123456789") for _ in range(8))
+            text = "\n".join([
+                "银行账户信息", f"公司名称: {holder}",
+                "开户银行名称: 中国某某银行股份有限公司北京支行",
+                f"账号: {zc_acct}", f"联行号: {zc_cnaps}"])
+            doc_type = "payment_instructions"
         elif tpl == "zh_notice":
             zh_acct = "6222" + "".join(rng.choice("0123456789") for _ in range(15))
             grouped = " ".join(zh_acct[j:j + 4] for j in range(0, len(zh_acct), 4))
@@ -484,6 +495,12 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
         elif tpl == "zh_notice":
             truth.update({"bank_name": "某某银行北京分行", "bank_country": "CN",
                           "swift_bic": "", "iban": "", "account_number": zh_acct})
+        elif tpl == "zh_cnaps":
+            truth.update({"bank_name": "中国某某银行股份有限公司北京支行",
+                          "bank_country": "CN", "swift_bic": "", "iban": "",
+                          "account_number": zc_acct,
+                          "national_clearing": zc_cnaps,
+                          "national_clearing_kind": "CNAPS"})
         scen = [f"synth_{doc_type}", f"synth_lang_{spec.get('lang', 'en')}",
                 f"synth_iban_{spec['validity']}", f"synth_sig_{sig}"]
         if tpl in ("letter_role", "packet3"):
@@ -494,6 +511,8 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
             scen.append("synth_ssi_issuer")
         elif tpl == "zh_notice":
             scen.append("synth_zh")
+        elif tpl == "zh_cnaps":
+            scen.append("synth_zh_cnaps")
         if not holder and tpl != "invoice":
             scen.append("synth_no_holder")
         fname = f"{doc_type}_{idx:03d}.pdf"
@@ -512,7 +531,8 @@ def _build_doc(spec: dict, idx: int, rng: random.Random, docs_dir: Path) -> dict
     det = _det_expected(pdf, doc_class)
 
     sens = []
-    for k in ("iban", "account_number", "routing_aba", "tin_raw", "foreign_tin"):
+    for k in ("iban", "account_number", "routing_aba", "tin_raw", "foreign_tin",
+              "national_clearing"):
         v = str(truth.get(k) or "")
         if v:
             kind = ("tin" if k in ("tin_raw", "foreign_tin")

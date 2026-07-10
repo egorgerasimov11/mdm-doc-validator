@@ -308,6 +308,27 @@
     ],
     "verdict": "NEED_MANUAL_REVIEW"
    }
+  },
+  {
+   "id": "cn-letter-cnaps",
+   "doc_class": "bank",
+   "filename": "cn_bank_letter.pdf",
+   "raw_text": "银行账户信息\n公司名称: 假冒服务有限公司\n开户行:中国某某银行股份有限公司北京支行\n账号: 35310188000049999\n我公司银行信息如下(收付款账户):\n开户银行名称:中国某某银行股份有限公司北京支行\n账号: 35310188000049999\n联行号: 303100000999",
+   "llm_fields": {
+    "account_holder": "假冒服务有限公司",
+    "bank_name": "中国某某银行股份有限公司北京支行",
+    "signed": true
+   },
+   "expect": {
+    "fields": {
+     "national_clearing": "…0999",
+     "account_number": "…9999"
+    },
+    "notes": [
+     "national clearing code (CNAPS)",
+     "bank country inferred: CN"
+    ]
+   }
   }
  ]
 }
