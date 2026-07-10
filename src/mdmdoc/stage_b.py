@@ -631,13 +631,20 @@ def _resolve_signature(ext: Extraction, raw: RawDoc) -> None:
     votes = probe.get("votes") or {}
 
     def _pub(extra: dict | None = None) -> None:
+        trail = [{**t, "evidence": scrub_text(str(t.get("evidence") or ""), ext.vault)}
+                 for t in (probe.get("trail") or [])]
         ext.signature_probe = {
             "handwritten_signature": bool(probe.get("handwritten_signature")),
             "stamp": bool(probe.get("stamp")),
             "evidence": scrub_text(str(probe.get("evidence") or ""), ext.vault),
             "page": (probe.get("page", 0) + 1
                      if isinstance(probe.get("page"), int) else None),
-            "votes": votes, "uncertain": bool(probe.get("uncertain")),
+            "votes": votes, "trail": trail,
+            "uncertain": bool(probe.get("uncertain")),
+            "contested": bool(probe.get("contested")),
+            "escalated": bool(probe.get("escalated")),
+            "probes_used": probe.get("probes_used", 0),
+            "esign_short_circuit": bool(probe.get("esign_short_circuit")),
             **(extra or {})}
 
     # (E) electronic: the esign guard fired, or the text carries esign markers

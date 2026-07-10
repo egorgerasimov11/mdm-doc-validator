@@ -75,8 +75,15 @@ def assess(ext: Extraction, raw=None) -> dict:
             weak += 1
             reasons.append("thin perception (no text layer, no vision text)")
 
+    # HARD: the vision ensemble stayed CONTESTED after escalation — positive
+    # and negative reads of the same signature area (S2); an ACCEPT resting on
+    # a contested signature is exactly the dangerous direction
+    sig = getattr(ext, "signature_probe", None) or {}
+    if sig.get("contested"):
+        hard = True
+        reasons.append("signature vision contested (positive and negative reads)")
     # WEAK: signature read was flagged uncertain
-    if (getattr(ext, "signature_probe", None) or {}).get("uncertain"):
+    elif sig.get("uncertain"):
         weak += 1
         reasons.append("signature read uncertain")
 

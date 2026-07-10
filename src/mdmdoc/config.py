@@ -111,6 +111,15 @@ def save_setting(key: str, value) -> None:
                       json.dumps(s, ensure_ascii=False, indent=1) + "\n")
 
 
+def sig_vision_cap() -> int:
+    """S2 signature-ensemble budget: every vision probe inside signature_probe
+    counts against this cap. 2 == the pre-ensemble behavior (no escalation)."""
+    try:
+        return max(0, int(os.environ.get("MDMDOC_SIG_VISION_CAP", "4")))
+    except ValueError:
+        return 4
+
+
 def doctype_rescue_enabled() -> bool:
     """П3 evidence-rescue kill switch: MDMDOC_DOCTYPE_RESCUE=0 reverts to the
     blunt payment_instructions->other->NMR grounding. Default ON."""

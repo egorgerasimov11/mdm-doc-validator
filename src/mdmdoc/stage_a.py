@@ -486,12 +486,14 @@ def _signature_page(path: Path, raw: RawDoc) -> int:
     return 0
 
 
-def _signature_band(path: Path, idx: int, doc_class: str) -> tuple | None:
+def _signature_band(path: Path, idx: int, doc_class: str,
+                    is_w8_cert: bool = False) -> tuple | None:
     """Zone (x0,y0,x1,y1 fractions) where the signature most likely sits.
     Text-layer pages: anchored on the y-position of the _SIG_HINTS line (a
     cursive mark is a sub-1%-of-page target on a dense letter — the same
     failure mode the W-9 zones fixed). Scans: bottom third for letters,
-    the Part II certification region for W-9s."""
+    the Part II certification region for W-9s, the Part XXX sign block
+    (bottom ~third) for a W-8 certification page (S2)."""
     try:
         doc = fitz.open(path)
         page = doc[idx]
@@ -505,94 +507,169 @@ def _signature_band(path: Path, idx: int, doc_class: str) -> tuple | None:
             return (0.0, max(0.0, y_frac - 0.05), 1.0, min(1.0, y_frac + 0.28))
     except Exception:
         pass
+    if is_w8_cert:
+        return (0.0, 0.60, 1.0, 0.95)
     return (0.0, 0.50, 1.0, 0.85) if doc_class == "w9" else (0.0, 0.60, 1.0, 1.0)
 
 
+def _sig_vote(o) -> str:
+    """pos-hand | pos-stamp | neg | err — an unusable reply is ERR, never a
+    negative (S2: the old probe collapsed model errors into 'neg')."""
+    if not isinstance(o, dict):
+        return "err"
+    if o.get("handwritten_signature"):
+        return "pos-hand"
+    if o.get("stamp"):
+        return "pos-stamp"
+    return "neg"
+
+
 def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
-    """Vision check for a real (wet) signature/stamp. Signatures are image
-    overlays — invisible to the text layer — so this runs for text-layer PDFs
-    too. Called while VISION is still resident (no extra model swap).
+    """Vision ENSEMBLE for a real (wet) signature/stamp (S2, subsumed R4).
+    Signatures are image overlays — invisible to the text layer — so this runs
+    for text-layer PDFs too, while VISION is resident.
 
-    Band-first: probe a signature-band CROP, and only when the band shows
-    neither signature nor stamp re-probe the full page (never-worse: both live
-    misses were false negatives, so band-first can only add positives)."""
+    * e-sign short-circuit: text markers say electronically signed -> ZERO
+      vision calls (the fold is settled deterministically in stage_b).
+    * band-first, page fallback on a band negative (as before).
+    * escalations (each once, cap-guarded, only on genuine disagreement):
+      E-A band-neg/page-pos -> re-probe the band at 300 DPI;
+      E-B bank stamp-only positives -> bottom-third crop (hunt handwriting);
+      E-C typed-system text vs a positive vote -> one extra probe.
+    * budget: MDMDOC_SIG_VISION_CAP (default 4) counts every probe call;
+      err votes never escalate (vision is unhealthy — do not burn budget).
+    * fold: positives > negatives -> positive; TIE -> negative (unsigned is
+      the safe direction); contested (pos and neg both present) is a HARD
+      confidence signal downstream."""
+    votes = {"band": "not-run", "page": "not-run", "band_hi": "not-run",
+             "crop_b3": "not-run", "text": _text_signature_vote(raw)}
+    trail: list[dict] = []
+    if votes["text"] == "esign":
+        raw.signature_probe = {
+            "handwritten_signature": False, "stamp": False,
+            "date_near_signature": "",
+            "evidence": "e-signature markers in text — vision probes skipped",
+            "page": None, "votes": votes, "trail": trail,
+            "uncertain": False, "esign_short_circuit": True,
+        }
+        return
     try:
+        cap = config.sig_vision_cap()
+        calls = 0
+        objs: dict[str, dict] = {}
+
+        def _probe(name: str, image: str | None) -> str:
+            nonlocal calls
+            if not image or calls >= cap:
+                return "not-run"
+            calls += 1
+            obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [image])
+            v = _sig_vote(obj)
+            votes[name] = v
+            if isinstance(obj, dict):
+                objs[name] = obj
+            trail.append({"probe": name, "vote": v,
+                          "evidence": str((obj or {}).get("evidence") or "")[:120]
+                          if isinstance(obj, dict) else ""})
+            return v
+
         idx = 0
-        png = band_png = None
-        if path.suffix.lower() == ".pdf":
+        band = None
+        is_pdf = path.suffix.lower() == ".pdf"
+        if is_pdf:
             idx = _signature_page(path, raw)
-            band = _signature_band(path, idx, raw.doc_class)
-            band_png = _render_zone(path, idx, band, render_dir, "sig",
-                                    raw.rotations.get(idx, 0))
-            if not band_png:
+            rot = raw.rotations.get(idx, 0)
+            band = _signature_band(path, idx, raw.doc_class,
+                                   is_w8_cert=(raw.w8_cert_page == idx))
+            band_png = _render_zone(path, idx, band, render_dir, "sig", rot)
+            if band_png:
+                if _probe("band", band_png) in ("neg", "err") and votes["band"] == "neg":
+                    doc = fitz.open(path)
+                    png = _render_page(doc, idx, render_dir, config.VISION_DPI,
+                                       rot, False, "sig")
+                    doc.close()
+                    _probe("page", png)
+            else:
                 doc = fitz.open(path)
                 png = _render_page(doc, idx, render_dir, config.VISION_DPI,
-                                   raw.rotations.get(idx, 0), False, "sig")
+                                   rot, False, "sig")
                 doc.close()
+                _probe("page", png)
         else:
-            png = raw.images[0] if raw.images else None
-        obj = None
-        votes = {"band": "not-run", "page": "not-run", "text": _text_signature_vote(raw)}
+            _probe("page", raw.images[0] if raw.images else None)
 
-        def _v(o):
-            return "pos" if (isinstance(o, dict) and (o.get("handwritten_signature")
-                                                      or o.get("stamp"))) else "neg"
+        usable = [v for v in votes.values()
+                  if v in ("pos-hand", "pos-stamp", "neg")]
+        errs = sum(1 for k, v in votes.items() if k != "text" and v == "err")
 
-        if band_png:
-            obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [band_png])
-            votes["band"] = _v(obj)
-            if votes["band"] == "neg":
-                # fall back to the whole page (never-worse: both live misses were
-                # false negatives, so band-first can only ADD positives). Keep the
-                # positive read if either fires; overwrite sig.png so the evidence
-                # thumbnail shows what was decisive.
-                doc = fitz.open(path)
-                png = _render_page(doc, idx, render_dir, config.VISION_DPI,
-                                   raw.rotations.get(idx, 0), False, "sig")
-                doc.close()
-                obj2, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [png]) \
-                    if png else (None, False)
-                votes["page"] = _v(obj2)
-                if votes["page"] == "pos":
-                    obj = obj2
-        elif png:
-            obj, _ = mc.generate_json_vision(SIGNATURE_PROMPT, [png])
-            votes["page"] = _v(obj)
-        if isinstance(obj, dict):
-            # Uncertainty is METADATA, not a verdict flip: the visual verdict
-            # still wins (see _apply_signature_probe). We only FLAG low
-            # confidence so the confidence gate (confidence.py) can hold back a
-            # blind ACCEPT — when the two vision reads disagreed, or the vision
-            # verdict contradicts the deterministic text signal.
-            visual_pos = bool(obj.get("handwritten_signature") or obj.get("stamp"))
-            uncertain = ((votes["band"] != "not-run" and votes["page"] != "not-run"
-                          and votes["band"] != votes["page"])
-                         or (votes["text"] != "none"
-                             and (votes["text"] == "esign") != visual_pos))
-            raw.signature_probe = {
-                "handwritten_signature": bool(obj.get("handwritten_signature")),
-                "stamp": bool(obj.get("stamp")),
-                "date_near_signature": str(obj.get("date_near_signature") or "")[:40],
-                "evidence": str(obj.get("evidence") or "")[:200],
-                "page": idx, "votes": votes, "uncertain": bool(uncertain),
-            }
-        elif band_png or png:
-            # Vision was attempted but produced nothing usable (model error /
-            # non-dict). That is NOT a negative read — mark the signature state
-            # unverified so the confidence gate can hold back a blind ACCEPT.
-            raw.signature_probe = {
-                "handwritten_signature": False, "stamp": False,
-                "date_near_signature": "", "evidence": "",
-                "page": idx, "votes": votes, "uncertain": True,
-                "no_visual_verdict": True,
-                "reason": "vision-unavailable-or-unusable",
-            }
+        # escalations — only when vision is healthy (no err votes)
+        if is_pdf and not errs:
+            pos = [v for v in usable if v.startswith("pos")]
+            neg = [v for v in usable if v == "neg"]
+            if votes["band"] == "neg" and votes["page"].startswith("pos"):
+                # E-A: the two base reads disagree — re-read the band hi-res
+                hi = _render_zone(path, idx, band, render_dir, "sig_hi",
+                                  raw.rotations.get(idx, 0), dpi=300)
+                _probe("band_hi", hi)
+            elif (raw.doc_class == "bank" and pos
+                    and all(v == "pos-stamp" for v in pos)):
+                # E-B: stamp-only positives — hunt handwriting in the bottom third
+                b3 = _render_zone(path, idx, (0.0, 0.66, 1.0, 1.0), render_dir,
+                                  "sig_b3", raw.rotations.get(idx, 0))
+                _probe("crop_b3", b3)
+            elif votes["text"] == "typed-system" and pos:
+                # E-C: deterministic 'no signature required' vs a positive vote
+                hi = _render_zone(path, idx, band, render_dir, "sig_hi",
+                                  raw.rotations.get(idx, 0), dpi=300)
+                _probe("band_hi", hi)
+
+        usable = [v for v in votes.values()
+                  if v in ("pos-hand", "pos-stamp", "neg")]
+        pos_n = sum(1 for v in usable if v.startswith("pos"))
+        neg_n = sum(1 for v in usable if v == "neg")
+        if not usable:
+            # every attempted probe errored (or none could run on an image-less
+            # doc): NOT a negative read — unverified, confidence holds ACCEPTs
+            attempted = any(v == "err" for k, v in votes.items() if k != "text")
+            if attempted:
+                raw.signature_probe = {
+                    "handwritten_signature": False, "stamp": False,
+                    "date_near_signature": "", "evidence": "",
+                    "page": idx, "votes": votes, "trail": trail,
+                    "uncertain": True, "no_visual_verdict": True,
+                    "reason": "vision-unavailable-or-unusable",
+                }
+            return
+        positive = pos_n > neg_n                    # TIE -> negative (safe)
+        contested = pos_n >= 1 and neg_n >= 1
+        # the decisive object: first positive probe when positive, else last usable
+        decisive = None
+        for name in ("band", "page", "band_hi", "crop_b3"):
+            o = objs.get(name)
+            if o is None:
+                continue
+            if positive and _sig_vote(o).startswith("pos"):
+                decisive = o
+                break
+            decisive = o
+        decisive = decisive or {}
+        uncertain = contested or (votes["text"] == "typed-system" and positive)
+        raw.signature_probe = {
+            "handwritten_signature": positive and bool(decisive.get("handwritten_signature")),
+            "stamp": positive and bool(decisive.get("stamp")),
+            "date_near_signature": str(decisive.get("date_near_signature") or "")[:40],
+            "evidence": str(decisive.get("evidence") or "")[:200],
+            "page": idx, "votes": votes, "trail": trail,
+            "uncertain": bool(uncertain), "contested": bool(contested),
+            "escalated": any(votes[k] != "not-run" for k in ("band_hi", "crop_b3")),
+            "probes_used": calls, "cap": cap,
+        }
     except Exception as e:  # noqa: BLE001 — probe is best-effort
         raw.warnings.append(f"signature probe failed ({e.__class__.__name__})")
         raw.signature_probe = {
             "handwritten_signature": False, "stamp": False,
             "date_near_signature": "", "evidence": "", "page": 0,
-            "votes": {"band": "not-run", "page": "not-run", "text": "none"},
+            "votes": votes, "trail": trail,
             "uncertain": True, "no_visual_verdict": True,
             "reason": f"probe-exception:{e.__class__.__name__}",
         }
@@ -617,14 +694,15 @@ def _text_signature_vote(raw: RawDoc) -> str:
 
 
 def _render_zone(path: Path, page_idx: int, zone: tuple, render_dir: Path,
-                 tag: str, rotation: int = 0) -> str | None:
+                 tag: str, rotation: int = 0, dpi: int = 220) -> str | None:
     """Render one page and crop a relative-coordinate zone, upscaled for the
-    vision model (small crops read far better than full pages)."""
+    vision model (small crops read far better than full pages). dpi=300 is
+    the S2 hi-res escalation variant."""
     try:
         doc = fitz.open(path)
         if page_idx >= doc.page_count:
             page_idx = 0
-        pix = doc[page_idx].get_pixmap(dpi=220)
+        pix = doc[page_idx].get_pixmap(dpi=dpi)
         doc.close()
         p = render_dir / f"{tag}.png"
         pix.save(p)

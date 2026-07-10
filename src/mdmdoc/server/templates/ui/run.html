@@ -131,6 +131,32 @@
 </section>
 {% endif %}
 
+{% if pub.signature_probe %}
+{% set sp = pub.signature_probe %}
+<section>
+  <h2>Signature <span class="meta">(kind: {{ pub.fields.signature_kind or 'n/a' }}{% if sp.page %} · probe page {{ sp.page }}{% endif %})</span>
+    {% if sp.esign_short_circuit %}<span class="tag">e-sign short-circuit — 0 vision probes</span>{% endif %}
+    {% if sp.contested %}<span class="tag" style="color:var(--danger,#c00)">CONTESTED</span>{% elif sp.uncertain %}<span class="tag">uncertain</span>{% endif %}
+    {% if sp.escalated %}<span class="tag">escalated ({{ sp.probes_used }} probes)</span>{% endif %}
+  </h2>
+  {% if sp.votes %}
+  <p class="meta">votes:
+    {% for k in ('band', 'page', 'band_hi', 'crop_b3', 'text') %}{% if sp.votes[k] and sp.votes[k] != 'not-run' %}{{ k }}={{ sp.votes[k] }} {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+  {% if sp.trail %}
+  <table>
+    <tr><th>probe</th><th>vote</th><th>evidence</th></tr>
+    {% for t in sp.trail %}
+    <tr><td class="meta">{{ t.probe }}</td><td>{{ t.vote }}</td><td class="meta">{{ t.evidence or '—' }}</td></tr>
+    {% endfor %}
+  </table>
+  {% elif sp.evidence %}
+  <p class="meta">{{ sp.evidence }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if pub.engine_compare %}
 <section>
   <h2>Engine comparison <span class="meta">(dual mode — deterministic OCR patterns vs LLM read, masked)</span></h2>
