@@ -11,6 +11,7 @@
 <p class="meta" style="margin-top:16px"><a href="/ui">← Documents</a></p>
 {% if flash == 'labeled' %}<p class="flash">Saved — dataset now has {{ labels_count }} examples. <a href="/ui/training">Training →</a></p>{% endif %}
 {% if flash == 'retrained' %}<p class="flash">Retrained — the corrected verdict below is now permanent for this document. <a href="/ui/training">Training →</a></p>{% endif %}
+{% if gate_stale %}<p class="flash">This verdict was decided while some rules still awaited approval. Every rule for this document class is approved now — the verdict below is stale until you press <strong>Re-analyze</strong>.</p>{% endif %}
 
 <div class="verdict-h">
   <span class="dot dot--{{ report.verdict }}"></span>
@@ -38,6 +39,8 @@
     <button type="button" data-r="down" class="{{ 'active' if rating == 'down' }}">👎</button>
   </span>
   <button type="button" id="btn-copy" data-run="{{ run_id }}">Copy report</button>
+  <button type="button" id="btn-rerun" data-run="{{ run_id }}" data-class="{{ doc_class }}"
+          title="run this document through the pipeline again — the verdict on this page was decided with the rules, models and settings as they stood at analysis time">Re-analyze</button>
 
   <details class="menu">
     <summary class="btn">Compare ▾</summary>
@@ -384,6 +387,6 @@
 {% block script %}<script>
   /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest.
      initRunTabs runs FIRST so the panels exist before initProposeFix wires disputes. */
-  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch"]
+  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch","initRerun"]
     .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
 </script>{% endblock %}

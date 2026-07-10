@@ -155,9 +155,32 @@ def run_page(request: Request, run_id: str, flash: str = ""):
         sap_rows=sap_rows, tpl_rows=tpl_rows, web_rows=web_rows, web_banner=web_banner,
         rating=__import__("mdmdoc.ratings", fromlist=["of"]).of(rid),
         doc_class=meta.get("doc_class", "bank"), label=label,
+        gate_stale=_gate_is_stale(findings, meta.get("doc_class", "bank")),
         trace=_learning_trace(label, pub, rep) if label else None,
         artifacts=["meta.json", "stage_a.json", "extraction.json", "reasoning.md", "findings.json",
                    "report.json", "report.md", "sap_compare.json", "web_evidence.json"]))
+
+
+def _gate_is_stale(findings: list, doc_class: str) -> bool:
+    """A verdict is a persisted artifact, not a live query: approving a rule does
+    NOT re-decide a run that is already on disk. So a run held back by RULE-GATE
+    keeps saying 'awaiting approval' forever, and the operator reasonably concludes
+    the approvals never took. True here = the gate held this run and nothing in its
+    class is pending any more; the page then asks for a re-analysis."""
+    if not any((f or {}).get("rule_id") == "RULE-GATE" for f in findings):
+        return False
+    try:
+        import yaml
+
+        from .. import rule_approvals, rules_io
+        store = rule_approvals.load()
+        cfg = yaml.safe_load(rules_io.rules_text(doc_class)) or {}
+        rules = cfg.get("rules") or []
+        return bool(rules) and all(
+            rule_approvals.status(store, doc_class, r) == rule_approvals.APPROVED
+            for r in rules)
+    except Exception:
+        return False
 
 
 def _preview_pages(meta: dict, stage_a_pub: dict) -> list[int]:

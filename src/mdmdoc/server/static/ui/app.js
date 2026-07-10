@@ -451,6 +451,29 @@ window.mdmdoc = (() => {
     };
   }
 
+  /* ---------- run page: re-analyze against the CURRENT rules -------------- */
+  function initRerun() {
+    const btn = document.getElementById("btn-rerun");
+    if (!btn) return;
+    const log = document.getElementById("job-log");
+    const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+    btn.onclick = async () => {
+      btn.disabled = true;
+      log.textContent = "";
+      say("re-analyzing this document with the rules as they stand now…");
+      const fd = new FormData();
+      fd.append("doc_class", btn.dataset.class || "auto");
+      fd.append("wait", "false");
+      fd.append("rerun_run_id", btn.dataset.run);
+      try {
+        const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
+        pollJob(job_id, say,
+          (res) => location = `/ui/runs/${res.run_id}`,
+          (err) => { say("ERROR: " + err); btn.disabled = false; });
+      } catch (e) { say("ERROR: " + e.message); btn.disabled = false; }
+    };
+  }
+
   /* ---------- run page: external web evidence ----------------------------- */
   function initWebVerify() {
     const btn = document.getElementById("btn-web");
@@ -977,5 +1000,5 @@ window.mdmdoc = (() => {
 
   return { api, pollJob, initDropZone, initTplCompare, initValidRate, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
-           initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs };
+           initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun };
 })();
