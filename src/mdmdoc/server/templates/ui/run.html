@@ -112,6 +112,25 @@
 </section>
 {% endif %}
 
+{% if tpl_rows %}
+<section>
+  <h2>Template comparison <span class="meta">(document vs the request-form workbook)</span></h2>
+  <table>
+    <tr><th>field</th><th>document</th><th>template</th><th>result</th></tr>
+    {% for r in tpl_rows %}
+    <tr>
+      <td>{{ r.field }}</td>
+      <td><code>{{ r.doc }}</code></td>
+      <td><code>{{ r.sap }}</code></td>
+      <td class="{{ 'bad' if r.status == 'MISMATCH' }}">
+        {{ r.status }}{% if r.note %} <span class="meta">({{ r.note }})</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
 {% if web_rows %}
 <section>
   <h2>External evidence <span class="meta">(external registries — advisory only)</span></h2>
@@ -298,6 +317,6 @@
 {% endblock %}
 {% block script %}<script>
   /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest */
-  ["initArtifacts","initSapCompare","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch"]
+  ["initArtifacts","initSapCompare","initTplCompare","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch"]
     .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
 </script>{% endblock %}

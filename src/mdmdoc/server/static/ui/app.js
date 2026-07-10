@@ -63,6 +63,20 @@ window.mdmdoc = (() => {
       };
     }
 
+    // optional request-form TEMPLATE (D8): the filled MDM workbook — the
+    // document is compared against what the requestor typed into the form
+    let tplFile = null;
+    const tplBtn = document.getElementById("tpl-attach");
+    const tplInput = document.getElementById("tpl-file");
+    const tplName = document.getElementById("tpl-name");
+    if (tplBtn) {
+      tplBtn.onclick = () => tplInput.click();
+      tplInput.onchange = () => {
+        tplFile = tplInput.files[0] || null;
+        tplName.textContent = tplFile ? tplFile.name + " ✓ (form values will be compared)" : "";
+      };
+    }
+
     async function send(file) {
       log.hidden = false; log.textContent = "";
       say(`uploading ${file.name} (${docClass()})…`);
@@ -77,6 +91,7 @@ window.mdmdoc = (() => {
         fd.append("sap_file", sapFile);
         if (sapBp && sapBp.value.trim()) fd.append("sap_bp", sapBp.value.trim());
       }
+      if (tplFile) fd.append("template_file", tplFile);
       try {
         const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
         trackJob(job_id);
@@ -202,6 +217,33 @@ window.mdmdoc = (() => {
     }
   }
 
+  /* ---------- run page: compare with template (D8) ----------------------- */
+  function initTplCompare() {
+    const btn = document.getElementById("btn-tpl");
+    const input = document.getElementById("tpl-input");
+    const log = document.getElementById("job-log");
+    if (!btn || !input) return;
+    const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+    btn.onclick = () => input.click();
+    input.onchange = async () => {
+      const f = input.files[0];
+      if (!f) return;
+      log.hidden = false; log.textContent = "";
+      say(`re-running against template ${f.name}…`);
+      const fd = new FormData();
+      fd.append("rerun_run_id", location.pathname.split("/").pop());
+      fd.append("doc_class", btn.dataset.class || "auto");
+      fd.append("wait", "false");
+      fd.append("template_file", f);
+      try {
+        const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
+        pollJob(job_id, say,
+          (res) => { location = `/ui/runs/${res.run_id}`; },
+          (err) => say("ERROR: " + err));
+      } catch (e) { say("ERROR: " + e.message); }
+    };
+  }
+
   /* ---------- run page: lazy artifacts ----------------------------------- */
   function initArtifacts() {
     document.querySelectorAll("details[data-artifact]").forEach(d => {
@@ -271,6 +313,77 @@ window.mdmdoc = (() => {
           (err) => { say("ERROR: " + err); btn.disabled = false; });
       } catch (e) { say("ERROR: " + e.message); btn.disabled = false; }
     };
+  }
+
+  /* ---------- dashboard: bank keys quick check --------------------------- */
+  function initBankCheck() {
+    const btn = document.getElementById("bc-run");
+    if (!btn) return;
+    const box = document.getElementById("bc-result");
+    const dot = document.getElementById("bc-dot");
+    const verdictEl = document.getElementById("bc-verdict");
+    const nextEl = document.getElementById("bc-next");
+    const hintEl = document.getElementById("bc-hint");
+    const list = document.getElementById("bc-findings");
+    const run = async () => {
+      const routing = document.getElementById("bc-routing").value.trim();
+      const account = document.getElementById("bc-account").value.trim();
+      if (!routing && !account) return;
+      btn.disabled = true;
+      verdictEl.textContent = "checking…";
+      nextEl.textContent = ""; hintEl.hidden = true; list.innerHTML = "";
+      dot.className = "dot"; box.hidden = false;
+      const fd = new FormData();
+      fd.append("routing", routing);
+      fd.append("account", account);
+      fd.append("bank_name", document.getElementById("bc-bank").value.trim());
+      fd.append("web", document.getElementById("bc-web").checked ? "true" : "false");
+      try {
+        const res = await api("/api/v1/check-routing", { method: "POST", body: fd });
+        dot.className = "dot dot--" + res.verdict;
+        verdictEl.textContent = res.verdict;
+        nextEl.textContent = res.next_step || "";
+        if (res.web_hint) { hintEl.textContent = "⚠ " + res.web_hint; hintEl.hidden = false; }
+        (res.findings || []).forEach((f) => {
+          const li = document.createElement("li");
+          const d = document.createElement("span");
+          d.className = "dot dot--" + (f.verdict_effect || (f.severity === "NOTE" ? "ACCEPT" : f.severity));
+          li.appendChild(d);
+          const s = document.createElement("span");
+          s.className = "grow";
+          s.textContent = `${f.rule_id}: ${f.message}`;
+          li.appendChild(s);
+          list.appendChild(li);
+        });
+        (res.web || []).forEach((w) => {
+          const li = document.createElement("li");
+          const d = document.createElement("span");
+          d.className = "dot dot--" + (w.status === "found" ? "ACCEPT" : w.status === "not_found" ? "REJECT" : "WARNING");
+          li.appendChild(d);
+          const s = document.createElement("span");
+          s.className = "grow";
+          s.textContent = `${w.check} (${w.status}): ${w.label} `;
+          if (w.url) {
+            const a = document.createElement("a");
+            a.href = w.url; a.target = "_blank"; a.rel = "noopener";
+            a.textContent = "source ↗";
+            s.appendChild(a);
+          }
+          li.appendChild(s);
+          list.appendChild(li);
+        });
+      } catch (e) {
+        dot.className = "dot dot--REJECT";
+        verdictEl.textContent = "error";
+        nextEl.textContent = e.message;
+      } finally { btn.disabled = false; }
+    };
+    btn.onclick = run;
+    ["bc-routing", "bc-account", "bc-bank"].forEach((id) => {
+      document.getElementById(id).addEventListener("keydown", (e) => {
+        if (e.key === "Enter") run();
+      });
+    });
   }
 
   /* ---------- run page: per-field copy ------------------------------------ */
@@ -664,7 +777,7 @@ window.mdmdoc = (() => {
   initRunFilters();
   initCopyReport();
 
-  return { api, pollJob, initDropZone, initArtifacts, initReview, initTraining,
-           initSapCompare, initWebVerify, initProposeFix, initFieldCopy,
+  return { api, pollJob, initDropZone, initTplCompare, initArtifacts, initReview, initTraining,
+           initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
            initRetrainWatch };
 })();

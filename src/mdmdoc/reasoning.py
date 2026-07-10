@@ -42,7 +42,7 @@ def _compare_table(rows: list) -> list[str]:
 def build_reasoning(meta: dict, stage_a_pub: dict, pub: dict, findings: list,
                     verdict: str, conf: dict, ladder_meta: dict | None,
                     sap_rows: list | None, rules_trace: list | None,
-                    container_note: str = "") -> str:
+                    container_note: str = "", tpl_rows: list | None = None) -> str:
     L: list[str] = []
     f = pub.get("fields", {}) or {}
 
@@ -163,6 +163,11 @@ def build_reasoning(meta: dict, stage_a_pub: dict, pub: dict, findings: list,
         L.append("")
         L.append("## 9. SAP comparison")
         L += _compare_table(sap_rows)
+
+    if tpl_rows:
+        L.append("")
+        L.append("## 9b. Template (request form) comparison")
+        L += _compare_table(tpl_rows)
 
     prec = pub.get("operator_precedent")
     if prec:

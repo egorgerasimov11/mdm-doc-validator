@@ -39,6 +39,9 @@
     <input type="text" id="sap-bp" placeholder="BP # (optional)" style="width:9em" hidden>
     <span class="meta" id="sap-name"></span>
     <input type="file" id="sap-file" accept=".png,.jpg,.jpeg,.pdf,.xlsx,.xlsm" hidden>
+    <button type="button" id="tpl-attach">+ Request form / template (.xlsx/.xlsm, optional)</button>
+    <span class="meta" id="tpl-name"></span>
+    <input type="file" id="tpl-file" accept=".xlsx,.xlsm" hidden>
   </div>
   <div class="actions" id="progress-row" hidden>
     <progress id="job-progress" max="100" value="0" style="flex:1"></progress>
@@ -102,4 +105,4 @@
   {% else %}<p class="meta">No runs yet — drop a document above.</p>{% endif %}
 </section>
 {% endblock %}
-{% block script %}<script>mdmdoc.initDropZone();</script>{% endblock %}
+{% block script %}<script>mdmdoc.initDropZone(); mdmdoc.initBankCheck();</script>{% endblock %}

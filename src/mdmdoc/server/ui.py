@@ -135,6 +135,7 @@ def run_page(request: Request, run_id: str, flash: str = ""):
     stage_a_pub = runstore.load(rid, "stage_a.json") or {}
     preview_pages = _preview_pages(meta, stage_a_pub)
     sap_rows = runstore.load(rid, "sap_compare.json") or []
+    tpl_rows = runstore.load(rid, "template_compare.json") or []
     web_rows = runstore.load(rid, "web_evidence.json") or []
     from ..web_enrichment import BANNER as web_banner
     label = next((l for l in dataset.load_labels() if l.get("doc_sha256") == rid), None)
@@ -143,7 +144,7 @@ def run_page(request: Request, run_id: str, flash: str = ""):
         report=rep, data_rows=data_rows, labeled=rid in _labeled_ids(), flash=flash,
         preview_pages=preview_pages, total_pages=stage_a_pub.get("pages") or 1,
         has_sap_shot=bool(meta.get("sap_path")) and meta.get("sap_kind") != "table",
-        sap_rows=sap_rows, web_rows=web_rows, web_banner=web_banner,
+        sap_rows=sap_rows, tpl_rows=tpl_rows, web_rows=web_rows, web_banner=web_banner,
         doc_class=meta.get("doc_class", "bank"), label=label,
         trace=_learning_trace(label, pub, rep) if label else None,
         artifacts=["meta.json", "stage_a.json", "extraction.json", "reasoning.md", "findings.json",
@@ -367,3 +368,75 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
     return templates.TemplateResponse(request, "rules_approve.html", _ctx(
         page="rules", doc_class=doc_class, rows=rows, counts=counts,
         proposals=proposals))
+
+
+# --- /ui/tax — bulk US TIN validation tab (tin_bulk.py; tables shared with W9-040/041)
+
+_TAX_DIR = config.RUNS_DIR / "tax"
+_TAX_NAME = re.compile(r"^[\w.\-]+\.xlsx$")
+
+
+def _tax_history() -> list[dict]:
+    if not _TAX_DIR.exists():
+        return []
+    out = []
+    for p in sorted(_TAX_DIR.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
+        st = p.stat()
+        out.append({"name": p.name, "size": f"{st.st_size // 1024} KB",
+                    "mtime": __import__("datetime").datetime.fromtimestamp(st.st_mtime)
+                    .strftime("%Y-%m-%d %H:%M")})
+    return out
+
+
+@router_ui.get("/ui/tax", response_class=HTMLResponse)
+def tax_page(request: Request):
+    return templates.TemplateResponse(request, "tax.html", _ctx(
+        page="tax", result=None, error=None, history=_tax_history()))
+
+
+@router_ui.post("/ui/tax/validate", response_class=HTMLResponse)
+async def tax_validate(request: Request):
+    import tempfile
+    from datetime import datetime
+
+    from .. import tin_bulk
+    form = await request.form()
+    up = form.get("file")
+    if up is None or not getattr(up, "filename", ""):
+        return templates.TemplateResponse(request, "tax.html", _ctx(
+            page="tax", result=None, error="no file uploaded", history=_tax_history()))
+    stem = re.sub(r"[^\w.\-]+", "_", Path(up.filename).stem)[:60] or "export"
+    fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{stem}_VALIDATED.xlsx"
+    _TAX_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=True) as tf:
+            tf.write(await up.read())
+            tf.flush()
+            summary = tin_bulk.validate_workbook(
+                Path(tf.name), _TAX_DIR / fname,
+                sheet=str(form.get("sheet") or "").strip() or None,
+                col=str(form.get("col") or "").strip() or None,
+                id_col=str(form.get("id_col") or "").strip() or None,
+                cat_col=str(form.get("cat_col") or "").strip() or None)
+    except Exception as exc:  # surface as a page error, never a 500
+        return templates.TemplateResponse(request, "tax.html", _ctx(
+            page="tax", result=None,
+            error=f"validation failed: {exc.__class__.__name__}: {exc}",
+            history=_tax_history()))
+    summary["fname"] = fname
+    return templates.TemplateResponse(request, "tax.html", _ctx(
+        page="tax", result=summary, error=None, history=_tax_history()))
+
+
+@router_ui.get("/ui/tax/download/{name}")
+def tax_download(name: str):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    if not _TAX_NAME.fullmatch(name):
+        raise HTTPException(404)
+    p = (_TAX_DIR / name).resolve()
+    if p.parent != _TAX_DIR.resolve() or not p.exists():
+        raise HTTPException(404)
+    return FileResponse(p, filename=name,
+                        media_type="application/vnd.openxmlformats-officedocument"
+                                   ".spreadsheetml.sheet")

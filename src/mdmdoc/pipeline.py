@@ -31,7 +31,8 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
               web_evidence: bool | None = None, enforce_approvals: bool = True,
               engine: str | None = None, sap_bp: str = "",
               cancel=None, on_stage=None, overrides: dict | None = None,
-              effort: int | None = None) -> CheckResult:
+              effort: int | None = None,
+              template_path: Path | None = None) -> CheckResult:
     """Thin control-plane wrapper (D1): binds a RunControl (cooperative cancel
     event, stage-progress callback, per-run config overrides) to THIS thread's
     context for the duration of the run, then delegates. A canceled run raises
@@ -56,7 +57,8 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                                sap_image=sap_image, apply_precedent=apply_precedent,
                                quality=quality, web_evidence=web_evidence,
                                enforce_approvals=enforce_approvals, engine=engine,
-                               sap_bp=sap_bp, effort=effort)
+                               sap_bp=sap_bp, effort=effort,
+                               template_path=template_path)
     finally:
         runctl.deactivate(token)
 
@@ -67,7 +69,8 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
                     apply_precedent: bool = True, quality: bool = False,
                     web_evidence: bool | None = None, enforce_approvals: bool = True,
                     engine: str | None = None, sap_bp: str = "",
-                    effort: int | None = None) -> CheckResult:
+                    effort: int | None = None,
+                    template_path: Path | None = None) -> CheckResult:
     """apply_precedent=False is for eval: metrics must measure the MACHINE,
     not the operator's stored answers. quality=True forces the strong tier.
     web_evidence: None -> honour the MDMDOC_WEB_EVIDENCE env flag; True/False
@@ -244,6 +247,38 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
             ext.warnings.append("SAP screenshot comparison applies to bank documents; "
                                 "for W-9 attach a BUT000 table export instead")
 
+    # --- template compare (D8): the filled REQUEST-FORM workbook as the other
+    # side — same char-by-char comparer as SAP, fail-closed the same way
+    tpl_rows: list = []
+    runctl.checkpoint("template-compare", 88)
+    if template_path is not None:
+        from . import sap_compare, template_form
+        try:
+            tpl_fields, _tpl_prov, tpl_hits = template_form.parse(template_path)
+            if tpl_hits < template_form._MIN_HITS_FOR_FORM:
+                ext.warnings.append("workbook not recognized as a request form "
+                                    f"({tpl_hits} known labels) — template "
+                                    "comparison skipped")
+                findings.append(_Finding(
+                    "TPL-015", "WARNING", None,
+                    "the uploaded workbook was not recognized as a request form "
+                    "— template comparison skipped; check the file"))
+            else:
+                template_form.register_secrets(ext, tpl_fields)
+                tpl_findings, tpl_rows = sap_compare.compare(
+                    ext, template_form.to_sap_fields(tpl_fields), policy=policy,
+                    prefix="TPL", side_label="template")
+                findings += tpl_findings
+        except Exception as e:  # noqa: BLE001 — fail closed, mirror SAP-014
+            ext.warnings.append(f"template comparison failed internally "
+                                f"({e.__class__.__name__}) — the document was "
+                                "NOT verified against the request form")
+            findings.append(_Finding(
+                "TPL-014", "WARNING", "NEED_MANUAL_REVIEW",
+                "template comparison was requested but aborted with an internal "
+                "error — the document was not verified against the request form; "
+                "review manually."))
+
     # confidence gate: fold the already-recorded read signals into a level, and
     # if the document would otherwise ACCEPT on a LOW-confidence read, abstain to
     # manual review (CONF-001). This ONLY ever escalates ACCEPT->NMR — the verdict
@@ -323,6 +358,8 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
                                      "relax_blocked": precedent_relax_blocked}
     if sap_rows:
         pub["sap_compare"] = sap_rows
+    if tpl_rows:
+        pub["template_compare"] = tpl_rows
 
     from .estimate import shape_key
     runctl.checkpoint("report", 94)
@@ -338,6 +375,7 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
             "shape_key": shape_key(doc_class, raw.has_text_layer, use_vision,
                                    sap_image is not None, quality),
             "sap_path": str(sap_image) if sap_image is not None else None,
+            "template_path": str(template_path) if template_path is not None else None,
             "sap_kind": sap_kind,
             "confidence": conf["level"], "confidence_reasons": conf["reasons"],
             "ladder": ladder_meta, "effort": effort}
@@ -352,7 +390,7 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
         meta, stage_a.to_public(raw, ext.vault, policy="masked"),
         ext.to_public(policy="masked"), findings,
         verdict, conf, ladder_meta, sap_rows, rules_trace,
-        container_note=container_note)
+        container_note=container_note, tpl_rows=tpl_rows)
     # crosscheck/warning lines were rendered under the OPERATOR policy at
     # extraction time — strict-scrub the assembled export end-to-end
     reasoning_md = _scrub(reasoning_md, ext.vault, policy="strict")
@@ -368,6 +406,8 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
     runstore.write(run_id, "report.json", report_json, secrets, policy=gate)
     if sap_rows:
         runstore.write(run_id, "sap_compare.json", sap_rows, secrets, policy=gate)
+    if tpl_rows:
+        runstore.write(run_id, "template_compare.json", tpl_rows, secrets, policy=gate)
     if web_rows:
         # Routing/ABA numbers legitimately APPEAR here (they are the check subject
         # and are egress-allowed public identifiers), so they must not be in this

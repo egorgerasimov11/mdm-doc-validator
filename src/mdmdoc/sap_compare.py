@@ -85,8 +85,12 @@ def _row(field: str, doc_val: str, sap_val: str, status: str, note: str = "",
     return {"field": field, "doc": dm, "sap": sm, "status": status, "note": note}
 
 
-def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Finding], list[dict]]:
-    """Deterministic char-by-char comparison -> (findings, display-policy rows)."""
+def compare(ext: Extraction, sap: dict, policy: str = "masked",
+            prefix: str = "SAP", side_label: str | None = None) -> tuple[list[Finding], list[dict]]:
+    """Deterministic char-by-char comparison -> (findings, display-policy rows).
+    prefix/side_label (D8): the SAME comparer serves the request-form TEMPLATE
+    stream — findings become TPL-00x and messages say 'template' instead of
+    'SAP'. Defaults keep every existing caller byte-identical."""
     from .privacy import display_value
 
     def _dv(kind, v):
@@ -275,4 +279,10 @@ def compare(ext: Extraction, sap: dict, policy: str = "masked") -> tuple[list[Fi
     if not any(r["status"] == "MISMATCH" for r in rows) and rows:
         findings.append(Finding("SAP-000", "NOTE", None,
                                 "SAP comparison: all comparable fields match."))
+    if prefix != "SAP":
+        lbl = side_label or prefix.lower()
+        findings = [Finding(fd.rule_id.replace("SAP-", f"{prefix}-", 1), fd.severity,
+                            fd.verdict_effect, fd.message.replace("SAP", lbl),
+                            fd.detail, fd.field)
+                    for fd in findings]
     return findings, rows

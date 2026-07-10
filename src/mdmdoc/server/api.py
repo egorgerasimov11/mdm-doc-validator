@@ -28,7 +28,7 @@ router_teach = APIRouter(prefix="/api/v1", dependencies=[Depends(require_token)]
 
 ARTIFACT_ALLOWLIST = {"meta.json", "stage_a.json", "extraction.json",
                       "findings.json", "report.json", "report.md", "sap_compare.json",
-                      "web_evidence.json", "reasoning.md"}
+                      "web_evidence.json", "reasoning.md", "template_compare.json"}
 
 
 def _labeled_ids() -> set[str]:
@@ -215,7 +215,8 @@ def set_settings(body: dict) -> dict:
 def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                   sap_image: Path | None = None, quality: bool = False,
                   web: bool = False, engine: str = "", sap_bp: str = "",
-                  job=None, effort: int = 0) -> dict:
+                  job=None, effort: int = 0,
+                  template_path: Path | None = None) -> dict:
     mc.reset_host()
     # HARD GATE default ON (Egor's choice); MDMDOC_RULE_GATE=0 is the instant
     # off-switch (no redeploy) if the "everything held for approval" phase is
@@ -235,7 +236,8 @@ def _run_pipeline(path: Path, doc_class: str, lang: str, use_vision: bool,
                         web_evidence=True if web else None, enforce_approvals=gate,
                         engine=engine or None, sap_bp=sap_bp,
                         cancel=(job.cancel if job is not None else None),
-                        on_stage=on_stage, effort=effort or None)
+                        on_stage=on_stage, effort=effort or None,
+                        template_path=template_path)
     report = json.loads(res.report_json)
     return {"run_id": res.run_id, "verdict": res.verdict, "report": report,
             "report_md": res.report_md}
@@ -247,7 +249,7 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
           wait: bool = Form(True), sap_file: UploadFile | None = File(None),
           rerun_run_id: str = Form(""), quality: bool = Form(False),
           web: bool = Form(False), engine: str = Form(""), sap_bp: str = Form(""),
-          effort: int = Form(0)):
+          effort: int = Form(0), template_file: UploadFile | None = File(None)):
     if doc_class not in ("bank", "w9", "auto"):
         raise api_error(400, "bad_request", "doc_class must be 'bank', 'w9' or 'auto'")
     engine = engine.strip().lower()
@@ -287,15 +289,23 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
                             "for a W-9 attach a BUT000 table export (.xlsx); "
                             "SAP screenshots apply to bank documents")
         sap_path = save_upload("sap__" + sap_name, sap_file.file.read())
+    tpl_path = None
+    if template_file is not None:
+        tpl_name = template_file.filename or "template.xlsx"
+        if Path(tpl_name).suffix.lower() not in (".xlsx", ".xlsm"):
+            raise api_error(400, "bad_request",
+                            "the template must be a request-form workbook (.xlsx/.xlsm)")
+        tpl_path = save_upload("tpl__" + tpl_name, template_file.file.read())
     from ..estimate import estimate_seconds, human, sniff_text_layer
     est = estimate_seconds("bank" if doc_class == "auto" else doc_class,
                            sniff_text_layer(path), use_vision=use_vision,
-                           sap=sap_path is not None, quality=quality,
-                           effort=effort or None)
+                           sap=sap_path is not None or tpl_path is not None,
+                           quality=quality, effort=effort or None)
     if wait:
         try:
             out = _run_pipeline(path, doc_class, lang, use_vision, sap_path,
-                                quality, web, engine, sap_bp, effort=effort)
+                                quality, web, engine, sap_bp, effort=effort,
+                                template_path=tpl_path)
             out["estimate_s"] = est
             return out
         except UnreadableDocument as e:
@@ -312,8 +322,11 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
             log(f"SAP screenshot: {sap_path.name}")
         log(f"running {doc_class} pipeline{' (thorough tier)' if quality else ''}"
             f"{' + external web evidence' if web else ''}…")
+        if tpl_path:
+            log(f"template: {tpl_path.name}")
         out = _run_pipeline(path, doc_class, lang, use_vision, sap_path, quality,
-                            web, engine, sap_bp, job=job, effort=effort)
+                            web, engine, sap_bp, job=job, effort=effort,
+                            template_path=tpl_path)
         out["estimate_s"] = est
         log(f"verdict: {out['verdict']} (run {out['run_id']})")
         return out
@@ -321,6 +334,58 @@ def check(file: UploadFile | None = File(None), doc_class: str = Form("auto"),
     job = jobs.REGISTRY.submit("check", work, pass_job=True)
     from fastapi.responses import JSONResponse
     return JSONResponse({"job_id": job.id, "estimate_s": est}, status_code=202)
+
+
+@router_core.post("/check-routing", tags=["check"])
+def check_routing(routing: str = Form(""), account: str = Form(""),
+                  bank_name: str = Form(""), web: bool = Form(False),
+                  lang: str = Form("en")) -> dict:
+    """US bank-keys quick check — a TYPED routing/account pair, no document.
+    Deciders are the same as a document run: the approval-gated YAML rules
+    (BNK-040..046 routing/account arithmetic). Live directory evidence is
+    opt-in and NOTE-only (invariant #1: web never moves the verdict) — a
+    directory miss surfaces as web_hint, not as a REJECT. No OCR and no model:
+    the input is already structured, so this answers deterministically."""
+    routing, account, bank_name = routing.strip(), account.strip(), bank_name.strip()
+    if not routing and not account:
+        raise api_error(400, "bad_request",
+                        "provide a routing number and/or an account number")
+    if lang not in ("en", "ru"):
+        raise api_error(400, "bad_request", "lang must be 'en' or 'ru'")
+    if web and os.environ.get("MDMDOC_MODE", "").strip() == "api-only":
+        raise api_error(400, "bad_request",
+                        "external web evidence is disabled in the api-only deployment")
+    from ..fields import Extraction
+    from ..rules.engine import run_rules
+    from ..verdict import decide, next_step
+    fields: dict = {"bank_country": "US"}
+    if routing:
+        fields["routing_aba"] = routing
+    if account:
+        fields["account_number"] = account
+    if bank_name:
+        fields["bank_name"] = bank_name
+    # doc_type stays EMPTY: there is no document, so document-typed rules
+    # (applies_to: invoice/payment_instructions/…) must not fire — only the
+    # field-arithmetic rules (routing/account/SWIFT/IBAN shape) apply.
+    ext = Extraction(doc_class="bank", doc_type="", fields=fields)
+    ext.register_secrets()
+    gate = os.environ.get("MDMDOC_RULE_GATE", "1").strip().lower() in ("1", "true", "on", "yes")
+    findings = run_rules(ext, lang=lang, enforce_approvals=gate)
+    web_rows: list[dict] = []
+    web_hint = ""
+    if web:
+        from .. import web_enrichment
+        web_findings, web_rows = web_enrichment.gather(ext, force=True)
+        findings.extend(web_findings)
+        for row in web_rows:
+            if row.get("check") == "aba_directory" and row.get("status") == "not_found":
+                web_hint = ("routing number not found in any live directory — "
+                            "unassigned or retired; verify with the bank before payment")
+    verdict = decide(findings)
+    return {"verdict": verdict, "next_step": next_step("bank", verdict),
+            "findings": [f.to_dict() for f in findings],
+            "web": web_rows, "web_hint": web_hint}
 
 
 # ---------------------------------------------------------------- runs --------
