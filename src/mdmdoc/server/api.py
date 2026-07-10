@@ -148,6 +148,33 @@ def approve_rule(doc_class: str, body: dict) -> dict:
     return {"ok": True, "updated": n, "decision": decision}
 
 
+@router_teach.get("/rules/stats", tags=["rules"])
+def rules_stats() -> dict:
+    """П7: per-rule firing stats + tier promotion/demotion PROPOSALS from the
+    local run history and confirmed labels. Read-only; application happens via
+    the explicit tier endpoint below (a human decision)."""
+    from .. import rule_stats
+    return rule_stats.build()
+
+
+@router_teach.post("/rules/{doc_class}/tier", tags=["rules"])
+def set_rule_tier(doc_class: str, body: dict) -> dict:
+    """Apply ONE tier change (the human's approval of a proposal). Surgical
+    tier-line edit; tier is approval-hash-immune so the rule does NOT reset to
+    pending — the hard gate is untouched."""
+    from .. import rules_io
+    if doc_class not in ("bank", "w9"):
+        raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
+    rid = str(body.get("rule_id") or "")
+    tier = str(body.get("tier") or "")
+    if not rid:
+        raise api_error(400, "bad_request", "rule_id required")
+    try:
+        return {"ok": True, **rules_io.set_rule_tier(doc_class, rid, tier)}
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+
+
 # ---------------------------------------------------------------- settings ----
 @router_teach.get("/settings", tags=["system"])
 def get_settings() -> dict:

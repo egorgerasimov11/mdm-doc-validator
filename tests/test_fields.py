@@ -181,9 +181,10 @@ def test_no_writes_outside_choke_points():
     # rules_io.py writes rules/*.yaml — no PII, so no leak gate, but a named write point
     # config.py writes settings.json (engine mode etc.) — operator state, no PII
     # synth.py writes eval/synthetic/ — PII-free by construction, leak-gated per row
+    # rule_stats.py writes eval/rule_stats.json — rule ids + counts only, no PII
     allowed = {"runstore.py", "modelfile.py", "evalrun.py", "dataset.py",
                "fewshot.py", "lora_export.py", "adoption.py", "rules_io.py",
-               "rule_approvals.py", "config.py", "synth.py"}
+               "rule_approvals.py", "config.py", "synth.py", "rule_stats.py"}
     offenders = []
     for p in src.rglob("*.py"):
         if p.name in allowed:

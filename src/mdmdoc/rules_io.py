@@ -9,6 +9,7 @@ The model never decides verdicts — rules stay explicit and editable (invariant
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -55,6 +56,42 @@ def save_rules(doc_class: str, text: str) -> int:
     with _LOCK:
         config.atomic_write_text(rules_path(doc_class), text)
     return len(parsed["rules"])
+
+
+_TIERS = ("corp", "experimental", "learned")
+
+
+def set_rule_tier(doc_class: str, rule_id: str, tier: str) -> dict:
+    """П7 promotion apply: SURGICAL edit of only the `tier:` line inside the
+    rule's block (a YAML re-dump would destroy in-block comments). `tier` is
+    approval-hash-immune (rule_approvals._METADATA_KEYS), so this NEVER resets
+    the rule to pending — the hard gate is untouched."""
+    if tier not in _TIERS:
+        raise ValueError(f"tier must be one of {_TIERS}, got {tier!r}")
+    from .rule_propose import _rule_block_span
+    p = rules_path(doc_class)
+    text = p.read_text(encoding="utf-8")
+    span = _rule_block_span(text, rule_id)
+    if not span:
+        raise ValueError(f"rule {rule_id} not found in {p.name}")
+    lines = text.splitlines(keepends=True)
+    old_tier = ""
+    edited = False
+    for i in range(span[0], span[1]):
+        m = re.match(r"^(\s*)tier:\s*(\S+)\s*$", lines[i])
+        if m:
+            old_tier = m.group(2)
+            lines[i] = f"{m.group(1)}tier: {tier}\n"
+            edited = True
+            break
+    if not edited:   # rule predates the metadata — insert right after the id line
+        indent = re.match(r"^(\s*)-\s", lines[span[0]]).group(1) + "  "
+        lines.insert(span[0] + 1, f"{indent}tier: {tier}\n")
+    new_text = "".join(lines)
+    with _LOCK:
+        config.atomic_write_text(p, new_text)
+    return {"rule_id": rule_id, "old_tier": old_tier, "new_tier": tier,
+            "hash_unchanged": True}
 
 
 def regenerate_abap() -> dict:

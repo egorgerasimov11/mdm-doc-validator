@@ -20,11 +20,33 @@
 </div>
 <pre id="job-log" hidden></pre>
 
+{% if proposals %}
+<h2>Tier promotion proposals</h2>
+<p class="meta">Accumulated precision on confirmed cases (Wilson lower bound) says these
+  rules earned a tier move. <strong>tier is approval-hash-immune</strong> — applying a
+  proposal does NOT reset the rule to pending; the hard gate is untouched. Proposals are
+  never auto-applied.</p>
+<table class="data-table" id="proposals-table">
+  <tr><th>rule</th><th>move</th><th>evidence</th><th></th></tr>
+  {% for p in proposals %}
+  <tr>
+    <td class="meta"><code>{{ p.rule_id }}</code></td>
+    <td>{{ p.kind }}: {{ p.from_tier }} → <strong>{{ p.to_tier }}</strong></td>
+    <td class="meta">n={{ p.evidence.n }} hits={{ p.evidence.hits }}
+      wilson_lb={{ p.evidence.wilson_lb }}{% if p.evidence.age_days %} · age {{ p.evidence.age_days }}d{% endif %}</td>
+    <td><button type="button" class="tier-apply" data-rule="{{ p.rule_id }}"
+        data-class="{{ doc_class }}" data-tier="{{ p.to_tier }}">Apply {{ p.kind }}</button></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 <table class="data-table" id="rules-table">
-  <tr><th>rule</th><th>what it does</th><th>effect</th><th>status</th><th>decision</th></tr>
+  <tr><th>rule</th><th>tier</th><th>what it does</th><th>effect</th><th>status</th><th>decision</th></tr>
   {% for r in rows %}
   <tr data-rule="{{ r.id }}">
     <td class="meta" style="white-space:nowrap"><code>{{ r.id }}</code><br>{{ r.name }}</td>
+    <td class="meta"><span class="tag tier-chip" data-rule="{{ r.id }}">{{ r.tier or '—' }}</span></td>
     <td>{{ r.message }}{% if r.applies_to %} <span class="hint">[{{ r.applies_to | join(', ') }}]</span>{% endif %}</td>
     <td class="meta">{{ r.severity }}{% if r.verdict_effect %} → {{ r.verdict_effect }}{% endif %}</td>
     <td class="status">
@@ -61,6 +83,18 @@
     decide(b.dataset.class, b.dataset.rule, "approved", b.closest("tr")));
   document.querySelectorAll(".rule-reject").forEach(b => b.onclick = () =>
     decide(b.dataset.class, b.dataset.rule, "rejected", b.closest("tr")));
+  document.querySelectorAll(".tier-apply").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const r = await api(`/api/v1/rules/${b.dataset.class}/tier`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_id: b.dataset.rule, tier: b.dataset.tier }) });
+      say(`${b.dataset.rule}: tier ${r.old_tier || "—"} -> ${r.new_tier} (approval kept)`);
+      const chip = document.querySelector(`.tier-chip[data-rule="${b.dataset.rule}"]`);
+      if (chip) chip.textContent = r.new_tier;
+      b.closest("tr").remove();
+    } catch (e) { say("ERROR: " + e.message); b.disabled = false; }
+  });
   const all = document.getElementById("approve-all");
   all.onclick = async () => {
     all.disabled = true; say("approving all pending rules…");

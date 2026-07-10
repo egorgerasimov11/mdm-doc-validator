@@ -350,9 +350,19 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
             continue
         rows.append({"id": r.get("id"), "name": r.get("name"), "message": r.get("message"),
                      "severity": r.get("severity"), "verdict_effect": r.get("verdict_effect"),
-                     "applies_to": r.get("applies_to"),
+                     "applies_to": r.get("applies_to"), "tier": r.get("tier") or "",
                      "status": rule_approvals.status(store, doc_class, r)})
     counts = {s: sum(x["status"] == s for x in rows)
               for s in ("approved", "pending", "rejected")}
+    # П7 tier-promotion proposals (best-effort: an empty runs dir just means none)
+    proposals = []
+    try:
+        from .. import rule_stats
+        payload = rule_stats.build()
+        proposals = [p for p in payload.get("proposals", [])
+                     if p.get("doc_class") == doc_class]
+    except Exception:  # the approvals page must never fail on stats
+        proposals = []
     return templates.TemplateResponse(request, "rules_approve.html", _ctx(
-        page="rules", doc_class=doc_class, rows=rows, counts=counts))
+        page="rules", doc_class=doc_class, rows=rows, counts=counts,
+        proposals=proposals))

@@ -7,6 +7,7 @@ Exit codes: 0 ACCEPT, 1 REJECT, 2 WARNING/NEED_MANUAL_REVIEW, 3 Ollama down, 4 u
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -104,6 +105,41 @@ def _cmd_eval(args) -> int:
     return run_eval(only=args.only, limit=args.limit, tag=args.tag,
                     scenario=args.scenario, dataset=getattr(args, "dataset", "real"),
                     engine=engine)
+
+
+def _cmd_rules_stats(args) -> int:
+    from . import rule_stats
+    payload = rule_stats.build(
+        runs_dir=Path(args.runs) if args.runs else None,
+        labels_path=Path(args.labels) if args.labels else None)
+    stats = payload["per_rule"]
+    fired_any = [s for s in stats if s["fired"]]
+    if not fired_any:
+        print(f"no runs found at {args.runs or config.RUNS_DIR} — nothing to aggregate "
+              "(run this on the host that holds the run history, e.g. the mini)")
+    else:
+        print("| rule | tier | effect | fired | confirmed | precision | wilson_lb | age_d |")
+        print("|---|---|---|---|---|---|---|---|")
+        for s in stats:
+            if not s["fired"]:
+                continue
+            print(f"| {s['doc_class']}:{s['rule_id']} | {s['tier'] or '—'} "
+                  f"| {s['verdict_effect'] or 'NOTE'} | {s['fired']} "
+                  f"| {s['fired_confirmed']} | {s['precision']} | {s['wilson_lb']} "
+                  f"| {s['age_days']} |")
+    if payload["proposals"]:
+        print("\nPROPOSALS (approve in the panel — never auto-applied):")
+        for p in payload["proposals"]:
+            print(f"  {p['kind']}: {p['doc_class']}:{p['rule_id']} "
+                  f"{p['from_tier']} -> {p['to_tier']}  evidence={p['evidence']}")
+    else:
+        print("\nno tier proposals (thresholds not met)")
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=1))
+    if args.write:
+        from .rule_stats import write_report
+        print(f"written: {write_report(payload)}")
+    return 0
 
 
 def _cmd_synth_gen(args) -> int:
@@ -322,6 +358,16 @@ def main(argv: list[str] | None = None) -> int:
                    help="staleness self-check: regenerate to a temp dir and "
                         "compare labels + per-doc text against the committed corpus")
     p.set_defaults(func=_cmd_synth_gen)
+
+    p = sub.add_parser("rules-stats",
+                       help="per-rule firing stats + tier promotion PROPOSALS "
+                            "(П7 governance; approval happens in the panel)")
+    p.add_argument("--runs", default="", help="runs dir (default: this host's runs/)")
+    p.add_argument("--labels", default="", help="labels.jsonl (default: this host's)")
+    p.add_argument("--json", action="store_true", help="print the full JSON payload")
+    p.add_argument("--write", action="store_true",
+                   help="persist eval/rule_stats.json for the panel")
+    p.set_defaults(func=_cmd_rules_stats)
 
     p = sub.add_parser("train", help="build few-shot prompts and/or a custom Ollama model from labels")
     p.add_argument("--fewshot", action="store_true")
