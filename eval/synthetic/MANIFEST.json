@@ -2,7 +2,7 @@
  "seed": 20260709,
  "generator_version": 2,
  "count": 55,
- "truth_vs_deterministic_agreement": 0.582,
+ "truth_vs_deterministic_agreement": 0.618,
  "matrix": {
   "synth_bank_letter": 24,
   "synth_bank_statement": 4,

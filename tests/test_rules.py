@@ -80,38 +80,44 @@ def test_computer_generated_statement_is_evidence():
     assert not any(x.rule_id == "BNK-021" for x in f)
 
 
-def test_bank_statement_no_unsigned_noise_and_swift_gap_note():
-    # statements carry no signature by design: no BNK-021/026; missing SWIFT is a
-    # NOTE pointing at the SAP/form comparison, and the verdict stays ACCEPT
+def test_bank_statement_not_acceptable_rejects():
+    """MDG template policy 2026-07-10 (BNK-047): a bank/account statement is not
+    acceptable bank support — an account cannot be verified from a statement.
+    Mirrors invoice/editable: the doc TYPE alone rejects."""
     f = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
                         bank_name="DBS Bank Ltd", account_number="072-154506-3",
                         signed=False))
-    assert decide(f) == "ACCEPT"
+    assert any(x.rule_id == "BNK-047" for x in f)
+    assert decide(f) == "REJECT"
+    # a genuine bank LETTER is unaffected — it stays acceptable
+    f2 = run_rules(_bank("bank_letter", account_holder="IQH LABS PTE. LTD.",
+                         bank_name="DBS Bank Ltd", account_number="072-154506-3",
+                         signed=True))
+    assert not any(x.rule_id == "BNK-047" for x in f2)
+
+
+def test_bank_statement_sub_rules_still_fire_under_reject():
+    # statements carry no signature by design (no BNK-021/026); the SWIFT gap is
+    # a NOTE (BNK-006); the holder/id/bank-name gaps still surface (BNK-023/024/
+    # 025) even though BNK-047 now folds the verdict to REJECT
+    f = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
+                        bank_name="DBS Bank Ltd", account_number="072-154506-3",
+                        signed=False))
     assert any(x.rule_id == "BNK-006" for x in f)
     assert not any(x.rule_id in ("BNK-021", "BNK-026") for x in f)
-
-
-def test_bank_statement_missing_holder_is_nmr():
-    """audit-wave C7: bank_statement was excluded from BNK-023/024/025, so a
-    holder-less statement could ACCEPT (worst in degraded no-LLM mode)."""
-    f = run_rules(_bank("bank_statement", bank_name="DBS Bank Ltd",
-                        account_number="072-154506-3", signed=False))
-    assert any(x.rule_id == "BNK-023" for x in f)
-    assert decide(f) == "NEED_MANUAL_REVIEW"
-
-
-def test_bank_statement_no_ids_is_nmr():
-    f = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
-                        bank_name="DBS Bank Ltd", signed=False))
-    assert any(x.rule_id == "BNK-024" for x in f)
-    assert decide(f) == "NEED_MANUAL_REVIEW"
-
-
-def test_bank_statement_missing_bank_name_warns():
-    f = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
-                        account_number="072-154506-3", signed=False))
-    assert any(x.rule_id == "BNK-025" for x in f)
-    assert decide(f) == "WARNING"
+    # BNK-023 (missing holder) still fires on a holder-less statement
+    f2 = run_rules(_bank("bank_statement", bank_name="DBS Bank Ltd",
+                         account_number="072-154506-3", signed=False))
+    assert any(x.rule_id == "BNK-023" for x in f2)
+    # BNK-024 (no ids) and BNK-025 (missing bank name) likewise
+    f3 = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
+                         bank_name="DBS Bank Ltd", signed=False))
+    assert any(x.rule_id == "BNK-024" for x in f3)
+    f4 = run_rules(_bank("bank_statement", account_holder="IQH LABS PTE. LTD.",
+                         account_number="072-154506-3", signed=False))
+    assert any(x.rule_id == "BNK-025" for x in f4)
+    # every one of these folds to REJECT now (the statement type is disqualifying)
+    assert all(decide(x) == "REJECT" for x in (f, f2, f3, f4))
 
 
 def test_payment_instructions_missing_holder_is_nmr():

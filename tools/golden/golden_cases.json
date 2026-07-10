@@ -40,9 +40,10 @@
      "document date = statement period"
     ],
     "findings": [
-     "BNK-006"
+     "BNK-006",
+     "BNK-047"
     ],
-    "verdict": "ACCEPT"
+    "verdict": "REJECT"
    }
   },
   {

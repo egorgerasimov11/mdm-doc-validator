@@ -303,6 +303,17 @@ rules:
     message: "Wire routing number {value_masked} has a never-assigned Fed prefix: {detail}."
     message_ru: "Wire-routing {value_masked} имеет никогда не назначаемый префикс ФРС: {detail}."
 
+  - id: BNK-047
+    name: bank_statement_not_acceptable
+    tier: corp
+    source: policy
+    applies_to: [bank_statement]
+    when: {always: true}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Bank/account statement is not acceptable as bank support — an account cannot be verified from a statement. Request a letter from the vendor's bank, a signed & stamped supplier letterhead stating the bank data, or a void check with a signed PDF letter. (MDG template policy 2026-07-10: 'account statement' removed from accepted bank documents.)"
+    message_ru: "Банковская выписка (bank/account statement) не принимается как банковское подтверждение — по выписке нельзя верифицировать счёт. Запросить письмо из банка вендора, подписанный и заверенный печатью letterhead поставщика с банковскими реквизитами, либо void check + подписанное PDF-письмо. (Политика MDG-шаблона 2026-07-10: «account statement» исключён из принимаемых банковских документов.)"
+
 --- # doc_class: w9
 # W-9 / W-8 document rules — explicit and editable. Sources: mdm-w9-checker skill
 # (+ its rules.md / dynamic_rules.md).
