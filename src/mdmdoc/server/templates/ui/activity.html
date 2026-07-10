@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — activity{% endblock %}
+{% block content %}
+<h1>Activity</h1>
+<p class="meta">Every background job — analyses, teach/retrain, rule extraction, evals.
+An analysis keeps running when you navigate away or close the page; it lives HERE.
+Finished work stays in <a href="/ui/history">History</a> even across server restarts.</p>
+
+<section>
+  <h2>Active <span class="meta" id="active-note"></span></h2>
+  <ul class="timeline" id="act-active">
+    {% for j in active %}
+    <li class="queue-row"><span class="dot dot--WARNING"></span>
+      <span class="grow"><strong>{{ j.label or j.kind }}</strong> — {{ j.status }}{% if j.stage %} · {{ j.stage }} {{ j.percent }}%{% endif %}{% if j.queue_pos and j.queue_pos > 0 %} · waiting #{{ j.queue_pos }}{% endif %}</span>
+      {% if j.cancelable %}<button type="button" class="queue-cancel" data-job="{{ j.id }}">Cancel</button>{% endif %}
+    </li>
+    {% else %}
+    <li class="meta">nothing running</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section>
+  <h2>Recently finished <span class="meta">latest 50 (in-memory + persisted history)</span></h2>
+  <ul class="timeline">
+    {% for j in finished %}
+    <li><span class="dot {{ 'dot--ok' if j.status == 'done' else 'dot--down' }}"></span>
+      <span class="meta">{{ j.kind }}</span>
+      <span class="grow">{{ j.label or '' }} — {{ j.status }}{% if j.run_id %} · <a href="/ui/runs/{{ j.run_id }}">run →</a>{% endif %}</span>
+      <span class="meta">{{ j.finished or j.ts }}</span></li>
+    {% else %}
+    <li class="meta">no finished jobs yet</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+(function () {
+  var tokenMeta = document.querySelector('meta[name="mdmdoc-token"]');
+  function headers() {
+    var h = {};
+    if (tokenMeta && tokenMeta.content) h['Authorization'] = 'Bearer ' + tokenMeta.content;
+    return h;
+  }
+  function tick() {
+    fetch('/api/v1/jobs', { headers: headers() })
+      .then(function (r) { return r.json(); })
+      .then(function (all) {
+        var act = (all || []).filter(function (j) { return j.status === 'queued' || j.status === 'running'; });
+        var ul = document.getElementById('act-active');
+        ul.innerHTML = '';
+        if (!act.length) { ul.innerHTML = '<li class="meta">nothing running</li>'; return; }
+        act.forEach(function (j) {
+          var li = document.createElement('li');
+          li.className = 'queue-row';
+          var state = j.status === 'running'
+            ? (j.stage ? 'running · ' + j.stage + ' ' + (j.percent || 0) + '%' : 'running')
+            : (j.queue_pos > 0 ? 'waiting #' + j.queue_pos : 'starting…');
+          li.innerHTML = '<span class="dot dot--WARNING"></span>' +
+            '<span class="grow"><strong>' + (j.label || j.kind) + '</strong> — ' + state + '</span>' +
+            (j.status === 'running' ? '<progress max="100" value="' + (j.percent || 0) + '"></progress>' : '');
+          if (j.cancelable) {
+            var btn = document.createElement('button');
+            btn.type = 'button'; btn.className = 'queue-cancel'; btn.textContent = 'Cancel';
+            btn.onclick = function () {
+              btn.disabled = true;
+              fetch('/api/v1/jobs/' + j.id + '/cancel', { method: 'POST', headers: headers() });
+            };
+            li.appendChild(btn);
+          }
+          ul.appendChild(li);
+        });
+      }).catch(function () {});
+  }
+  tick();
+  setInterval(tick, 2000);
+  document.querySelectorAll('.queue-cancel[data-job]').forEach(function (b) {
+    b.onclick = function () {
+      b.disabled = true;
+      fetch('/api/v1/jobs/' + b.dataset.job + '/cancel', { method: 'POST', headers: headers() });
+    };
+  });
+})();
+</script>
+{% endblock %}

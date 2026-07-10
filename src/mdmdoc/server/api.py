@@ -203,6 +203,9 @@ def approve_rule(doc_class: str, body: dict) -> dict:
         if r:
             rule_approvals.set_decision(doc_class, r, decision, note=body.get("note", ""))
             n += 1
+            from .. import oplog
+            oplog.log("rule-approve", rule_id=str(rid), doc_class=doc_class,
+                      detail=decision)
     return {"ok": True, "updated": n, "decision": decision}
 
 
@@ -228,9 +231,13 @@ def set_rule_tier(doc_class: str, body: dict) -> dict:
     if not rid:
         raise api_error(400, "bad_request", "rule_id required")
     try:
-        return {"ok": True, **rules_io.set_rule_tier(doc_class, rid, tier)}
+        out = rules_io.set_rule_tier(doc_class, rid, tier)
     except ValueError as e:
         raise api_error(400, "bad_request", str(e))
+    from .. import oplog
+    oplog.log("rule-tier", rule_id=rid, doc_class=doc_class,
+              detail=f"{out.get('old_tier') or '?'} -> {tier}")
+    return {"ok": True, **out}
 
 
 # ---------------------------------------------------------------- settings ----

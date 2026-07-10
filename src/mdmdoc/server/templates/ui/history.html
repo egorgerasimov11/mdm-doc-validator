@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — history{% endblock %}
+{% block content %}
+<h1>History</h1>
+<p class="meta">Every operator action and every background job, append-only
+(<code>dataset/oplog.jsonl</code>) — survives restarts. Newest first.</p>
+
+<section>
+  <div class="actions" id="hist-filters">
+    <span class="seg">
+      <button type="button" class="active" data-f="">all</button>
+      <button type="button" data-f="check,cancel">runs</button>
+      <button type="button" data-f="label,mark-valid,rating,finding-vote,run-test">feedback</button>
+      <button type="button" data-f="rule-,skill-upload">rules</button>
+      <button type="button" data-f="job-">jobs</button>
+      <button type="button" data-f="train,eval,settings,bulk">system</button>
+    </span>
+    <span class="meta">{{ rows | length }} shown</span>
+  </div>
+  <ul class="timeline" id="hist-list">
+    {% for r in rows %}
+    <li data-action="{{ r.action }}">
+      <span class="meta" style="min-width:11.5em">{{ r.ts }}</span>
+      <span class="chip">{{ r.action }}</span>
+      <span class="grow">
+        {% if r.run_id %}<a href="/ui/runs/{{ r.run_id }}"><code>{{ r.run_id[:10] }}</code></a>{% endif %}
+        {% if r.rule_id %}<code>{{ r.rule_id }}</code>{% endif %}
+        {% if r.doc_class %}<span class="meta">{{ r.doc_class }}</span>{% endif %}
+        {{ r.detail or '' }}
+      </span>
+      {% if r.job_id %}<span class="meta">job {{ r.job_id[:8] }}</span>{% endif %}
+    </li>
+    {% else %}
+    <li class="meta">no actions recorded yet</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+(function () {
+  document.querySelectorAll('#hist-filters button').forEach(function (b) {
+    b.onclick = function () {
+      document.querySelectorAll('#hist-filters button').forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+      var prefixes = (b.dataset.f || '').split(',').filter(Boolean);
+      document.querySelectorAll('#hist-list li[data-action]').forEach(function (li) {
+        var a = li.dataset.action || '';
+        li.hidden = prefixes.length > 0 && !prefixes.some(function (p) { return a.indexOf(p) === 0; });
+      });
+    };
+  });
+})();
+</script>
+{% endblock %}

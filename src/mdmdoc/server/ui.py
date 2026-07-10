@@ -92,6 +92,7 @@ def dashboard(request: Request):
     return templates.TemplateResponse(request, "dashboard.html",
                                       _ctx(runs=rows[:40], page="documents", subpage="documents",
                                            test_count=len(runstore.list_runs(test=True)),
+                                           recent_actions=__import__("mdmdoc.oplog", fromlist=["recent"]).recent(limit=8),
                                            default_effort=config.default_effort(),
                                            engine_default=config.engine_mode(),
                                            engine_modes=list(config.ENGINE_MODES),
@@ -363,6 +364,46 @@ def training_page(request: Request):
         current_model=current_model, strong_model=strong_model,
         running_jobs=[j.to_dict() for j in jobs.REGISTRY.list()
                       if j.status in ("queued", "running")]))
+
+
+@router_ui.get("/ui/activity", response_class=HTMLResponse)
+def activity_page(request: Request):
+    """E2: every background job — running work survives navigation and lives
+    here; finished work falls back to the persisted oplog after a restart."""
+    from .. import oplog
+    all_jobs = [j.to_dict() for j in jobs.REGISTRY.list()]
+    active = [j for j in all_jobs if j["status"] in ("queued", "running")]
+    finished = []
+    for j in all_jobs:
+        if j["status"] in ("done", "error", "canceled"):
+            finished.append({"kind": j["kind"], "label": j.get("label"),
+                             "status": j["status"], "finished": j.get("finished"),
+                             "run_id": (j.get("result") or {}).get("run_id", "")})
+    if len(finished) < 50:   # older history from the persisted ledger
+        seen = {(f["kind"], f.get("finished")) for f in finished}
+        for r in oplog.recent(limit=200, actions=("job-end",)):
+            det = str(r.get("detail", ""))
+            kind = det.split(" ", 1)[0] if det else "job"
+            key = (kind, r.get("ts"))
+            if key in seen:
+                continue
+            status = "done" if " done" in det else                 ("canceled" if " canceled" in det else
+                 ("error" if " error" in det else ""))
+            finished.append({"kind": kind, "label": det.split("— ")[-1] if "— " in det else "",
+                             "status": status or "finished", "finished": "",
+                             "ts": r.get("ts"), "run_id": ""})
+            if len(finished) >= 50:
+                break
+    return templates.TemplateResponse(request, "activity.html", _ctx(
+        page="activity", active=active, finished=finished[:50]))
+
+
+@router_ui.get("/ui/history", response_class=HTMLResponse)
+def history_page(request: Request):
+    """E1: the operator action audit trail (dataset/oplog.jsonl)."""
+    from .. import oplog
+    return templates.TemplateResponse(request, "history.html", _ctx(
+        page="activity", rows=oplog.recent(limit=500)))
 
 
 @router_ui.get("/ui/debug", response_class=HTMLResponse)

@@ -189,6 +189,8 @@ class JobRegistry:
         hands its own Job in BEFORE the thread starts (no set-after-start race
         for cancel/progress wiring)."""
         job = Job(id=uuid.uuid4().hex[:12], kind=kind, created=runstore.now_iso())
+        from .. import oplog
+        oplog.log("job-start", job_id=job.id, detail=kind)
         with self._lock:
             self._jobs[job.id] = job
             self._order.append(job.id)
@@ -233,6 +235,19 @@ class JobRegistry:
                 if capture_stdout and router:
                     router.clear_sink()
                 job.finished = runstore.now_iso()
+                from .. import oplog
+                dur = ""
+                try:
+                    import datetime as _dt
+                    dur = str(int((_dt.datetime.fromisoformat(job.finished.rstrip("Z"))
+                                   - _dt.datetime.fromisoformat((job.started or job.created).rstrip("Z"))
+                                   ).total_seconds()))
+                except Exception:
+                    pass
+                oplog.log("job-end", job_id=job.id,
+                          detail=f"{kind} {job.status}"
+                                 + (f" {dur}s" if dur else "")
+                                 + (f" — {job.label}" if job.label else ""))
 
         threading.Thread(target=worker, daemon=True, name=f"job-{kind}-{job.id}").start()
         return job

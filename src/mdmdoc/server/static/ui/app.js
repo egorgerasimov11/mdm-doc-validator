@@ -145,8 +145,10 @@ window.mdmdoc = (() => {
       if (!panel || !list) return;
       let all = [];
       try { all = await api("/api/v1/jobs"); } catch (e) { return; }
+      // E2: EVERY active kind is visible (retrain/note-rule/skill-import/eval…),
+      // and page reloads pick running work back up — nothing is "lost"
       const rows = all.filter(j => tracked.has(j.id) ||
-                                   (j.kind === "check" && (j.status === "queued" || j.status === "running")));
+                                   j.status === "queued" || j.status === "running");
       if (!rows.length) { panel.hidden = true; clearInterval(queueTimer); queueTimer = null; return; }
       panel.hidden = false;
       list.innerHTML = "";
@@ -1022,6 +1024,23 @@ window.mdmdoc = (() => {
 
   initFilterBar();
   initCopyReport();
+
+  /* ---------- Activity nav badge (all pages, E2) -------------------------- */
+  function initActivityBadge() {
+    const badge = document.getElementById("activity-badge");
+    if (!badge) return;
+    const tick = async () => {
+      try {
+        const all = await api("/api/v1/jobs");
+        const n = (all || []).filter(j => j.status === "queued" || j.status === "running").length;
+        badge.hidden = n === 0;
+        badge.textContent = n ? " ●" + n : "";
+      } catch (e) { /* ignore */ }
+    };
+    tick();
+    setInterval(tick, 5000);
+  }
+  initActivityBadge();
 
   return { api, pollJob, initDropZone, initTplCompare, initValidRate, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,

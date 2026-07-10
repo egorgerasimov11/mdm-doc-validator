@@ -23,6 +23,42 @@ from ..privacy import scrub_text
 PKG_DIR = Path(__file__).resolve().parent
 
 
+import re as _re
+
+_AUDIT_ROUTES = (
+    (_re.compile(r"^/api/v1/rules/skill-upload$"), "skill-upload", ()),
+    (_re.compile(r"^/api/v1/rules/unified$"), "rule-save", ()),
+    (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/raw$"), "rule-save", ()),
+    (_re.compile(r"^/api/v1/rules/regenerate$"), "rule-regenerate", ()),
+    (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/delete$"), None, ()),   # handler logs (rule_id)
+    (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/approve$"), None, ()),  # handler logs (rule_id)
+    (_re.compile(r"^/api/v1/rules/(?P<doc_class>\w+)/tier$"), None, ()),     # handler logs (rule_id)
+    (_re.compile(r"^/api/v1/settings$"), "settings", ()),
+    (_re.compile(r"^/api/v1/check$"), "check", ()),
+    (_re.compile(r"^/api/v1/check-routing$"), "check", ()),
+    (_re.compile(r"^/api/v1/bulk$"), "bulk", ()),
+    (_re.compile(r"^/api/v1/jobs/(?P<job_id>\w+)/cancel$"), "cancel", ()),
+    (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/label$"), "label", ()),
+    (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/mark-valid$"), "mark-valid", ()),
+    (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/rating$"), "rating", ()),
+    (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/test$"), "run-test", ()),
+    (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/propose-fix$"), "propose", ()),
+    (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/findings/(?P<rule_id>[\w-]+)/vote$"),
+     "finding-vote", ()),
+    (_re.compile(r"^/api/v1/train/(?P<detail>[\w-]+)$"), "train", ()),
+    (_re.compile(r"^/api/v1/eval$"), "eval", ()),
+)
+
+
+def _audit_route(path: str):
+    """-> (action|None, kwargs) for the audit middleware."""
+    for rx, action, _ in _AUDIT_ROUTES:
+        m = rx.match(path)
+        if m:
+            return action, {k: v for k, v in m.groupdict().items() if v}
+    return None, {}
+
+
 def create_app(mode: str | None = None) -> FastAPI:
     mode = mode or os.environ.get("MDMDOC_MODE", "full")
     os.environ["MDMDOC_MODE"] = mode
@@ -92,6 +128,25 @@ def create_app(mode: str | None = None) -> FastAPI:
         @app.get("/", include_in_schema=False)
         def index():
             return RedirectResponse("/ui")
+
+        @app.middleware("http")
+        async def _operator_audit(request: Request, call_next):
+            # E1 oplog: ONE seam records every successful mutating operator
+            # action (POST /api/v1/*). Handlers with body-level detail
+            # (approve/tier: rule_id) log richer rows themselves and are
+            # excluded here to avoid doubles.
+            resp = await call_next(request)
+            try:
+                path = request.url.path
+                if (request.method == "POST" and path.startswith("/api/v1/")
+                        and resp.status_code < 400):
+                    from .. import oplog
+                    action, kw = _audit_route(path)
+                    if action:
+                        oplog.log(action, **kw)
+            except Exception:
+                pass
+            return resp
 
         @app.middleware("http")
         async def _ui_token_cookie(request: Request, call_next):
