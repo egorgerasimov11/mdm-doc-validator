@@ -207,3 +207,8 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
              background: var(--bg); border: 1px solid var(--divider); border-radius: 8px;
              padding: 6px 12px; min-width: 420px; }
 .menu-body .actions { margin: 6px 0; }
+
+/* the document itself sits above the tabs — context for every panel, so keep
+   the filmstrip compact enough that the tab row stays on the first screen */
+.preview-section { padding-top: 12px; }
+.preview-section .preview-strip img { height: 150px; }

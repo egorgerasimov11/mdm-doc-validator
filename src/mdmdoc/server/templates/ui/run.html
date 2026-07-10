@@ -6,7 +6,7 @@
    content, so an empty tab can never be clicked. #}
 {% set has_data = data_rows or (label and trace) or pub.inventory or pub.crosscheck %}
 {% set has_cmp = sap_rows or tpl_rows or web_rows or pub.engine_compare %}
-{% set has_perc = preview_pages or pub.signature_probe %}
+{% set has_perc = pub.signature_probe %}
 
 <p class="meta" style="margin-top:16px"><a href="/ui">← Documents</a></p>
 {% if flash == 'labeled' %}<p class="flash">Saved — dataset now has {{ labels_count }} examples. <a href="/ui/training">Training →</a></p>{% endif %}
@@ -76,12 +76,32 @@
 </div>
 <pre id="job-log" hidden></pre>
 
+{% if preview_pages %}
+<section class="preview-section">
+  <h2>Document <span class="meta">{% if preview_pages|length < total_pages %}showing the {{ preview_pages|length }} page(s) the pipeline read of {{ total_pages }}{% else %}all {{ total_pages }} page(s){% endif %} · click to zoom</span></h2>
+  <div class="preview-strip">
+    {% for p in preview_pages %}
+    <a href="/api/v1/runs/{{ run_id }}/preview/{{ p }}" target="_blank">
+      <img src="/api/v1/runs/{{ run_id }}/preview/{{ p }}" alt="page {{ p + 1 }}" loading="lazy">
+      <span class="meta">page {{ p + 1 }}</span>
+    </a>
+    {% endfor %}
+    {% if has_sap_shot %}
+    <a href="/api/v1/runs/{{ run_id }}/preview/0?src=sap" target="_blank">
+      <img src="/api/v1/runs/{{ run_id }}/preview/0?src=sap" alt="SAP screen" loading="lazy">
+      <span class="meta">SAP screen</span>
+    </a>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
 <div class="run-tabs">
   <span class="seg" id="run-tabs">
     {% if has_data %}<button type="button" data-panel-target="data">Data</button>{% endif %}
     <button type="button" data-panel-target="findings">Findings{% if findings %} <span class="meta">{{ findings|length }}</span>{% endif %}</button>
     {% if has_cmp %}<button type="button" data-panel-target="comparisons">Comparisons</button>{% endif %}
-    {% if has_perc %}<button type="button" data-panel-target="perception">Signature &amp; perception</button>{% endif %}
+    {% if has_perc %}<button type="button" data-panel-target="perception">Signature</button>{% endif %}
     <button type="button" data-panel-target="artifacts">Artifacts</button>
   </span>
 </div>
@@ -321,26 +341,6 @@
 
 {% if has_perc %}
 <div data-panel="perception">
-  {% if preview_pages %}
-  <section>
-    <h2>Document preview <span class="meta">{% if preview_pages|length < total_pages %}showing the {{ preview_pages|length }} page(s) the pipeline read of {{ total_pages }}{% else %}all {{ total_pages }} page(s){% endif %}</span></h2>
-    <div class="preview-strip">
-      {% for p in preview_pages %}
-      <a href="/api/v1/runs/{{ run_id }}/preview/{{ p }}" target="_blank">
-        <img src="/api/v1/runs/{{ run_id }}/preview/{{ p }}" alt="page {{ p + 1 }}" loading="lazy">
-        <span class="meta">page {{ p + 1 }}</span>
-      </a>
-      {% endfor %}
-      {% if has_sap_shot %}
-      <a href="/api/v1/runs/{{ run_id }}/preview/0?src=sap" target="_blank">
-        <img src="/api/v1/runs/{{ run_id }}/preview/0?src=sap" alt="SAP screen" loading="lazy">
-        <span class="meta">SAP screen</span>
-      </a>
-      {% endif %}
-    </div>
-  </section>
-  {% endif %}
-
   {% if pub.signature_probe %}
   {% set sp = pub.signature_probe %}
   <section>
