@@ -22,11 +22,20 @@ BANK_KEYS = ["account_holder", "account_type", "bank_name", "bank_country",
              "signature_evidence", "partial_capture"]
 W9_KEYS = ["line1_name", "line2_business_name", "line3_classification", "tin_type",
            "tin_raw", "address_street", "address_city_state_zip", "signed", "sign_date"]
+# W-8 family subtype (doc_class stays "w9"; raw.type_hint == "w8" switches the
+# schema): a W-8 is a DIFFERENT form — beneficial owner + chapter 3/4 status +
+# certification Part — and pressing it into the W-9 schema was the root of the
+# real GVS failure (Foreign TIN offered for "Tax Number 2", Part XXX ignored).
+W8_KEYS = ["form_variant", "legal_name", "country_incorporation",
+           "chapter3_status", "chapter4_status", "chapter4_cert_section",
+           "foreign_tin", "us_tin", "address_street", "address_city_country",
+           "treaty_country", "signed", "sign_date", "signer_name",
+           "capacity_checked"]
 
 ID_FIELDS = ("iban", "swift_bic", "account_number", "routing_aba", "routing_aba_wires")
 
 _SENSITIVE_BANK = ("iban", "account_number", "routing_aba", "routing_aba_wires")
-_SENSITIVE_W9 = ("tin_raw",)
+_SENSITIVE_W9 = ("tin_raw", "foreign_tin", "us_tin")
 
 
 def _norm_id(s) -> str:
@@ -131,8 +140,10 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
                          f"vs ocr={display_value(kind, dv, policy)})")
     # EIN found by OCR regex backs an unread TIN. The detector is EIN-specific
     # (label/format anchored), so it also SETTLES tin_type — deterministic
-    # evidence beats a model guess.
-    if doc_class == "w9" and det.get("ein"):
+    # evidence beats a model guess. Scoped to the W-9 SCHEMA ("tin_raw" key):
+    # a W-8's foreign TIN matches the EIN shape (real GVS case) and must never
+    # be pressed into tin_raw / Tax Number 2.
+    if doc_class == "w9" and det.get("ein") and "tin_raw" in fields:
         if not str(fields.get("tin_raw") or "").strip():
             fields["tin_raw"] = det["ein"]
             notes.append(f"tin=filled-from-OCR({mask('ein', det['ein'])})")
@@ -151,7 +162,7 @@ def crosscheck_ids(fields: dict, det: dict, doc_class: str = "bank",
             notes.append(f"tin_raw=MISMATCH(model={mask('tin', str(fields.get('tin_raw') or ''))} "
                          f"vs ocr={mask('ein', det['ein'])})")
     # W-9 digit boxes (one digit per line in the text layer)
-    if doc_class == "w9" and det.get("tin_boxed"):
+    if doc_class == "w9" and det.get("tin_boxed") and "tin_raw" in fields:
         if not str(fields.get("tin_raw") or "").strip():
             fields["tin_raw"] = det["tin_boxed"]
             notes.append(f"tin=filled-from-boxed-digits({mask('tin', det['tin_boxed'])})")
@@ -561,6 +572,12 @@ class Extraction:
                 else:
                     pub["tin"] = {"type": (self.fields.get("tin_type") or "").upper() or "unknown",
                                   "masked": "", "digits": 0, "hyphenated": False, "present": False}
+            elif k in ("foreign_tin", "us_tin"):
+                # W-8 tax numbers: masked-only under EVERY policy, never a
+                # 'value' key — same contract as the W-9 TIN
+                digits = re.sub(r"\D", "", sv) if sv else ""
+                pub[k] = {"masked": mask("tin", sv) if sv else "",
+                          "digits": len(digits), "present": bool(sv)}
             elif k == "tin_type":
                 continue  # folded into tin above
             else:

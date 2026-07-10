@@ -1,0 +1,42 @@
+W-8 CHECK (Certificate of Foreign Status)
+
+Document: {{ pub.file_name }}
+Detected form: {{ fields.form_variant or pub.doc_type }}
+Verdict: {{ verdict }}
+TIN mapping: {% if fields.foreign_tin and fields.foreign_tin.present %}Foreign TIN ({{ fields.foreign_tin.masked }}) — NEVER enter into SAP Tax Number 1 or Tax Number 2{% elif fields.us_tin and fields.us_tin.present %}US TIN ({{ fields.us_tin.masked }}) -> Tax Number 2 only if it is a genuine US EIN{% else %}no TIN on the form{% endif %}
+
+Next step: {{ next_step }}
+
+{{ data_block }}
+
+{% if groups.critical %}
+Critical issues:
+{% for f in groups.critical %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+{% if groups.warnings %}
+Warnings:
+{% for f in groups.warnings %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+{% if groups.notes %}
+Notes:
+{% for f in groups.notes %}
+- [{{ f.rule_id }}] {{ f.message }}
+{% endfor %}
+{% endif %}
+MDM entry notes:
+- W-8 is a FOREIGN-status certificate — do not process it as a W-9.
+- Beneficial owner (Part I Line 1) maps to SAP Name 1: {{ fields.legal_name or '—' }}
+- Foreign TIN goes to the vendor's LOCAL tax field for {{ fields.country_incorporation or 'its country' }}, never to Tax Number 1/2.
+{% if fields.chapter4_status and not fields.chapter4_cert_section %}
+- Chapter-4 status "{{ fields.chapter4_status }}" is claimed but no certification Part is completed — see findings.
+{% endif %}
+{% if pub.crosscheck %}
+OCR cross-check: {{ pub.crosscheck | join('; ') }}
+{% endif %}
+{% if sap_block %}
+{{ sap_block }}
+{% endif %}

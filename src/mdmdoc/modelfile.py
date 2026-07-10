@@ -17,19 +17,42 @@ CANDIDATE_NAME = "mdmdoc-extract-candidate"   # adoption gate builds land here f
 STOCK_BASE = "qwen3:4b"
 
 
-def _fewshot_messages(doc_class: str, limit: int = 2) -> list[str]:
+def _fewshot_examples(doc_class: str, limit: int = 2) -> list[dict]:
     p = config.FEWSHOT_DIR / f"{doc_class}.json"
     if not p.exists():
         return []
     try:
-        examples = json.loads(p.read_text())[:limit]
+        return json.loads(p.read_text())[:limit]
     except Exception:
         return []
+
+
+def _fewshot_messages(doc_class: str, limit: int = 2) -> list[str]:
     out = []
-    for ex in examples:
+    for ex in _fewshot_examples(doc_class, limit):
         out.append('MESSAGE user """' + ex.get("input", "") + '"""')
         out.append('MESSAGE assistant """' + json.dumps(ex.get("output", {}), ensure_ascii=False) + '"""')
     return out
+
+
+def snapshot_exemplar_values() -> list[str]:
+    """models/exemplar_values.json — every exemplar output value that gets
+    BAKED into the custom model. stage_b._drop_exemplar_echo unions this with
+    the live few-shot files; without it the guard is blind to values baked in
+    an earlier build (real case: 'ACME' echoed into a W-8 read)."""
+    vals: set = set()
+    for dc in ("bank", "w9"):
+        for ex in _fewshot_examples(dc):
+            out = ex.get("output", {})
+            for v in (out.get("fields") or {}).values():
+                s = str(v or "").strip()
+                if len(s) >= 4 and not isinstance(v, bool):
+                    vals.add(s)
+    snap = config.MODELS_DIR / "exemplar_values.json"
+    data = sorted(vals)
+    snap.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n",
+                    encoding="utf-8")
+    return data
 
 
 def build_modelfile(apply: bool = False, name: str = MODEL_NAME) -> int:
@@ -47,6 +70,8 @@ def build_modelfile(apply: bool = False, name: str = MODEL_NAME) -> int:
     mf = config.MODELS_DIR / f"Modelfile.{name}"
     mf.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {mf} (FROM {base})")
+    snap = snapshot_exemplar_values()
+    print(f"wrote {config.MODELS_DIR / 'exemplar_values.json'} ({len(snap)} values)")
     cmd = ["ollama", "create", name, "-f", str(mf)]
     if not apply:
         print("to build the model (with Ollama already running):")

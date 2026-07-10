@@ -70,18 +70,20 @@ ladder (ladder.py — the pipeline controller's bounded second perception pass).
 None of these are stage_b guards except `corroborate_across_pages` (listed
 n/a above); nothing here is a pending port.
 
-## Golden parity corpus (behavioural, beyond marker grep) — 2026-07-09
-`tools/golden/golden_cases.json` (6 cases) runs through the Python DETERMINISTIC
-engine (`tools/golden/run_golden.py`, `tests/test_golden_parity.py`, all green).
-The SAME cases must reproduce identical fields/notes in ABAP. **ABAP twin =
-tracked verify-on-system next-step** (ABAP Unit runs only on a real system;
-abaplint only lints syntax): a generator emits `zcl_mdmdoc_golden_data`
-(precedent: `zcl_mdmdoc_rules_data`, "DO NOT EDIT" + a `GOLDEN-HASH <hex>` header
-= the corpus hash) + a hand-written loop testclass that calls
-`zcl_mdmdoc_extract=>build` (doc_type supplied per case — ABAP has no type_hint
-port) and asserts fields + crosscheck-note substrings. check_parity §7 will then
-compare the corpus hash to the ABAP header. Until generated, this is the ONE
-tracked ABAP follow-up (guards themselves are already ported).
+## Golden parity corpus (behavioural, beyond marker grep) — 2026-07-09, v2 2026-07-10
+`tools/golden/golden_cases.json` (**11 cases**, corpus v2 with `llm_fields` +
+`expect.verdict`/`expect.findings`) runs through the Python DETERMINISTIC engine
+(`tools/golden/run_golden.py`, `tests/test_golden_parity.py`) AND through
+`run_rules(enforce_approvals=False)+decide()` for verdict parity. The ABAP twin
+**IS generated**: `tools/golden/gen_abap_golden.py` emits
+`zcl_mdmdoc_golden_data` (headers `GOLDEN-HASH 8a74945f3e2d6b66` = corpus hash,
+`GEN-HASH 332a326a58f70960` = generator+runner hash) and the hand-written loop
+testclass calls `zcl_mdmdoc_extract=>build` + `zcl_mdmdoc_rules->run()` +
+`zcl_mdmdoc_verdict=>decide()`, asserting fields, crosscheck-note substrings,
+verdict and finding ids. check_parity **§7 enforces it**: corpus-hash match +
+GEN-HASH match + regenerate-and-diff (catches hand edits, generator drift and a
+stale baked corpus). Update flow: edit cases → run gen_abap_golden.py → commit
+both repos (ABAP first, then the pin bump).
 
 ## Constants parity (§8, audit M5)
 Hand-duplicated constants (regexes, thresholds, phrase lists) are registered in
@@ -114,10 +116,11 @@ The golden ABAP twin above is data/test generation, not a logic port.)
    provenance metadata `tier: corp|experimental|learned` and `source: skill|policy|operator`
    — if a save strips unknown keys, governance data is silently lost. A rule edited via
    the panel must come back with its `tier`/`source` intact.
-3. **`gen_rules_abap.py`: treat `tier`/`source` as additive/optional** — either propagate
-   into `ZCL_MDMDOC_RULES_DATA` (preferred: enables "corp profile = only tier:corp rules"
-   in ZMDMDOC) or ignore them; must not fail on unknown keys. `tools/check_parity.py`
-   will treat these fields as non-verdict metadata (audit session keeps that file).
+3. ~~`gen_rules_abap.py`: treat `tier`/`source` as additive/optional~~ — **closed
+   2026-07-10 (audit R3)**: `tier` now propagates into `ZCL_MDMDOC_RULES_DATA` and
+   the emitted `rules/*.json`; `--tier-min corp` implements the corp shipping
+   profile; unknown keys never fail generation; `rule_hash` excludes tier/source
+   (metadata — approvals survive tier edits).
 5. **П3 evidence-rescue (2026-07-09 audit wave)**: `ground_payment_instructions` gained a
    rescue sub-path backed by `doctype_evidence.score` (pure, table-driven AND-gate:
    letter shape + named-bank identity + account facts + holder signal → bank_letter with

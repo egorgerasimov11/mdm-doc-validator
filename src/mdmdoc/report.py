@@ -27,10 +27,31 @@ def _group(findings: list[Finding]) -> dict:
     }
 
 
+def _is_w8_pub(pub: dict) -> bool:
+    """W-8 subtype detection by SCHEMA, not just doc_type: only a run that was
+    actually extracted with W8_KEYS gets the W-8 report — a model-guessed 'w8'
+    over the legacy W-9 schema falls back to the W-9 report (W9-030 covers)."""
+    return (pub.get("doc_class") == "w9" and pub.get("doc_type") == "w8"
+            and "legal_name" in (pub.get("fields") or {}))
+
+
 def _evidence(pub: dict) -> list[str]:
     """Short masked evidence lines: which identity elements the document shows."""
     f = pub.get("fields", {})
     ev = []
+    if _is_w8_pub(pub):
+        if f.get("form_variant"):
+            ev.append(f"form: {f['form_variant']}")
+        if f.get("legal_name"):
+            ev.append(f"beneficial owner: {f['legal_name']}")
+        if f.get("country_incorporation"):
+            ev.append(f"country: {f['country_incorporation']}")
+        ftin = f.get("foreign_tin", {})
+        if isinstance(ftin, dict) and ftin.get("present"):
+            ev.append(f"foreign TIN: {ftin.get('masked')}")
+        if isinstance(f.get("signed"), bool):
+            ev.append("signed: " + ("yes" if f["signed"] else "no"))
+        return ev
     if pub["doc_class"] == "bank":
         if f.get("bank_name"):
             ev.append(f"bank: {f['bank_name']}")
@@ -100,6 +121,29 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
             ("Document date", _fmt(f.get("doc_date"), empty="no visible document date"), "", "doc_date"),
             ("Signed/stamped", signed, "", "signed"),
         ]
+    if _is_w8_pub(pub):
+        ftin = f.get("foreign_tin", {}) if isinstance(f.get("foreign_tin"), dict) else {}
+        ustin = f.get("us_tin", {}) if isinstance(f.get("us_tin"), dict) else {}
+        signed = _fmt(f.get("signed", False))
+        if f.get("sign_date"):
+            signed += f" ({f['sign_date']})"
+        if f.get("signer_name"):
+            signed += f" — {f['signer_name']}"
+        return [
+            ("Form variant", _fmt(f.get("form_variant")), "", "form_variant"),
+            ("Beneficial owner (Part I)", _fmt(f.get("legal_name")), "SAP Name 1", "legal_name"),
+            ("Country of incorporation", _fmt(f.get("country_incorporation")), "", "country_incorporation"),
+            ("Chapter 3 status", _fmt(f.get("chapter3_status")), "", "chapter3_status"),
+            ("Chapter 4 (FATCA) status", _fmt(f.get("chapter4_status")), "", "chapter4_status"),
+            ("Chapter 4 certification", _fmt(f.get("chapter4_cert_section")), "", "chapter4_cert_section"),
+            ("Foreign TIN (masked)", _fmt(ftin), "NEVER → Tax Number 1/2", "foreign_tin"),
+            ("US TIN (masked)", _fmt(ustin), "Tax Number 2 only if a real US EIN", "us_tin"),
+            ("Address — street", _fmt(f.get("address_street")), "", "address_street"),
+            ("Address — city/country", _fmt(f.get("address_city_country")), "", "address_city_country"),
+            ("Treaty country", _fmt(f.get("treaty_country")), "", "treaty_country"),
+            ("Capacity to sign checked", _fmt(f.get("capacity_checked", False)), "", "capacity_checked"),
+            ("Signed (Certification Part)", signed, "", "signed"),
+        ]
     tin = f.get("tin", {}) if isinstance(f.get("tin"), dict) else {}
     tin_target = ("Tax Number 1" if tin.get("type") == "SSN"
                   else "Tax Number 2" if tin.get("type") == "EIN" else "")
@@ -150,7 +194,9 @@ def sap_block(rows: list[dict]) -> str:
 
 
 def render_report(pub: dict, findings: list[Finding], verdict: str, lang: str = "en") -> str:
-    tpl = _env.get_template("report_bank.md.j2" if pub["doc_class"] == "bank" else "report_w9.md.j2")
+    tpl = _env.get_template("report_bank.md.j2" if pub["doc_class"] == "bank"
+                            else "report_w8.md.j2" if _is_w8_pub(pub)
+                            else "report_w9.md.j2")
     groups = _group(findings)
     why = (groups["critical"][0].message if groups["critical"]
            else groups["warnings"][0].message if groups["warnings"]

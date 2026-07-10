@@ -274,8 +274,10 @@ def compare_bp(ext: Extraction, row: dict, policy: str = "masked") \
         rows.append({"field": field, "doc": str(doc or ""), "sap": str(sap or ""),
                      "status": status, "note": note})
 
-    # Line 1 (legal name) vs BP names — lenient (legal suffix / word order)
-    d_name = str(f.get("line1_name") or f.get("account_holder") or "")
+    # Line 1 (legal name) vs BP names — lenient (legal suffix / word order);
+    # the W-8 subtype carries the beneficial owner in legal_name instead
+    d_name = str(f.get("line1_name") or f.get("legal_name")
+                 or f.get("account_holder") or "")
     sap_names = _bp_names(row)
     if d_name and sap_names:
         eq = any(names_materially_equal(d_name, s)

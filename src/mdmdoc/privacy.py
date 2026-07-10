@@ -26,6 +26,8 @@ FIELD_KIND = {
     "routing_aba_wires": "routing_aba",
     "tin_raw": "tin",
     "tin_boxed": "tin",
+    "foreign_tin": "tin",
+    "us_tin": "tin",
     "ein": "ein",
     "ssn": "ssn",
 }

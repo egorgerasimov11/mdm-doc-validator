@@ -1,0 +1,48 @@
+[
+ {
+  "input": "OCR-VERIFIED CANDIDATES (from deterministic regex — trust these over your own reading):\n{}\n\nDOCUMENT TEXT:\nForm W-8BEN-E  Certificate of Status of Beneficial Owner for United States Tax Withholding and Reporting (Entities)\nPart I  Identification of Beneficial Owner\n1 Name of organization that is the beneficial owner: Nordwind Maschinenbau GmbH\n2 Country of incorporation or organization: Germany\n4 Chapter 3 Status: [x] Corporation\n5 Chapter 4 Status (FATCA status): [x] Active NFFE. Complete Part XXV.\n6 Permanent residence address: Musterstrasse 12\nCity or town, state or province, country: 28195 Bremen, Germany\n9b Foreign TIN: DE 29/815/44444\nPart XXV  Active NFFE\n39 [x] I certify that the entity identified in Part I is a foreign entity that is an active NFFE.\nPart XXX  Certification\nSign Here  (signature) Karl Mustermann\nPrint Name of individual authorized to sign: Karl Mustermann\nDate (MM-DD-YYYY): 02-03-2026\n[x] I certify that I have the capacity to sign for the entity identified on line 1 of this form.",
+  "output": {
+   "doc_type": "w8",
+   "fields": {
+    "form_variant": "W-8BEN-E",
+    "legal_name": "Nordwind Maschinenbau GmbH",
+    "country_incorporation": "Germany",
+    "chapter3_status": "Corporation",
+    "chapter4_status": "Active NFFE",
+    "chapter4_cert_section": "Part XXV",
+    "foreign_tin": "DE 29/815/44444",
+    "us_tin": "",
+    "address_street": "Musterstrasse 12",
+    "address_city_country": "28195 Bremen, Germany",
+    "treaty_country": "",
+    "signed": true,
+    "sign_date": "02-03-2026",
+    "signer_name": "Karl Mustermann",
+    "capacity_checked": true
+   }
+  }
+ },
+ {
+  "input": "OCR-VERIFIED CANDIDATES (from deterministic regex — trust these over your own reading):\n{}\n\nDOCUMENT TEXT:\nForm W-8BEN  Certificate of Foreign Status of Beneficial Owner for United States Tax Withholding and Reporting (Individuals)\nPart I  Identification of Beneficial Owner\n1 Name of individual who is the beneficial owner: Marta Beispielova\n2 Country of citizenship: Austria\n3 Permanent residence address: Ringgasse 7/3\nCity or town, state or province, country: 1010 Wien, Austria\n6a Foreign tax identifying number: AT 55-221/9876\nPart II  Claim of Tax Treaty Benefits\n9 I certify that the beneficial owner is a resident of Austria within the meaning of the income tax treaty.\nPart III  Certification\nSign Here  (signature) Marta Beispielova\nPrint name of signer: Marta Beispielova\nDate (MM-DD-YYYY): 11-24-2025",
+  "output": {
+   "doc_type": "w8",
+   "fields": {
+    "form_variant": "W-8BEN",
+    "legal_name": "Marta Beispielova",
+    "country_incorporation": "Austria",
+    "chapter3_status": "",
+    "chapter4_status": "",
+    "chapter4_cert_section": "",
+    "foreign_tin": "AT 55-221/9876",
+    "us_tin": "",
+    "address_street": "Ringgasse 7/3",
+    "address_city_country": "1010 Wien, Austria",
+    "treaty_country": "Austria",
+    "signed": true,
+    "sign_date": "11-24-2025",
+    "signer_name": "Marta Beispielova",
+    "capacity_checked": false
+   }
+  }
+ }
+]

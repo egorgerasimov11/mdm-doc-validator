@@ -19,21 +19,32 @@ import json
 import re
 
 from . import config, model_client as mc
-from .fields import (BANK_DOC_TYPES, BANK_KEYS, W9_DOC_TYPES, W9_KEYS, Extraction,
-                     crosscheck_ids, iban_mod97_ok, to_iso2)
+from .fields import (BANK_DOC_TYPES, BANK_KEYS, W8_KEYS, W9_DOC_TYPES, W9_KEYS,
+                     Extraction, crosscheck_ids, iban_mod97_ok, to_iso2)
 from .fields import find_valid_ibans as fields_valid_ibans
 from .stage_a import RawDoc
 
 _DATE_SHAPE = re.compile(r"^\s*\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}\s*$")
 
 
-def _load_system(doc_class: str) -> str:
-    p = config.PROMPTS_DIR / f"system_{'bank' if doc_class == 'bank' else 'w9'}.txt"
+def _is_w8(raw: RawDoc) -> bool:
+    """The W-8 subtype gate: same doc_class ('w9' — one rules file, one sniff,
+    one BUT000 compare) but a DIFFERENT schema/prompt/report. type_hint is
+    frozen on the pre-hunt text in perceive(), so this never flips mid-run."""
+    return raw.doc_class == "w9" and raw.type_hint == "w8"
+
+
+def _prompt_profile(doc_class: str, is_w8: bool = False) -> str:
+    return "bank" if doc_class == "bank" else ("w8" if is_w8 else "w9")
+
+
+def _load_system(doc_class: str, is_w8: bool = False) -> str:
+    p = config.PROMPTS_DIR / f"system_{_prompt_profile(doc_class, is_w8)}.txt"
     return p.read_text() if p.exists() else ""
 
 
-def _load_fewshot(doc_class: str) -> list[dict]:
-    p = config.FEWSHOT_DIR / f"{'bank' if doc_class == 'bank' else 'w9'}.json"
+def _load_fewshot(doc_class: str, is_w8: bool = False) -> list[dict]:
+    p = config.FEWSHOT_DIR / f"{_prompt_profile(doc_class, is_w8)}.json"
     if not p.exists():
         return []
     try:
@@ -65,18 +76,29 @@ FOCUS_HINTS = {
         "PRIOR-PASS GAP: Line 1 (legal name) is empty. Line 1 is the FIRST "
         "name box at the top of the W-9 — do not confuse it with Line 2 "
         "(business/DBA name); both may be filled with different names."),
+    "w8-no-name": (
+        "PRIOR-PASS GAP: no beneficial-owner name. Part I Line 1 of a W-8 is "
+        "'Name of organization that is the beneficial owner' (W-8BEN-E) or "
+        "'Name of individual' (W-8BEN) — read it from Part I, never from an "
+        "example or the withholding agent's name."),
+    "w8-no-country": (
+        "PRIOR-PASS GAP: no country. Part I Line 2 is 'Country of "
+        "incorporation or organization' (W-8BEN-E) / 'Country of citizenship' "
+        "(W-8BEN) — a country NAME, not an address."),
 }
 
 
 def build_prompt(raw: RawDoc, role: str = "TEXT", focus: list[str] | None = None) -> str:
     doc_class = raw.doc_class
-    keys = BANK_KEYS if doc_class == "bank" else W9_KEYS
+    is_w8 = _is_w8(raw)
+    keys = BANK_KEYS if doc_class == "bank" else (W8_KEYS if is_w8 else W9_KEYS)
     types = BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES
     parts = []
     # our custom model has the exemplars baked in via MESSAGE pairs; any stock
-    # model (incl. the strong tier) gets them injected at runtime
-    if not mc.resolve(role).startswith("mdmdoc-extract"):
-        for ex in _load_fewshot(doc_class):
+    # model (incl. the strong tier) gets them injected at runtime. W-8 exemplars
+    # are NOT baked into mdmdoc-extract — inject them unconditionally.
+    if is_w8 or not mc.resolve(role).startswith("mdmdoc-extract"):
+        for ex in _load_fewshot(doc_class, is_w8):
             parts.append("EXAMPLE INPUT:\n" + ex.get("input", "")
                          + "\nEXAMPLE OUTPUT:\n" + json.dumps(ex.get("output", {}), ensure_ascii=False))
     packet_note = ""
@@ -124,7 +146,7 @@ def _run_model(raw: RawDoc, role: str,
                focus: list[str] | None = None) -> tuple[dict | None, bool, str]:
     """One tier run -> (fields-bearing obj or None, json_first_try, model_id)."""
     obj, first_try = mc.generate_json(role, build_prompt(raw, role, focus=focus),
-                                      system=_load_system(raw.doc_class),
+                                      system=_load_system(raw.doc_class, _is_w8(raw)),
                                       options={"num_ctx": 16384, "temperature": 0, "seed": 7})
     mc.unload(role)
     return (obj if isinstance(obj, dict) else None), first_try, mc.resolve(role)
@@ -165,6 +187,11 @@ def escalation_reasons(ext: Extraction, raw: RawDoc, quality: bool) -> list[str]
             r.append("w9-no-classification")
         if not str(f.get("line1_name") or "").strip():
             r.append("w9-no-line1")
+    if ext.doc_class == "w9" and ext.doc_type == "w8" and "legal_name" in f:
+        if not str(f.get("legal_name") or "").strip():
+            r.append("w8-no-name")
+        if not str(f.get("country_incorporation") or "").strip():
+            r.append("w8-no-country")
     if any("MISMATCH" in n for n in ext.crosscheck):
         r.append("crosscheck-mismatch")
     return r
@@ -199,8 +226,8 @@ def _merge_tiers(fast: dict, strong: dict, keys: list, policy: str = "masked") -
 def _normalize_tin(ext: Extraction) -> None:
     """tin_type to canonical values; a DATE can never be a TIN (the model kept
     grabbing the signature date 1/1/2026 as a tax number)."""
-    if ext.doc_class != "w9":
-        return
+    if ext.doc_class != "w9" or "tin_raw" not in ext.fields:
+        return   # W-8 schema has no tin_raw/tin_type — nothing to normalize
     tt = str(ext.fields.get("tin_type") or "").lower()
     ext.fields["tin_type"] = ("SSN" if "ssn" in tt or "social" in tt
                               else "EIN" if "ein" in tt or "employer" in tt else "")
@@ -214,14 +241,31 @@ def _normalize_tin(ext: Extraction) -> None:
         ext.provenance.pop("tin_raw", None)
 
 
+def _baked_exemplar_values() -> set:
+    """Exemplar values BAKED into the custom mdmdoc-extract model (snapshotted
+    by modelfile.py at build time into models/exemplar_values.json). The live
+    few-shot files drift away from what was baked — the echo guard was blind to
+    baked-only values (real case: 'ACME' echoed into a W-8's line 1)."""
+    p = config.MODELS_DIR / "exemplar_values.json"
+    try:
+        vals = json.loads(p.read_text())
+        return {str(v).casefold() for v in vals if str(v).strip()}
+    except Exception:
+        return set()
+
+
 def _exemplar_values(doc_class: str, exclude_sha: str = "") -> set:
-    """All string values that appear in few-shot exemplar OUTPUTS. These are
+    """All string values that appear in few-shot exemplar OUTPUTS — the live
+    files (both schemas of the class) UNION the baked-model snapshot. These are
     shape-preserving fakes / example data — a real document can never
     legitimately contain them; if the model outputs one, it echoed the exemplar.
     Exemplars built from `exclude_sha` (the document being processed) are
     skipped: its own gold values are NOT echoes."""
     vals: set = set()
-    for ex in _load_fewshot(doc_class):
+    shots = list(_load_fewshot(doc_class))
+    if doc_class == "w9":   # the w8 subtype exemplars ride the same class
+        shots += _load_fewshot(doc_class, is_w8=True)
+    for ex in shots:
         if exclude_sha and ex.get("doc_sha256") == exclude_sha:
             continue
         out = ex.get("output", {})
@@ -229,27 +273,47 @@ def _exemplar_values(doc_class: str, exclude_sha: str = "") -> set:
             s = str(v or "").strip()
             if len(s) >= 4 and not isinstance(v, bool):
                 vals.add(s.casefold())
-    return vals
+    return vals | _baked_exemplar_values()
+
+
+# classic tutorial placeholders a model reaches for when it did NOT read the
+# document — never legitimate NAME-field values unless literally printed there
+_PLACEHOLDER_NAMES = frozenset({
+    "acme", "acme corp", "acme corporation", "acme inc", "acme llc",
+    "john doe", "jane doe", "john smith", "jane smith", "example corp",
+    "example company", "test company", "sample company", "company name",
+    "your company", "n/a",
+})
+_ECHO_NAME_FIELDS = ("line1_name", "line2_business_name", "account_holder",
+                     "bank_name", "legal_name", "signer_name")
 
 
 def _drop_exemplar_echo(ext: Extraction, raw: RawDoc) -> None:
     """Real case: a W-8 came back with 'ACME' and an exemplar's fake EIN —
     the model copied the few-shot example instead of reading the document.
-    Any extracted value that equals an exemplar value AND does not occur in
-    the document text is an echo — drop it."""
+    Any extracted value that equals an exemplar value (live few-shot files or
+    the baked-model snapshot) AND does not occur in the document text is an
+    echo — drop it. NAME fields additionally pass a placeholder denylist:
+    'ACME'/'John Doe' without support in the text is invented, whatever
+    exemplar set it came from."""
     exemplar_vals = _exemplar_values(ext.doc_class, exclude_sha=raw.sha256)
-    if not exemplar_vals:
-        return
     doc_text = raw.raw_text.casefold()
     for k, v in list(ext.fields.items()):
         if isinstance(v, bool):
             continue
         s = str(v or "").strip()
-        if s and s.casefold() in exemplar_vals and s.casefold() not in doc_text:
+        if not s or s.casefold() in doc_text:
+            continue
+        if s.casefold() in exemplar_vals:
             ext.fields[k] = ""
             ext.provenance.pop(k, None)
             ext.warnings.append(f"{k}: dropped few-shot exemplar echo (value was "
                                 "copied from an example, not read from the document)")
+        elif k in _ECHO_NAME_FIELDS and s.casefold() in _PLACEHOLDER_NAMES:
+            ext.fields[k] = ""
+            ext.provenance.pop(k, None)
+            ext.warnings.append(f"{k}: dropped placeholder value '{s}' — not "
+                                "present in the document text")
 
 
 _NAME_FIELDS = ("line1_name", "line2_business_name", "account_holder", "bank_name")
@@ -902,7 +966,8 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     mirror of ABAP `build(it_llm_fields)`. Used by the golden parity corpus;
     ignored on every LLM-backed engine."""
     doc_class = raw.doc_class
-    keys = BANK_KEYS if doc_class == "bank" else W9_KEYS
+    is_w8 = _is_w8(raw)
+    keys = BANK_KEYS if doc_class == "bank" else (W8_KEYS if is_w8 else W9_KEYS)
     types = BANK_DOC_TYPES if doc_class == "bank" else W9_DOC_TYPES
     no_llm = engine == "deterministic"
     ext_res = Extraction(doc_class=doc_class,
@@ -917,6 +982,11 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
         ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
     elif raw.ext in config.EMAIL_EXTS:
         ext_res.doc_type = "email"
+        ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
+    elif is_w8:
+        # the subtype gate already proved W-8 markers deterministically —
+        # the model reads the W-8 schema and must not re-classify
+        ext_res.doc_type = "w8"
         ext_res.provenance["doc_type"] = {"source": "rule", "page": None}
 
     if raw.raw_text.strip() and not no_llm:
@@ -1015,7 +1085,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
             _drop_filename_echo(ext_res, raw)
             _drop_regulator_noise(ext_res)
             strong_type = str(strong_obj.get("doc_type", "") or "").strip().lower()
-            if (strong_type in types and not raw.editable
+            if (strong_type in types and not raw.editable and not is_w8
                     and raw.ext not in config.EMAIL_EXTS
                     and not (doc_class == "bank" and raw.bank_letter_pages
                              and strong_type == "invoice")

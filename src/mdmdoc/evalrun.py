@@ -17,6 +17,13 @@ from .privacy import assert_no_leak
 
 BANK_SCORED = ["account_holder", "bank_name", "iban", "swift_bic", "account_number"]
 W9_SCORED = ["line1_name", "line2_business_name", "line3_classification", "tin"]
+W8_SCORED = ["legal_name", "country_incorporation", "chapter3_status", "treaty_country"]
+
+
+def _scored_keys(lab: dict) -> list:
+    if lab.get("doc_class") == "bank":
+        return BANK_SCORED
+    return W8_SCORED if lab.get("doc_type_gold") == "w8" else W9_SCORED
 
 
 def _norm(s) -> str:
@@ -325,7 +332,7 @@ def run_eval(only: str | None = None, limit: int | None = None, tag: str = "",
         if gold_type == "invoice":
             invoice_total += 1
             invoice_false_accept += int(res.verdict != "REJECT")
-        scored = BANK_SCORED if lab["doc_class"] == "bank" else W9_SCORED
+        scored = _scored_keys(lab)
         row_fields = {}
         row_fields_lenient = {}
         for k in scored:
@@ -561,7 +568,7 @@ def run_rescore(tag: str = "", record: bool = False) -> int:
             print(f"  ! skipped (no label/artifact): {r.get('file', '?')}")
             continue
         pred = pub.get("fields", {})
-        scored = BANK_SCORED if lab["doc_class"] == "bank" else W9_SCORED
+        scored = _scored_keys(lab)
         row_s = {}
         for k in scored:
             ok = _field_match(k, pred, lab.get("fields_gold", {}))
