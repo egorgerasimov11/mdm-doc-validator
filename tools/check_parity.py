@@ -60,6 +60,25 @@ def _resolve_abap_root() -> Path:
 
 ABAP_ROOT = _resolve_abap_root()
 DOC_CLASSES = ("banking", "w9")
+_UNIFIED_SECTION_RE = re.compile(r"(?m)^--- # doc_class: (\w+)\s*$")
+_CLS_TO_SECTION = {"banking": "bank", "w9": "w9"}
+
+
+def class_yaml_text(root: Path, cls: str) -> str:
+    """The class's rule YAML text in either layout: the unified rules.yaml
+    section (D9) or the legacy per-class file."""
+    uni = root / "rules" / "rules.yaml"
+    if uni.exists():
+        text = uni.read_text()
+        marks = list(_UNIFIED_SECTION_RE.finditer(text))
+        want = _CLS_TO_SECTION.get(cls, cls)
+        for i, m in enumerate(marks):
+            if m.group(1) == want:
+                end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+                return text[m.end():end]
+        return ""
+    legacy = root / "rules" / f"{cls}.yaml"
+    return legacy.read_text() if legacy.exists() else ""
 
 # ABAP `when:` OPERATORS (not `check:` predicates) — the rule engine handles these
 # inline; everything else lowercase in a WHEN-label is a check-predicate name.
@@ -92,10 +111,9 @@ def abap_check_names(abap_root: Path = ABAP_ROOT) -> set[str]:
 _RULE_METADATA_KEYS = ("tier", "source")
 
 
-def yaml_rules(path: Path) -> dict:
-    """{rule_id: rule_dict} for semantic comparison (ignores formatting and the
-    non-portable tier/source metadata)."""
-    data = yaml.safe_load(path.read_text()) or {}
+def yaml_rules_text(text: str) -> dict:
+    """{rule_id: rule_dict} from YAML TEXT (unified-section or legacy file)."""
+    data = yaml.safe_load(text or "") or {}
     out = {}
     for r in data.get("rules", []):
         if isinstance(r, dict) and r.get("id"):
@@ -106,10 +124,18 @@ def yaml_rules(path: Path) -> dict:
     return out
 
 
-def yaml_checks_used(path: Path) -> set[str]:
-    data = yaml.safe_load(path.read_text()) or {}
+def yaml_rules(path: Path) -> dict:
+    return yaml_rules_text(path.read_text())
+
+
+def yaml_checks_used_text(text: str) -> set[str]:
+    data = yaml.safe_load(text or "") or {}
     return {r["when"]["check"] for r in data.get("rules", [])
             if isinstance(r.get("when"), dict) and "check" in r["when"]}
+
+
+def yaml_checks_used(path: Path) -> set[str]:
+    return yaml_checks_used_text(path.read_text())
 
 
 def python_guards(py_root: Path = PY_ROOT) -> set[str]:
@@ -369,11 +395,12 @@ def run() -> int:
 
     # 1. rule DATA parity (semantic)
     for cls in DOC_CLASSES:
-        py_f, abap_f = PY_ROOT / "rules" / f"{cls}.yaml", ABAP_ROOT / "rules" / f"{cls}.yaml"
-        if not abap_f.exists():
-            problems.append(f"data: {abap_f} is missing in the ABAP repo")
+        py_t, abap_t = class_yaml_text(PY_ROOT, cls), class_yaml_text(ABAP_ROOT, cls)
+        if not abap_t:
+            problems.append(f"data: {cls} rules missing in the ABAP repo "
+                            "(neither rules.yaml section nor legacy file)")
             continue
-        py_r, abap_r = yaml_rules(py_f), yaml_rules(abap_f)
+        py_r, abap_r = yaml_rules_text(py_t), yaml_rules_text(abap_t)
         only_py = sorted(set(py_r) - set(abap_r))
         only_abap = sorted(set(abap_r) - set(py_r))
         changed = sorted(k for k in set(py_r) & set(abap_r) if py_r[k] != abap_r[k])
@@ -393,7 +420,7 @@ def run() -> int:
         problems.append(f"predicates dispatched by ABAP but absent in Python: {sorted(abap_p - py_p)}")
 
     # 3. YAML coverage — every used check exists on both sides
-    used = set().union(*(yaml_checks_used(PY_ROOT / "rules" / f"{c}.yaml") for c in DOC_CLASSES))
+    used = set().union(*(yaml_checks_used_text(class_yaml_text(PY_ROOT, c)) for c in DOC_CLASSES))
     for miss, side in ((used - py_p, "Python"), (used - abap_p, "ABAP")):
         if miss:
             problems.append(f"coverage: rules use check(s) {sorted(miss)} not implemented in {side}")
@@ -460,7 +487,7 @@ def run() -> int:
         return 1
     ported = sum(1 for s in guard_manifest.values() if s == "ported")
     print(f"✓ Python↔ABAP in sync — {len(py_p)} predicates, "
-          f"{sum(len(yaml_rules(PY_ROOT / 'rules' / f'{c}.yaml')) for c in DOC_CLASSES)} rule entries, "
+          f"{sum(len(yaml_rules_text(class_yaml_text(PY_ROOT, c))) for c in DOC_CLASSES)} rule entries, "
           f"{ported}/{len(guard_manifest)} guards ported (rest n/a by design), "
           "rule data identical, no pending logic ports.")
     return 0

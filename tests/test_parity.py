@@ -62,9 +62,9 @@ def test_ported_guards_have_abap_markers():
 
 
 def test_yaml_rules_and_checks_parse():
-    rules = cp.yaml_rules(PY_ROOT / "rules" / "banking.yaml")
+    rules = cp.yaml_rules_text(cp.class_yaml_text(PY_ROOT, "banking"))
     assert "BNK-001" in rules and "__tables__" in rules
-    used = cp.yaml_checks_used(PY_ROOT / "rules" / "banking.yaml")
+    used = cp.yaml_checks_used_text(cp.class_yaml_text(PY_ROOT, "banking"))
     assert "iban_valid" in used and used <= PREDICATES
 
 
@@ -77,9 +77,9 @@ def test_abap_dispatch_matches_python_predicates():
 def test_rule_data_identical_between_repos():
     _need_abap()
     for cls in ("banking", "w9"):
-        py = cp.yaml_rules(PY_ROOT / "rules" / f"{cls}.yaml")
-        abap = cp.yaml_rules(cp.ABAP_ROOT / "rules" / f"{cls}.yaml")
-        assert py == abap, f"{cls}.yaml differs between Python and ABAP repos"
+        py = cp.yaml_rules_text(cp.class_yaml_text(PY_ROOT, cls))
+        abap = cp.yaml_rules_text(cp.class_yaml_text(cp.ABAP_ROOT, cls))
+        assert py == abap, f"{cls} rules differ between Python and ABAP repos"
 
 
 def test_golden_regen_diff_flags_hand_edit(tmp_path, monkeypatch):

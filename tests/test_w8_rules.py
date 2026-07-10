@@ -57,7 +57,8 @@ def test_pending_rules_change_no_verdict(tmp_path, monkeypatch):
     from mdmdoc.rules import engine
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
-    shutil.copy(config.RULES_DIR / "w9.yaml", rules_dir / "w9.yaml")
+    from mdmdoc import rules_io
+    (rules_dir / "w9.yaml").write_text(rules_io.rules_text("w9"))
     monkeypatch.setattr(config, "RULES_DIR", rules_dir)
     w9_030 = next(r for r in engine.load_rules("w9")["rules"] if r["id"] == "W9-030")
     rule_approvals.set_decision("w9", w9_030, "approved")

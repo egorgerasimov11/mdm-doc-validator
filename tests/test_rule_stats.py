@@ -136,8 +136,10 @@ def test_set_rule_tier_surgical(tmp_path, monkeypatch):
 
     from mdmdoc import rule_approvals
     monkeypatch.setattr(config, "RULES_DIR", tmp_path)
-    real = __import__("pathlib").Path(__file__).resolve().parents[1] / "rules" / "banking.yaml"
-    shutil.copy(real, tmp_path / "banking.yaml")
+    import mdmdoc.rules_io as real_io
+    real_uni = __import__("pathlib").Path(__file__).resolve().parents[1] / "rules" / "rules.yaml"
+    text_real = real_io._split_sections(real_uni.read_text())["bank"]
+    (tmp_path / "banking.yaml").write_text(text_real)
     text_before = (tmp_path / "banking.yaml").read_text()
     import yaml
     rule_before = next(r for r in yaml.safe_load(text_before)["rules"]

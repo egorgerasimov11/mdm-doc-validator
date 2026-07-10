@@ -1,0 +1,498 @@
+# mdmdoc unified rules — the ONE physical rules file (D9, operator decision).
+# Multi-document YAML: each '--- # doc_class: X' line starts that class's
+# section, whose text is byte-identical to the former per-class file — rule
+# block hashes (approvals) and in-block comments survive untouched.
+# Learned/skill rules are appended into the same sections with source: tags.
+
+--- # doc_class: bank
+# Banking document rules — explicit and editable. The model never decides verdicts;
+# these rules do. Sources: mdm-banking-doc-verdict + mdm-banking-checker skills.
+#
+# Governance metadata (per rule, hash-immune — never invalidates an approval):
+#   tier:   corp | experimental | learned   (only tier:corp ships to SAP v1)
+#   source: skill | policy | operator        (where the rule came from)
+version: 1
+
+doc_types: [bank_letter, bank_statement, supplier_letterhead, bank_screenshot,
+            voided_check, ap_document, payment_instructions, invoice, email,
+            editable_source, other]
+
+tables:
+  iban_length: {AD: 24, AE: 23, AT: 20, BE: 16, BG: 22, BH: 22, BR: 29, CH: 21,
+                CY: 28, CZ: 24, DE: 22, DK: 18, EE: 20, EG: 29, ES: 24, FI: 18,
+                FR: 27, GB: 22, GR: 27, HR: 21, HU: 28, IE: 22, IL: 23, IQ: 23,
+                IS: 26, IT: 27, JO: 30, KW: 30, LB: 28, LI: 21, LT: 20, LU: 20,
+                LV: 21, MC: 27, MT: 31, MX: 18, NL: 18, "NO": 15, PK: 24, PL: 28,
+                PT: 25, QA: 29, RO: 24, SA: 24, SE: 24, SG: 19, SI: 19, SK: 24,
+                TN: 24, TR: 26}
+
+rules:
+  - id: BNK-001
+    name: invoice_never_bank_proof
+    tier: corp
+    source: policy
+    applies_to: [invoice]
+    when: {always: true}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Invoice used as banking support — an invoice (incl. pro forma) is never acceptable, even when it shows remittance/bank details. Request a bank letter, bank statement or supplier letterhead."
+    message_ru: "Инвойс как банковское подтверждение не принимается (даже с реквизитами). Запросить bank letter / statement / supplier letterhead."
+
+  - id: BNK-002
+    name: email_as_proof
+    tier: experimental
+    source: policy
+    applies_to: [email]
+    when: {always: true}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Plain email is not normal bank support — exception-only with explicit Finance/Accounting approval evidence."
+    message_ru: "Обычное письмо — не банковское подтверждение; только как исключение с явным одобрением Finance/Accounting."
+
+  - id: BNK-003
+    name: editable_source
+    tier: corp
+    source: policy
+    applies_to: [editable_source]
+    when: {always: true}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Editable file (.docx/.xlsx/.txt/.rtf) is not acceptable as bank proof. Request a PDF/scan on letterhead."
+    message_ru: "Редактируемый файл (.docx/.xlsx/.txt/.rtf) не принимается как банковское подтверждение. Запросить PDF/скан."
+
+  - id: BNK-005
+    name: ap_form_self_certified
+    tier: corp
+    source: skill
+    applies_to: [ap_document]
+    when: {always: true}
+    severity: NOTE
+    verdict_effect: null
+    message: "Self-certified AP/HCP bank-information form (not bank-issued). Acceptable per the HCP/AP policy for this request type; verify every detail against SAP and the request context."
+    message_ru: "Самозаполненная AP/HCP форма банковских данных (не выпущена банком). Приемлемо по политике HCP/AP для этого типа запроса; каждую деталь сверить с SAP и контекстом запроса."
+
+  - id: BNK-006
+    name: statement_swift_not_shown
+    tier: corp
+    source: skill
+    applies_to: [bank_statement]
+    when: {check: field_empty, field: swift_bic}
+    severity: NOTE
+    verdict_effect: null
+    message: "Bank statement shows no SWIFT/BIC — normal for statements; take SWIFT from the SAP/request-form comparison, not from this document."
+    message_ru: "В выписке нет SWIFT/BIC — для выписок это норма; SWIFT берётся из сверки с SAP/формой запроса, не из этого документа."
+
+  - id: BNK-004
+    name: payment_instructions_context
+    tier: corp
+    source: skill
+    applies_to: [payment_instructions]
+    when: {always: true}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "Supplier payment instructions — NOT an invoice. Acceptable only as an official, non-editable supplier document (letterhead) whose details match SAP; otherwise request a bank letter or bank statement. Mind payment-method limits printed on it (e.g. 'ACH only — not for wire transfers'). Any kickback reason is 'no official supplier support', never 'invoice'."
+    message_ru: "Платёжные инструкции поставщика — это НЕ инвойс. Принимается только как официальный нередактируемый документ поставщика (letterhead) с реквизитами, совпадающими с SAP; иначе запросить bank letter / bank statement. Учитывай ограничения способа платежа (например, «ACH only — не для wire»). Причина kickback — «нет официального подтверждения поставщика», не «инвойс»."
+
+  - id: BNK-010
+    name: swift_shape
+    tier: corp
+    source: skill
+    when: {check: swift_valid, field: swift_bic, args: {lengths: [8, 11]}}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "SWIFT/BIC {value} fails shape/country check: {detail}."
+
+  - id: BNK-011
+    name: iban_country_length
+    tier: corp
+    source: skill
+    when: {check: iban_valid, field: iban, args: {table: iban_length}}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "IBAN {value_masked}: {detail}."
+
+  - id: BNK-020
+    name: doc_older_than_2y
+    tier: corp
+    source: skill
+    when: {check: date_older_than, field: doc_date, args: {years: 2}}
+    severity: NOTE
+    verdict_effect: null
+    message: "Document is older than 2 years ({detail}) — confirm the details are still current."
+
+  - id: BNK-021
+    name: missing_signature_bank_letter
+    tier: corp
+    source: skill
+    applies_to: [bank_letter]
+    when: {check: unsigned_no_evidence, field: signed}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "Bank letter appears unsigned/unstamped (no officer block either)."
+    message_ru: "Банковское письмо без подписи/печати (и без блока офицера)."
+
+  - id: BNK-026
+    name: typed_officer_block_instead_of_signature
+    tier: corp
+    source: skill
+    applies_to: [bank_letter]
+    when: {check: unsigned_typed_block, field: signed}
+    severity: NOTE
+    verdict_effect: null
+    message: "No wet signature/stamp; compensating evidence present ({detail}) — normal for system-issued bank letters; note for the Data Owner."
+    message_ru: "Живой подписи/печати нет; есть компенсирующее свидетельство ({detail}) — норма для системно выпускаемых банковских писем; заметка для Data Owner."
+
+  - id: BNK-027
+    name: settlement_issuer_strong
+    tier: experimental
+    source: policy
+    applies_to: [payment_instructions]
+    when: {flag_true: settlement_issuer_strong}
+    severity: NOTE
+    verdict_effect: null
+    message: "Payment instructions appear BANK-ISSUED (named bank plus an officer block or an account-held statement) — materially stronger than a supplier's self-declaration; context for the Data Owner."
+    message_ru: "Платёжные инструкции выглядят ВЫПУЩЕННЫМИ БАНКОМ (именованный банк + officer block или подтверждение ведения счёта) — существенно сильнее самодекларации поставщика; контекст для Data Owner."
+
+  - id: BNK-031
+    name: distinct_account_numbers
+    tier: experimental
+    source: policy
+    applies_to: [bank_letter, bank_statement, payment_instructions, supplier_letterhead]
+    when: {flag_true: distinct_accounts}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "The document carries two or more DIFFERENT labeled account numbers — verify with the requestor which account is actually being set up."
+    message_ru: "В документе два и более РАЗНЫХ счёта с метками — уточните у заявителя, какой счёт заводится."
+
+  - id: BNK-022
+    name: partial_screenshot
+    tier: corp
+    source: skill
+    applies_to: [bank_screenshot]
+    when: {flag_true: partial_capture}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Screenshot appears cropped/partial — key fields may be cut off."
+
+  - id: BNK-023
+    name: missing_account_holder
+    tier: corp
+    source: skill
+    # bank_statement/payment_instructions included since the 2026-07 audit:
+    # a holder-less statement could ACCEPT in the degraded (no-LLM) mode
+    applies_to: [bank_letter, bank_statement, supplier_letterhead, bank_screenshot, voided_check, ap_document, payment_instructions, other]
+    when: {field_missing: account_holder}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "No account holder / beneficiary name readable on the document."
+
+  - id: BNK-024
+    name: no_banking_identity
+    tier: corp
+    source: skill
+    applies_to: [bank_letter, bank_statement, supplier_letterhead, bank_screenshot, voided_check, ap_document, payment_instructions, other]
+    when: {check: no_bank_ids}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Document shows no bank account identifiers (no IBAN, account number or routing) — cannot serve as banking evidence as-is."
+
+  - id: BNK-025
+    name: missing_bank_name
+    tier: corp
+    source: skill
+    # statements are bank-issued — a real one always prints the bank name
+    # (supplier-issued types stay excluded, as before)
+    applies_to: [bank_letter, bank_statement, bank_screenshot, voided_check]
+    when: {field_missing: bank_name}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "Bank name not readable on the document."
+
+  - id: BNK-030
+    name: unrecognized_document_type
+    tier: experimental
+    source: policy
+    # An UNRECOGNIZED document (doc_type could not be established) must never
+    # auto-accept, however complete its fields look — "understand what the
+    # document IS" is the first check. Live case: a Chinese conference
+    # exhibition notice carrying the organiser's remittance details.
+    # NMR-only: cannot produce a false REJECT. Left PENDING on purpose —
+    # while pending, the approvals gate already holds doc_type=other at
+    # NEED_MANUAL_REVIEW; the rule owner decides its fate in the panel.
+    applies_to: [other]
+    when: {always: true}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Document type could not be established — an unrecognized document is never auto-accepted; review manually."
+    message_ru: "Тип документа не установлен — неопознанный документ не принимается автоматически; проверьте вручную."
+
+  # --- US routing / account arithmetic (skill sap-us-bank-validate, 2026-07-09).
+  # Deterministic math — offline, source-cited (ABA registrar / Fed MICR / NACHA
+  # format spec / SAP BANKL-US). These CAN drive the verdict because they are
+  # arithmetic, not web evidence; live directory existence stays NOTE-only.
+
+  - id: BNK-040
+    name: routing_format_9d
+    tier: corp
+    source: skill
+    when: {check: routing_format, field: routing_aba}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Routing number {value_masked} is not 9 numeric digits: {detail}."
+    message_ru: "Routing-номер {value_masked} — не 9 цифр: {detail}."
+
+  - id: BNK-041
+    name: routing_checksum
+    tier: corp
+    source: skill
+    when: {check: routing_checksum, field: routing_aba}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Routing number {value_masked} fails the ABA 3-7-1 checksum: {detail}."
+    message_ru: "Routing-номер {value_masked} не проходит контрольную сумму ABA 3-7-1: {detail}."
+
+  - id: BNK-042
+    name: routing_prefix
+    tier: corp
+    source: skill
+    when: {check: routing_prefix, field: routing_aba}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Routing number {value_masked} has a never-assigned Fed prefix: {detail}."
+    message_ru: "Routing-номер {value_masked} имеет никогда не назначаемый префикс ФРС: {detail}."
+
+  - id: BNK-043
+    name: account_sig_digits
+    tier: corp
+    source: skill
+    # NMR, not REJECT: in the document flow a too-short account may be an OCR
+    # truncation — a human decides. Leading zeros are SAP padding, not a defect.
+    when: {check: account_sig_digits, field: account_number, args: {min: 4}}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Account number {value_masked} looks unusable: {detail}."
+    message_ru: "Номер счёта {value_masked} выглядит непригодным: {detail}."
+
+  - id: BNK-044
+    name: routing_wires_format_9d
+    tier: corp
+    source: skill
+    when: {check: routing_format, field: routing_aba_wires}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Wire routing number {value_masked} is not 9 numeric digits: {detail}."
+    message_ru: "Wire-routing {value_masked} — не 9 цифр: {detail}."
+
+  - id: BNK-045
+    name: routing_wires_checksum
+    tier: corp
+    source: skill
+    when: {check: routing_checksum, field: routing_aba_wires}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Wire routing number {value_masked} fails the ABA 3-7-1 checksum: {detail}."
+    message_ru: "Wire-routing {value_masked} не проходит контрольную сумму ABA 3-7-1: {detail}."
+
+  - id: BNK-046
+    name: routing_wires_prefix
+    tier: corp
+    source: skill
+    when: {check: routing_prefix, field: routing_aba_wires}
+    severity: CRITICAL
+    verdict_effect: REJECT
+    message: "Wire routing number {value_masked} has a never-assigned Fed prefix: {detail}."
+    message_ru: "Wire-routing {value_masked} имеет никогда не назначаемый префикс ФРС: {detail}."
+
+--- # doc_class: w9
+# W-9 / W-8 document rules — explicit and editable. Sources: mdm-w9-checker skill
+# (+ its rules.md / dynamic_rules.md).
+#
+# Governance metadata (per rule, hash-immune — never invalidates an approval):
+#   tier:   corp | experimental | learned   (only tier:corp ships to SAP v1)
+#   source: skill | policy | operator        (where the rule came from)
+version: 1
+
+doc_types: [w9, w8, other_tax, unknown]
+
+tables: {}
+
+rules:
+  - id: W9-030
+    name: w8_detected
+    tier: corp
+    source: skill
+    applies_to: [w8]
+    when: {always: true}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "This is a W-8 (foreign status), not a W-9 — apply W-8 treatment; do not map to Tax Number 1/2 as a W-9."
+    message_ru: "Это W-8 (иностранный статус), не W-9 — другой процесс обработки."
+
+  - id: W9-031
+    name: unknown_tax_doc
+    tier: corp
+    source: skill
+    applies_to: [unknown, other_tax]
+    when: {always: true}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Not recognized as a W-9 — confirm the document type before using it as US tax evidence."
+
+  - id: W9-001
+    name: line1_missing
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {field_missing: line1_name}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "W-9 Line 1 (taxpayer legal name) is missing/unreadable — Line 1 must feed SAP Name 1."
+
+  - id: W9-002
+    name: tin_unreadable
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {field_missing: tin_raw}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN not readable on the form — cannot verify SSN/EIN mapping."
+
+  - id: W9-003
+    name: classification_missing
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {field_missing: line3_classification}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Federal tax classification (Line 3) unclear — Recipient Type cannot be verified."
+
+  - id: W9-010
+    name: ein_9_digits
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {check: ein_shape, field: tin_raw, args: {digits: 9}}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN {value} has the wrong digit count: {detail} (EIN/SSN must be 9 digits)."
+
+  - id: W9-011
+    name: tin_type_vs_classification
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {check: tin_type_vs_classification, field: tin_raw}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN type conflicts with the tax classification: {detail}. Individual/Sole proprietor normally uses SSN (Tax Number 1); businesses use EIN (Tax Number 2)."
+
+  - id: W9-012
+    name: individual_llc_ein_mix
+    tier: corp
+    source: policy
+    applies_to: [w9]
+    when: {check: individual_with_business_name_and_ein}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Internal inconsistency: {detail}. Request clarification or an updated W-9 (rule DR-20260624-131532)."
+
+  # W9-040/041 tables: us-tax-number-validator skill (references/rules.md —
+  # IRS "How EINs are Assigned", SSA randomization FAQ, IRS Pub 4757).
+  - id: W9-040
+    name: tin_structure_invalid
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {check: tin_structural, field: tin_raw}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN {value} fails US TIN structure: {detail}. Verify the digits against the form image; if the form really reads so, request a corrected W-9."
+    message_ru: "TIN {value} структурно невалиден: {detail}. Сверить с изображением формы; если так и напечатано — запросить исправленный W-9."
+
+  - id: W9-041
+    name: tin_placeholder_fake
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {check: tin_placeholder, field: tin_raw}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "TIN {value} is a placeholder/known-fake value ({detail}) — not a real TIN. Request the actual TIN or an updated W-9."
+    message_ru: "TIN {value} — заглушка/известный фиктивный номер ({detail}). Запросить настоящий TIN или обновлённый W-9."
+
+  - id: W9-013
+    name: line_swap_suspect
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {check: line_swap_suspect}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Line 1 / Line 2 look swapped or collapsed: {detail}. Never swap or merge W-9 name lines (Line 1 -> Name 1, Line 2 -> Name 2)."
+
+  - id: W9-020
+    name: unsigned
+    tier: corp
+    source: skill
+    applies_to: [w9]
+    when: {flag_false: signed}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "W-9 appears unsigned — note for review (blocking only if packet rules say so)."
+
+  # --- W-8 family (subtype schema: legal_name/chapter statuses/foreign_tin) ---
+  # All five are experimental + PENDING by design (quality wave QW8-B): the
+  # approved W9-030 already sends every W-8 to manual review, so shipping these
+  # changes NO verdict until Egor approves them (and decides W9-030's fate).
+
+  - id: W8-001
+    name: w8_unsigned
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {flag_false: signed}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "W-8 Certification Part is not signed — an unsigned W-8 is not valid foreign-status evidence."
+
+  - id: W8-002
+    name: w8_no_legal_name
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {field_missing: legal_name}
+    severity: CRITICAL
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "W-8 Part I beneficial-owner name is missing/unreadable — it must feed SAP Name 1."
+
+  - id: W8-003
+    name: w8_ch4_cert_missing
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {check: w8_ch4_cert_missing, field: chapter4_status}
+    severity: WARNING
+    verdict_effect: NEED_MANUAL_REVIEW
+    message: "Chapter-4 (FATCA) status is claimed without a completed certification part: {detail}."
+
+  - id: W8-004
+    name: w8_stale
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {check: date_older_than, field: sign_date, args: {years: 3}}
+    severity: NOTE
+    verdict_effect: null
+    message: "W-8 signature date {value} is older than ~3 years — W-8 forms expire after the third full calendar year; consider requesting a fresh one."
+
+  - id: W8-005
+    name: w8_undated
+    tier: experimental
+    source: skill
+    applies_to: [w8]
+    when: {field_missing: sign_date}
+    severity: NOTE
+    verdict_effect: null
+    message: "W-8 carries no signature date — expiry cannot be tracked."

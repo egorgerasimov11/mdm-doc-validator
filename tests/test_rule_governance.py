@@ -85,10 +85,12 @@ def test_validate_rule_when_op_not_dict_order_dependent():
 
 
 def test_shipped_rules_pass_save_verbatim(rules_env):
-    """Regression guard: both shipped files must save byte-identical."""
-    shipped = __import__("pathlib").Path(__file__).resolve().parents[1] / "rules"
-    for doc_class, fname in (("bank", "banking.yaml"), ("w9", "w9.yaml")):
-        text = (shipped / fname).read_text(encoding="utf-8")
+    """Regression guard: both shipped SECTIONS must save byte-identical."""
+    import mdmdoc.rules_io as real_io
+    shipped = __import__("pathlib").Path(__file__).resolve().parents[1] / "rules" / "rules.yaml"
+    sections = real_io._split_sections(shipped.read_text(encoding="utf-8"))
+    for doc_class in ("bank", "w9"):
+        text = sections[doc_class]
         n = rules_io.save_rules(doc_class, text)
         assert n > 0
-        assert (config.RULES_DIR / fname).read_text(encoding="utf-8") == text
+        assert rules_io.rules_text(doc_class) == text
