@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import threading
+import uuid
 
 from . import config, runstore
 
@@ -21,11 +22,12 @@ _LOCK = threading.Lock()
 
 # canonical action names (free-form allowed, these are the known set the
 # history page offers as filter chips)
-ACTIONS = ("check", "cancel", "label", "mark-valid", "rating", "finding-vote",
+ACTIONS = ("check", "cancel", "label", "mark-valid", "teach-type", "rating",
+           "finding-vote",
            "rule-save", "rule-approve", "rule-tier", "rule-delete",
-           "rule-challenge-dismiss",
+           "rule-restore", "rule-create", "rule-challenge-dismiss",
            "rule-regenerate", "skill-upload", "settings", "train", "eval",
-           "bulk", "run-test", "job-start", "job-end")
+           "bulk", "run-test", "job-start", "job-end", "pattern-study", "undo")
 
 
 def _path():
@@ -34,7 +36,10 @@ def _path():
 
 def log(action: str, run_id: str = "", rule_id: str = "", doc_class: str = "",
         job_id: str = "", detail: str = "") -> dict:
-    row = {"ts": runstore.now_iso(), "action": str(action)[:40]}
+    # `op` uniquely names this row so undo can target it — ts alone collides
+    # (second precision, bulk-approve logs several rows per second)
+    row = {"ts": runstore.now_iso(), "op": uuid.uuid4().hex[:8],
+           "action": str(action)[:40]}
     if run_id:
         row["run_id"] = str(run_id)[:32]
     if rule_id:

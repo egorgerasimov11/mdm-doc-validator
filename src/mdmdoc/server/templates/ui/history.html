@@ -19,7 +19,7 @@
   </div>
   <ul class="timeline" id="hist-list">
     {% for r in rows %}
-    <li data-action="{{ r.action }}">
+    <li data-action="{{ r.action }}"{% if r.undone %} style="opacity:.45;text-decoration:line-through"{% endif %}>
       <span class="meta" style="min-width:11.5em">{{ r.ts }}</span>
       <span class="chip">{{ r.action }}</span>
       <span class="grow">
@@ -29,6 +29,9 @@
         {{ r.detail or '' }}
       </span>
       {% if r.job_id %}<span class="meta">job {{ r.job_id[:8] }}</span>{% endif %}
+      {% if r.undoable %}<button type="button" class="op-undo" data-op="{{ r.op }}"
+              title="take this action back — the revert goes through the same safety checks">Undo</button>{% endif %}
+      {% if r.undone %}<span class="meta">undone</span>{% endif %}
     </li>
     {% else %}
     <li class="meta">no actions recorded yet</li>
@@ -40,6 +43,27 @@
 {% block script %}
 <script>
 (function () {
+  document.querySelectorAll('.op-undo').forEach(function (b) {
+    b.onclick = function () {
+      if (!confirm('Take back this action? The revert runs the same safety checks as the action itself.')) return;
+      b.disabled = true;
+      mdmdoc.api('/api/v1/undo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: b.dataset.op }),
+      }).then(function (r) {
+        var li = b.closest('li');
+        li.style.opacity = .45; li.style.textDecoration = 'line-through';
+        b.remove();
+        var note = document.createElement('span');
+        note.className = 'meta';
+        note.textContent = 'undone' + (r.note ? ' — ' + r.note : '');
+        li.appendChild(note);
+      }).catch(function (e) {
+        b.disabled = false;
+        alert('Undo refused: ' + e.message);
+      });
+    };
+  });
   document.querySelectorAll('#hist-filters button').forEach(function (b) {
     b.onclick = function () {
       document.querySelectorAll('#hist-filters button').forEach(function (x) { x.classList.remove('active'); });

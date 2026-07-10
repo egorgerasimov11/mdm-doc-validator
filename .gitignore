@@ -30,3 +30,5 @@ rules/challenges.jsonl
 rules/deleted/
 dataset/ratings.jsonl
 dataset/patterns.jsonl
+dataset/labels_history.jsonl
+rules/history/

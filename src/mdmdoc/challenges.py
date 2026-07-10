@@ -45,6 +45,13 @@ def dismiss_rule(rule_id: str, reason: str = "") -> dict:
     return record(rule_id, "", "", "dismissed", note=reason)
 
 
+def retract(rule_id: str, run_id: str, note: str = "") -> dict:
+    """Undo of ONE challenge (F1): surgically takes back a single vote without
+    the nuclear dismissal — counts() subtracts it, for_rule() drops the newest
+    row of the same run."""
+    return record(rule_id, "", run_id, "retracted", note=note)
+
+
 def load() -> list[dict]:
     p = _path()
     if not p.exists():
@@ -59,14 +66,18 @@ def load() -> list[dict]:
 
 
 def counts() -> dict[str, int]:
-    """rule_id -> LIVE challenge count (challenges after the last dismissal)."""
+    """rule_id -> LIVE challenge count (challenges after the last dismissal,
+    minus retractions)."""
     live: dict[str, int] = {}
     for r in load():
         rid = str(r.get("rule_id") or "")
         if not rid:
             continue
-        if r.get("kind") == "dismissed":
+        kind = r.get("kind")
+        if kind == "dismissed":
             live[rid] = 0
+        elif kind == "retracted":
+            live[rid] = max(0, live.get(rid, 0) - 1)
         else:
             live[rid] = live.get(rid, 0) + 1
     return {k: v for k, v in live.items() if v > 0}
@@ -77,8 +88,15 @@ def for_rule(rule_id: str, limit: int = 10) -> list[dict]:
     rows = [r for r in load() if r.get("rule_id") == rule_id]
     out: list[dict] = []
     for r in rows:                      # respect the last dismissal boundary
-        if r.get("kind") == "dismissed":
+        kind = r.get("kind")
+        if kind == "dismissed":
             out = []
+        elif kind == "retracted":       # take back the newest row of that run
+            run = r.get("run_id") or ""
+            for i in range(len(out) - 1, -1, -1):
+                if not run or out[i].get("run_id") == run:
+                    del out[i]
+                    break
         else:
             out.append(r)
     return list(reversed(out))[:limit]

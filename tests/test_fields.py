@@ -187,10 +187,11 @@ def test_no_writes_outside_choke_points():
     # lookup statuses only (public identifiers), via config.atomic_write_text
     # skill_import.py stores the uploaded skill markdown under rules/skills/
     # (provenance text supplied by the operator, no document PII)
+    # patterns.py rewrites its own PII-free shape ledger on undo (drop, F1)
     allowed = {"runstore.py", "modelfile.py", "evalrun.py", "dataset.py",
                "fewshot.py", "lora_export.py", "adoption.py", "rules_io.py",
                "rule_approvals.py", "config.py", "synth.py", "rule_stats.py",
-               "webcheck.py", "skill_import.py"}
+               "webcheck.py", "skill_import.py", "patterns.py"}
     offenders = []
     for p in src.rglob("*.py"):
         if p.name in allowed:

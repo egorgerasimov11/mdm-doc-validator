@@ -82,6 +82,31 @@ def record(label: dict, findings, machine_verdict: str) -> dict:
     return row
 
 
+def drop(doc_sha256: str, ts: str = "") -> int:
+    """Remove the pattern row(s) a label wrote (undo, F1): by sha, and by the
+    label ts when given — rows from earlier label eras stay, which is right."""
+    p = _path()
+    if not p.exists():
+        return 0
+    keep, dropped = [], 0
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            keep.append(line)
+            continue
+        if row.get("doc_sha256") == doc_sha256 and (not ts or row.get("ts") == ts):
+            dropped += 1
+        else:
+            keep.append(line)
+    if dropped:
+        with _LOCK:
+            config.atomic_write_text(p, ("\n".join(keep) + "\n") if keep else "")
+    return dropped
+
+
 def load() -> list[dict]:
     p = _path()
     if not p.exists():

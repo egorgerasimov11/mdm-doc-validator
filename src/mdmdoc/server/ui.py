@@ -403,10 +403,16 @@ def activity_page(request: Request):
 
 @router_ui.get("/ui/history", response_class=HTMLResponse)
 def history_page(request: Request):
-    """E1: the operator action audit trail (dataset/oplog.jsonl)."""
-    from .. import oplog
+    """E1: the operator action audit trail (dataset/oplog.jsonl); F1 adds the
+    per-row Undo button (undone rows render struck-through)."""
+    from .. import oplog, undo
+    rows = oplog.recent(limit=500)
+    undone = undo.undone_ops(rows)
+    for r in rows:
+        r["undone"] = r.get("op", "") in undone
+        r["undoable"] = undo.can_undo(r, undone)
     return templates.TemplateResponse(request, "history.html", _ctx(
-        page="activity", rows=oplog.recent(limit=500)))
+        page="activity", rows=rows))
 
 
 @router_ui.get("/ui/debug", response_class=HTMLResponse)

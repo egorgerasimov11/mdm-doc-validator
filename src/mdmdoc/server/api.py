@@ -201,11 +201,14 @@ def approve_rule(doc_class: str, body: dict) -> dict:
     for rid in ids:
         r = by_id.get(str(rid))
         if r:
+            # capture the PREVIOUS decision before it is overwritten — the undo
+            # ledger reverts from this "prev -> new" detail (rule-tier format)
+            prev = rule_approvals.status(rule_approvals.load(), doc_class, r)
             rule_approvals.set_decision(doc_class, r, decision, note=body.get("note", ""))
             n += 1
             from .. import oplog
             oplog.log("rule-approve", rule_id=str(rid), doc_class=doc_class,
-                      detail=decision)
+                      detail=f"{prev} -> {decision}")
             if decision == "rejected":
                 # a rejected rule no longer fires — its challenges are resolved
                 from .. import challenges as _challenges
@@ -254,6 +257,24 @@ def delete_rule(doc_class: str, body: dict) -> dict:
     if body.get("regen_abap"):
         out["regenerate"] = rules_io.regenerate_abap()
     return {"ok": True, **out}
+
+
+@router_teach.post("/undo", tags=["teach"])
+def undo_action(body: dict) -> dict:
+    """F1: take back one operator action by its History `op` id. Every revert
+    goes through the same choke points the action used; a stale state (newer
+    work on the same target) refuses with a readable reason instead of
+    clobbering."""
+    from .. import undo
+    op = str(body.get("op") or "")
+    if not op:
+        raise api_error(400, "bad_request", "op required")
+    try:
+        return undo.perform(op)
+    except undo.StaleState as e:
+        raise api_error(409, "stale_state", str(e))
+    except undo.UndoError as e:
+        raise api_error(400, "not_undoable", str(e))
 
 
 @router_teach.get("/rules/stats", tags=["rules"])
@@ -894,8 +915,9 @@ def rate_run(run_id: str, body: dict) -> dict:
     rid = runstore.resolve_run(run_id)
     if not rid or not runstore.load(rid, "meta.json"):
         raise api_error(404, "not_found", f"run {run_id} not found")
-    from .. import ratings
+    from .. import oplog, ratings
     row = ratings.record(rid, rating)
+    oplog.log("rating", run_id=rid, detail=rating)
     return {"ok": True, **row}
 
 

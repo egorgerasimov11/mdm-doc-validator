@@ -40,7 +40,7 @@ _AUDIT_ROUTES = (
     (_re.compile(r"^/api/v1/jobs/(?P<job_id>\w+)/cancel$"), "cancel", ()),
     (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/label$"), "label", ()),
     (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/mark-valid$"), "mark-valid", ()),
-    (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/rating$"), "rating", ()),
+    (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/rating$"), None, ()),    # handler logs (detail=rating)
     (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/test$"), "run-test", ()),
     (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/propose-fix$"), "propose", ()),
     (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/findings/(?P<rule_id>[\w-]+)/vote$"),

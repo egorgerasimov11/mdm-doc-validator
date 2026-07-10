@@ -86,12 +86,72 @@ def all_fakes() -> list[str]:
     return out
 
 
+def _history_path():
+    return config.DATASET_DIR / "labels_history.jsonl"
+
+
 def append_label(label: dict, secrets: list[str] | None = None) -> None:
     config.ensure_dirs()
     blob = json.dumps(label, ensure_ascii=False)
     assert_no_leak(blob, secrets or [], allowed_fakes=label_fakes(label))
     with _LOCK:
-        # replace an earlier label for the same document (latest correction wins)
-        existing = [l for l in load_labels() if l.get("doc_sha256") != label.get("doc_sha256")]
-        lines = [json.dumps(l, ensure_ascii=False) for l in existing] + [blob]
+        # replace an earlier label for the same document (latest correction wins);
+        # the DISPLACED row is snapshotted to labels_history.jsonl first — it is
+        # physically destroyed here otherwise, and undo (F1) needs it back
+        keep, displaced = [], []
+        for l in load_labels():
+            (displaced if l.get("doc_sha256") == label.get("doc_sha256") else keep).append(l)
+        if displaced:
+            try:
+                with open(_history_path(), "a", encoding="utf-8") as f:
+                    for old_row in displaced:
+                        f.write(json.dumps({**old_row, "_replaced_ts": label.get("ts", ""),
+                                            "_replaced_by": label.get("label_id", "")},
+                                           ensure_ascii=False) + "\n")
+            except Exception:
+                pass   # history is best-effort; the save itself must proceed
+        lines = [json.dumps(l, ensure_ascii=False) for l in keep] + [blob]
         config.atomic_write_text(config.LABELS_PATH, "\n".join(lines) + "\n")
+
+
+def delete_label(doc_sha256: str) -> dict | None:
+    """Remove the label for one document (undo of label/mark-valid/teach-type).
+    Returns the removed row, or None if the sha has no label. The caller decides
+    whether to restore a predecessor from labels_history."""
+    with _LOCK:
+        keep, removed = [], None
+        for l in load_labels():
+            if l.get("doc_sha256") == doc_sha256 and removed is None:
+                removed = l
+            else:
+                keep.append(l)
+        if removed is None:
+            return None
+        lines = [json.dumps(l, ensure_ascii=False) for l in keep]
+        config.atomic_write_text(config.LABELS_PATH,
+                                 ("\n".join(lines) + "\n") if lines else "")
+    return removed
+
+
+def last_replaced_label(doc_sha256: str, replaced_ts: str = "") -> dict | None:
+    """Newest labels_history row for the sha — the predecessor a label undo
+    restores (internal _replaced_* bookkeeping stripped). `replaced_ts` pins the
+    displacement moment: only the row displaced BY the label being undone counts,
+    an older era must not resurrect."""
+    p = _history_path()
+    if not p.exists():
+        return None
+    found = None
+    for line in p.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        if row.get("doc_sha256") != doc_sha256:
+            continue
+        if replaced_ts and row.get("_replaced_ts") != replaced_ts:
+            continue
+        found = row
+    if found is None:
+        return None
+    return {k: v for k, v in found.items() if not k.startswith("_replaced")}

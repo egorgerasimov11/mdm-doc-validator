@@ -74,8 +74,47 @@ def rules_text(doc_class: str) -> str:
     return legacy.read_text(encoding="utf-8") if legacy.exists() else ""
 
 
+HISTORY_KEEP = 50
+
+
+_LEGACY_SNAP_MARK = "# mdmdoc-legacy-snapshot doc_class: "
+
+
+def _snapshot_current(doc_class: str = "") -> str:
+    """Copy the CURRENT rules file bytes into rules/history/ before any write —
+    the undo ledger's restore source (F1). Unified layout snapshots the whole
+    file; a legacy checkout snapshots the class file being overwritten (marked
+    so restore knows where it goes). Returns the snapshot basename ("" when
+    there is nothing to snapshot). Retention-capped; never raises."""
+    try:
+        u = unified_path()
+        if u.exists():
+            payload = u.read_text(encoding="utf-8")
+        elif doc_class and rules_path(doc_class).exists():
+            payload = (_LEGACY_SNAP_MARK + doc_class + "\n"
+                       + rules_path(doc_class).read_text(encoding="utf-8"))
+        else:
+            return ""
+        from . import runstore
+        hist = config.RULES_DIR / "history"
+        hist.mkdir(parents=True, exist_ok=True)
+        ts = runstore.now_iso().replace(":", "").replace("-", "").rstrip("Z")
+        base, n = f"rules-{ts}", 0
+        snap = hist / f"{base}-{n}.yaml"
+        while snap.exists():
+            n += 1
+            snap = hist / f"{base}-{n}.yaml"
+        snap.write_text(payload, encoding="utf-8")
+        for old_snap in sorted(hist.glob("rules-*.yaml"))[:-HISTORY_KEEP]:
+            old_snap.unlink()
+        return snap.name
+    except Exception:
+        return ""   # a failed snapshot must never block the actual save
+
+
 def _write_rules_text(doc_class: str, text: str) -> None:
     """Write one class's section back (unified when present, else legacy)."""
+    _snapshot_current(doc_class)
     u = unified_path()
     if u.exists():
         sections = _split_sections(u.read_text(encoding="utf-8"))
@@ -190,6 +229,74 @@ def delete_rule(doc_class: str, rule_id: str) -> dict:
             "backup": str(backup), "remaining_rules": len(parsed["rules"])}
 
 
+_BACKUP_NAME = re.compile(r"^[A-Za-z0-9_.\-]+\.yaml$")
+
+
+def list_deleted() -> list[dict]:
+    """Backups under rules/deleted/, newest first — the restore menu (F2a)."""
+    d = config.RULES_DIR / "deleted"
+    if not d.exists():
+        return []
+    out = []
+    for p in sorted(d.glob("*.yaml"), reverse=True):
+        rule_id = p.name.rsplit("-", 1)[0]
+        header = ""
+        try:
+            header = p.read_text(encoding="utf-8").splitlines()[0].lstrip("# ")
+        except Exception:
+            pass
+        out.append({"backup": p.name, "rule_id": rule_id, "header": header})
+    return out
+
+
+def restore_rule(doc_class: str, backup_name: str) -> dict:
+    """Splice a deleted rule's backed-up block back into its section (F1 undo /
+    F2a restore). The block returns verbatim (appended at the section end) and
+    the rule starts PENDING — its approval was cleared at delete time."""
+    if not _BACKUP_NAME.match(backup_name or ""):
+        raise ValueError("bad backup name")
+    p = config.RULES_DIR / "deleted" / backup_name
+    if not p.exists():
+        raise ValueError(f"backup {backup_name} not found")
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    block = "".join(l for l in lines if not l.startswith("#"))
+    parsed = yaml.safe_load(block)
+    if not (isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict)):
+        raise ValueError("backup does not contain exactly one rule block")
+    rule_id = str(parsed[0].get("id") or "")
+    text = rules_text(doc_class)
+    cfg = yaml.safe_load(text) or {}
+    if any(str(r.get("id")) == rule_id for r in cfg.get("rules", []) if isinstance(r, dict)):
+        raise ValueError(f"rule {rule_id} already exists in the {doc_class} rules")
+    new_text = text.rstrip("\n") + "\n\n" + block.lstrip("\n")
+    n = save_rules(doc_class, new_text)          # full validation, snapshot inside
+    return {"rule_id": rule_id, "doc_class": doc_class, "rules": n}
+
+
+def list_snapshots() -> list[str]:
+    d = config.RULES_DIR / "history"
+    return sorted((p.name for p in d.glob("rules-*.yaml")), reverse=True) if d.exists() else []
+
+
+def restore_snapshot(name: str) -> dict:
+    """Restore a pre-write snapshot (undo of rule-save). Goes through the
+    validated save path so the CURRENT state is snapshotted first — an undo is
+    itself undoable. Legacy-marked snapshots restore into their class file."""
+    if not _BACKUP_NAME.match(name or ""):
+        raise ValueError("bad snapshot name")
+    p = config.RULES_DIR / "history" / name
+    if not p.exists():
+        raise ValueError(f"snapshot {name} not found")
+    text = p.read_text(encoding="utf-8")
+    if text.startswith(_LEGACY_SNAP_MARK):
+        first, _, rest = text.partition("\n")
+        doc_class = first.removeprefix(_LEGACY_SNAP_MARK).strip()
+        n = save_rules(doc_class, rest)
+        return {"snapshot": name, "counts": {doc_class: n}}
+    counts = save_unified(text)
+    return {"snapshot": name, "counts": counts}
+
+
 def regenerate_abap() -> dict:
     """Push the edited YAML rules to the ABAP/SAP side: copy them into the ABAP
     repo and run its generator. Best-effort — reports if the repo is absent."""
@@ -243,5 +350,8 @@ def save_unified(text: str) -> dict:
         counts[doc_class] = len(parsed["rules"])
         parsed_ok[doc_class] = body
     with _LOCK:
+        # save_unified writes unified_path directly (not via _write_rules_text)
+        # so it needs its own pre-write snapshot for the undo ledger
+        _snapshot_current()
         config.atomic_write_text(unified_path(), _assemble(parsed_ok))
     return counts
