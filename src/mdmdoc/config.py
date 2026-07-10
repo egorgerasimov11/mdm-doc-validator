@@ -120,6 +120,35 @@ def sig_vision_cap() -> int:
         return 4
 
 
+def _env_int(name: str, default: int, floor: int = 0) -> int:
+    try:
+        return max(floor, int(os.environ.get(name, str(default))))
+    except ValueError:
+        return default
+
+
+def ladder_enabled() -> bool:
+    """P6 evidence-ladder kill switch: MDMDOC_LADDER=0 disables the bounded
+    second perception pass entirely. Default ON — clean documents never
+    trigger it (no critical gaps -> zero extra cost)."""
+    return os.environ.get("MDMDOC_LADDER", "1").strip() != "0"
+
+
+def ladder_pages() -> int:
+    """Max extra pages one ladder climb may deep-read."""
+    return _env_int("MDMDOC_LADDER_PAGES", 2)
+
+
+def ladder_vision_cap() -> int:
+    """Max vision transcribe calls per ladder climb (0 = OCR-only)."""
+    return _env_int("MDMDOC_LADDER_VISION_CAP", 1)
+
+
+def time_budget_s() -> float:
+    """Whole-run soft budget: the ladder refuses to start past this point."""
+    return float(_env_int("MDMDOC_TIME_BUDGET_S", 240))
+
+
 def doctype_rescue_enabled() -> bool:
     """П3 evidence-rescue kill switch: MDMDOC_DOCTYPE_RESCUE=0 reverts to the
     blunt payment_instructions->other->NMR grounding. Default ON."""

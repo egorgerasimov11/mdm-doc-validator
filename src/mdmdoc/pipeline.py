@@ -91,6 +91,13 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
 
     # Stage B (trainable extraction, two tiers)
     ext = stage_b.extract(raw, quality=quality, policy=policy, engine=engine_eff)
+    # evidence ladder (P6): a bounded SECOND perception pass when critical
+    # fields are still missing and unread pages show deterministic evidence
+    # they can close the gap (the controller loop lives here, not in stage_b)
+    from . import ladder
+    ext, ladder_meta = ladder.climb(path, raw, ext, rdir, t0=t0, quality=quality,
+                                    policy=policy, engine=engine_eff,
+                                    use_vision=use_vision)
     if container_note:
         ext.warnings.insert(0, container_note)
 
@@ -279,7 +286,8 @@ def run_check(path: Path, doc_class: str, use_vision: bool = True, keep_renders:
                                    sap_image is not None, quality),
             "sap_path": str(sap_image) if sap_image is not None else None,
             "sap_kind": sap_kind,
-            "confidence": conf["level"], "confidence_reasons": conf["reasons"]}
+            "confidence": conf["level"], "confidence_reasons": conf["reasons"],
+            "ladder": ladder_meta}
     report_json = rpt.build_json(pub, findings, verdict, meta)
 
     runstore.write(run_id, "meta.json", meta, secrets, policy=gate)

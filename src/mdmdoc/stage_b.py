@@ -797,6 +797,56 @@ def _attribute_page(raw: RawDoc, value) -> int | None:
     return None
 
 
+# critical IDs the cross-page corroboration guard hunts (P5)
+_CORROB_FIELDS = ("iban", "account_number", "routing_aba", "routing_aba_wires",
+                  "swift_bic", "tin_raw")
+
+
+def _page_class(text: str) -> str:
+    """Coarse page class from the deterministic markers — corroboration only
+    counts pages of DIFFERENT classes as independent."""
+    from .fields import page_markers
+    m = page_markers(text)
+    if m["bank_letter"]:
+        return "bank_letter"
+    if m["w9_form"]:
+        return "w9"
+    if m["invoice"]:
+        return "invoice"
+    return "plain"
+
+
+def _corroborate_across_pages(ext: Extraction, raw: RawDoc) -> None:
+    """A critical ID printed on >=2 pages of DIFFERENT page classes (a letter
+    AND a supplier sheet, say) was produced twice by independent layouts —
+    stronger than the model==regex 'confirmed' echo, which reads ONE text.
+    Marks provenance.confirmed_independent; the note carries page counts and
+    classes only, never the ID itself (strict-gate safe)."""
+    from .fields import _norm_id
+    texts: dict[int, str] = {}
+    for i in set(raw.page_texts) | set(raw.survey_texts):
+        t = raw.page_texts.get(i) or raw.survey_texts.get(i) or ""
+        if t.strip():
+            texts[i] = t
+    if len(texts) < 2:
+        return
+    norms = {i: _norm_id(t) for i, t in texts.items()}
+    for k in _CORROB_FIELDS:
+        s_id = _norm_id(str(ext.fields.get(k) or "").strip())
+        if len(s_id) < 6:
+            continue
+        hits = [i for i in sorted(texts) if s_id in norms[i]]
+        if len(hits) < 2:
+            continue
+        classes = sorted({_page_class(texts[i]) for i in hits})
+        if len(classes) < 2:
+            continue
+        prov = ext.provenance.setdefault(k, {"source": "model", "page": None})
+        prov["confirmed_independent"] = True
+        _cross_note(ext, f"{k}=confirmed independently on {len(hits)} pages "
+                         f"({'+'.join(classes)})")
+
+
 def _finalize_provenance(ext: Extraction, raw: RawDoc) -> None:
     """Every non-empty field gets a provenance entry: special sources (probes,
     OCR fills, guards) were recorded where they fired; everything else was read
@@ -998,6 +1048,7 @@ def extract(raw: RawDoc, quality: bool = False, policy: str = "masked",
     # a negative probe can no longer overwrite the text-tier evidence
     _officer_block_guard(ext_res, raw)
     _resolve_signature(ext_res, raw)
+    _corroborate_across_pages(ext_res, raw)
     _finalize_provenance(ext_res, raw)
 
     if engine == "dual":

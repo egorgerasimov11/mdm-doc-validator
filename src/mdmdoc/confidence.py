@@ -56,7 +56,11 @@ def assess(ext: Extraction, raw=None) -> dict:
             # provenance is keyed by the INTERNAL field name ("tin_raw" included);
             # the "tin" re-key exists only in the public to_public() view.
             prov = (ext.provenance or {}).get(k) or {}
-            if prov.get("source") == "model" and not prov.get("confirmed"):
+            # "confirmed" = model==regex over the SAME text; confirmed_independent
+            # = the ID printed on >=2 pages of different classes (P5) — either
+            # settles the model-only worry
+            if (prov.get("source") == "model" and not prov.get("confirmed")
+                    and not prov.get("confirmed_independent")):
                 weak += 1
                 reasons.append(f"{k}: model-only read, not confirmed by OCR")
 

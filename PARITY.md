@@ -46,6 +46,7 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
   esignature_guard [extended to w9/w8] and officer_block_guard — ARE ported)
 - officer_block_guard — ported
 - finalize_provenance — n/a (Python report provenance structure; the ABAP result has no provenance field)
+- corroborate_across_pages — n/a (needs per-page perception texts; ABAP receives one flat text and has no page structure)
 
 ## Guards (continued, 2026-07-09 accuracy wave)
 - normalize_tin — ported (already listed)
@@ -57,6 +58,17 @@ MDMDOC_NOW (audit C13) is a Python-only test clock for `date_older_than`; the
 ABAP side stays on sy-datum by design — no port expected. The Python
 `_DATE_FORMATS` day-first-abbreviated additions of the same commit CONVERGE
 Python toward ABAP's `try_textual_date` (which already parsed "15 Jan 2023").
+
+## Perception & controller layer (Python-only by design) — 2026-07-10
+The quality wave's perception layer has NO ABAP counterpart and never will:
+ABAP receives one flat text (CONTRACT.md) and has no pages, renders or vision.
+Covered: vision payload caps (model_client), the text-layer garbage gate
+(ocr.text_layer_garbage — reroute only; the ABAP caller supplies text it
+already trusts), page bookkeeping (w9_pages/survey_texts), W-8 page targeting,
+the signature vision ensemble (stage_a.signature_probe), and the evidence
+ladder (ladder.py — the pipeline controller's bounded second perception pass).
+None of these are stage_b guards except `corroborate_across_pages` (listed
+n/a above); nothing here is a pending port.
 
 ## Golden parity corpus (behavioural, beyond marker grep) — 2026-07-09
 `tools/golden/golden_cases.json` (6 cases) runs through the Python DETERMINISTIC

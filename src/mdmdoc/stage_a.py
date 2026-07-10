@@ -333,6 +333,70 @@ def _deep_read_pages(path: Path, picks: list, render_dir: Path, raw: RawDoc,
         raw.vision_text = "\n".join(parts).strip()
 
 
+def deep_read_extra_pages(path: Path, raw: RawDoc, render_dir: Path,
+                          page_idxs: list, use_vision: bool,
+                          vision_cap: int = 1) -> dict:
+    """Evidence-ladder enrichment (P6): deep-read pages the first pass skipped.
+    Text-layer PDFs already hold every page's text in survey_texts — enrichment
+    is free; scans/garbage layers get a 300-DPI OCR render per page plus AT MOST
+    ONE vision transcribe over the new renders (vision_cap). Every recovered
+    text goes through _append_hunt_text so it survives the Stage-B budget cut,
+    and regex_candidates are refreshed over the merged view."""
+    stats = {"pages": [], "vision_calls": 0}
+    if raw.ext != ".pdf" or not page_idxs:
+        return stats
+    todo = [i for i in page_idxs if i not in set(raw.pages_used)]
+    if raw.has_text_layer and not raw.text_layer_garbage:
+        for idx in todo:
+            t = raw.survey_texts.get(idx) or ""
+            if not t.strip():
+                continue
+            raw.page_texts[idx] = t
+            raw.pages_used.append(idx)
+            _append_hunt_text(raw, f"ladder page {idx + 1}", t)
+            stats["pages"].append(idx)
+    else:
+        try:
+            doc = fitz.open(path)
+        except Exception:
+            return stats
+        vis_renders = []
+        for idx in todo:
+            g = _render_page(doc, idx, render_dir, ocr.RENDER_DPI, 0, True, "lt")
+            if not g:
+                continue
+            t = _quick_ocr(g)
+            rot, t = _best_rotation(g, t)
+            if rot:
+                raw.rotations[idx] = rot
+            raw.page_texts[idx] = t
+            raw.pages_used.append(idx)
+            raw.tesseract_text = (raw.tesseract_text + "\n" + t).strip()
+            _append_hunt_text(raw, f"ladder page {idx + 1}", t)
+            stats["pages"].append(idx)
+            if use_vision and vision_cap > 0:
+                v = _render_page(doc, idx, render_dir, config.VISION_DPI, rot,
+                                 False, "lv")
+                if v:
+                    vis_renders.append(v)
+        doc.close()
+        if vis_renders and use_vision and vision_cap > 0:
+            vt = mc.vision("VISION", VISION_TRANSCRIBE_PROMPT,
+                           vis_renders[:mc.VISION_MAX_IMAGES_PER_CALL],
+                           options={"temperature": 0, "seed": 7})
+            stats["vision_calls"] = 1
+            if not vt.startswith("[vision"):
+                raw.vision_text = (raw.vision_text
+                                   + "\n\n[ladder transcribe]\n" + vt).strip()
+                _append_hunt_text(raw, "ladder transcribe", vt)
+            else:
+                raw.warnings.append(vt)
+            mc.unload("VISION")   # free RAM before the re-extract's text model
+    if stats["pages"]:
+        raw.regex_candidates = ocr.regex_fields(_merged(raw))
+    return stats
+
+
 def _read_image_file(path: Path, render_dir: Path, raw: RawDoc, use_vision: bool) -> None:
     proc = ocr.prepare_image(path, render_dir)
     t = _quick_ocr(proc)
