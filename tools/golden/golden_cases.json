@@ -141,6 +141,7 @@
     "account_holder": "Helios OU",
     "bank_name": "Deutsche Bank",
     "iban": "DE89370400440532013000",
+    "swift_bic": "DEUTDEFF",
     "signed": true
    },
    "expect": {
@@ -152,6 +153,25 @@
      "iban": "DE**…3000"
     },
     "verdict": "ACCEPT"
+   }
+  },
+  {
+   "id": "bank-no-swift-warning",
+   "doc_class": "bank",
+   "filename": "no_swift.pdf",
+   "raw_text": "Bank confirmation letter. Account of Falcon OU held at Deutsche Bank, IBAN DE89 3704 0044 0532 0130 00. Signed by officer.",
+   "llm_fields": {
+    "account_holder": "Falcon OU",
+    "bank_name": "Deutsche Bank",
+    "iban": "DE89370400440532013000",
+    "signed": true
+   },
+   "expect": {
+    "doc_type": "bank_letter",
+    "findings": [
+     "BNK-048"
+    ],
+    "verdict": "WARNING"
    }
   },
   {
@@ -180,6 +200,7 @@
     "account_holder": "Kestrel BV",
     "bank_name": "ABN AMRO",
     "doc_date": "15 Jan 2019",
+    "swift_bic": "ABNANL2A",
     "signed": true
    },
    "expect": {

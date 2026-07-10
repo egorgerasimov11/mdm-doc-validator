@@ -313,6 +313,16 @@ rules:
     verdict_effect: REJECT
     message: "Bank/account statement is not acceptable as bank support — an account cannot be verified from a statement. Request a letter from the vendor's bank, a signed & stamped supplier letterhead stating the bank data, or a void check with a signed PDF letter. (MDG template policy 2026-07-10: 'account statement' removed from accepted bank documents.)"
     message_ru: "Банковская выписка (bank/account statement) не принимается как банковское подтверждение — по выписке нельзя верифицировать счёт. Запросить письмо из банка вендора, подписанный и заверенный печатью letterhead поставщика с банковскими реквизитами, либо void check + подписанное PDF-письмо. (Политика MDG-шаблона 2026-07-10: «account statement» исключён из принимаемых банковских документов.)"
+  - id: BNK-048
+    name: swift_missing_warning
+    tier: corp
+    source: policy
+    applies_to: [bank_letter, bank_statement, supplier_letterhead, bank_screenshot, voided_check, ap_document, payment_instructions]
+    when: {check: field_empty, field: swift_bic}
+    severity: WARNING
+    verdict_effect: WARNING
+    message: "No SWIFT/BIC in the document — a banking document should carry a SWIFT/BIC. Confirm it against the SAP data / request form before proceeding. (Operator policy 2026-07-10: a missing SWIFT is always a warning.)"
+    message_ru: "В документе нет SWIFT/BIC — банковский документ должен содержать SWIFT/BIC. Подтвердите его по данным SAP / форме запроса перед продолжением. (Политика оператора 2026-07-10: отсутствие SWIFT — всегда предупреждение.)"
 
 --- # doc_class: w9
 # W-9 / W-8 document rules — explicit and editable. Sources: mdm-w9-checker skill

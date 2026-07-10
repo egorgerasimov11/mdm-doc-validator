@@ -119,7 +119,9 @@ def test_negative_probe_never_overwrites_officer_evidence():
     f = run_rules(ext, enforce_approvals=False)
     assert any(x.rule_id == "BNK-026" for x in f)
     assert not any(x.rule_id == "BNK-021" for x in f)
-    assert decide(f) == "ACCEPT"
+    # WARNING only for the missing SWIFT (BNK-048 policy 2026-07-10); the
+    # officer-evidence preservation this test targets is intact (BNK-026, no BNK-021).
+    assert decide(f) == "WARNING"
 
 
 def test_officer_fill_after_resolve_even_when_model_said_signed():

@@ -75,9 +75,13 @@ def test_computer_generated_statement_is_evidence():
                         account_number="12345678", signed=False,
                         signature_evidence="This is a computer generated confirmation "
                                            "and requires no signature."))
-    assert decide(f) == "ACCEPT"
+    # WARNING (not ACCEPT) only because this fixture carries no SWIFT — the
+    # signature evidence itself is clean: BNK-026 fires, BNK-021 does not.
+    # (BNK-048 policy 2026-07-10: a missing SWIFT is always a warning.)
+    assert decide(f) == "WARNING"
     assert any(x.rule_id == "BNK-026" for x in f)
     assert not any(x.rule_id == "BNK-021" for x in f)
+    assert any(x.rule_id == "BNK-048" for x in f)
 
 
 def test_bank_statement_not_acceptable_rejects():
@@ -132,7 +136,10 @@ def test_ap_document_self_certified_note():
     f = run_rules(_bank("ap_document", account_holder="タカキ ユウスケ",
                         bank_name="福岡銀行", account_number="1442667", signed=True))
     assert any(x.rule_id == "BNK-005" for x in f)
-    assert decide(f) == "ACCEPT"
+    # WARNING only for the missing SWIFT (BNK-048 policy 2026-07-10); the
+    # AP-document self-certification path itself is fine.
+    assert decide(f) == "WARNING"
+    assert any(x.rule_id == "BNK-048" for x in f)
 
 
 def test_us_numeric_iban_field_not_flagged():
