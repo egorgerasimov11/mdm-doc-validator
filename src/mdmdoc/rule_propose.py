@@ -65,7 +65,9 @@ class RunNotFound(RuntimeError):
 # --------------------------------------------------------- textual YAML edit --
 def _rule_block_span(text: str, rule_id: str) -> tuple[int, int] | None:
     """(start, end) line indices of the ``  - id: <rule_id>`` block, end
-    exclusive. A block runs until the next list item or a column-0 line."""
+    exclusive. A block runs until the next RULE item (``- id:`` — every rule
+    starts with its id key) or a column-0 line; a nested block-style sublist
+    (``  - bank_letter`` under applies_to:) must NOT terminate the block."""
     lines = text.splitlines()
     start = None
     for i, ln in enumerate(lines):
@@ -77,7 +79,7 @@ def _rule_block_span(text: str, rule_id: str) -> tuple[int, int] | None:
         return None
     for j in range(start + 1, len(lines)):
         ln = lines[j]
-        if re.match(r"^\s*-\s", ln) or (ln and not ln[0].isspace()):
+        if re.match(r"^\s*-\s*id:\s", ln) or (ln and not ln[0].isspace()):
             return start, j
     return start, len(lines)
 

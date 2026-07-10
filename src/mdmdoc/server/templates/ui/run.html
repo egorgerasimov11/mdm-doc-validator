@@ -33,8 +33,8 @@
 
 <div class="actions">
   <a class="btn" href="/ui/runs/{{ run_id }}/review"><strong>Correct</strong> — teach the model</a>
-  <button type="button" id="btn-valid" data-run="{{ run_id }}"
-          title="record a confirmed ACCEPT for this document: the precedent sticks and the pattern memory learns this shape">Mark valid ✓</button>
+  <button type="button" id="btn-valid" data-run="{{ run_id }}" data-class="{{ doc_class }}"
+          title="record a confirmed ACCEPT for this document: the precedent sticks, every overriding rule lands in the challenge review, and the document re-runs so the verdict flips right here">Mark valid ✓</button>
   <span class="seg" id="rate-seg" data-run="{{ run_id }}" title="rate this analysis — 👎 pushes the run to the top of the training queue">
     <button type="button" data-r="up" class="{{ 'active' if rating == 'up' }}">👍</button>
     <button type="button" data-r="down" class="{{ 'active' if rating == 'down' }}">👎</button>
@@ -212,16 +212,46 @@
 {% endif %}
 
 <div data-panel="findings">
+  {% if pending_rules %}
+  <section id="gate-panel">
+    <h2>Blocked by unapproved rules
+      <span class="meta">verdict held at NEED_MANUAL_REVIEW until every applicable rule is approved — decide each one right here</span></h2>
+    <ul class="timeline">
+      {% for p in pending_rules %}
+      <li class="queue-row gate-row" data-rule="{{ p.id }}" data-class="{{ doc_class }}">
+        <code>{{ p.id }}</code>
+        <span class="meta">{{ p.name }}</span>
+        {% if p.source %}<span class="chip">{{ p.source }}</span>{% endif %}
+        {% if p.tier %}<span class="chip">{{ p.tier }}</span>{% endif %}
+        {% if challenge_counts.get(p.id) %}<span class="chip chip--WARNING">⚠ challenged ×{{ challenge_counts[p.id] }}</span>{% endif %}
+        <span class="grow"></span>
+        <button type="button" class="gate-act" data-act="approved">Approve</button>
+        <button type="button" class="gate-act" data-act="rejected">Reject</button>
+        <button type="button" class="gate-act gate-del" data-act="delete">Delete</button>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="actions">
+      <span class="meta" id="gate-flash"></span>
+      <button type="button" id="gate-rerun" data-run="{{ run_id }}" hidden>Re-analyze with the new decisions</button>
+    </div>
+  </section>
+  {% endif %}
+
   {% if findings %}
   <section>
     <h2>Findings</h2>
     <ul class="timeline">
       {% for f in findings %}
+      {% if not (f.rule_id == 'RULE-GATE' and pending_rules) %}
       <li>
         <span class="chip chip--{{ f.severity }}">{{ f.severity }}</span>
         <code>{{ f.rule_id }}</code>
+        {% if challenge_counts.get(f.rule_id) %}<span class="chip chip--WARNING" title="operator judgement has contradicted this rule — edit or delete it">⚠×{{ challenge_counts[f.rule_id] }}</span>{% endif %}
         <span class="grow" style="white-space:normal">{{ f.message }}</span>
         {% if f.real_rule %}
+        <button type="button" class="fb-vote" data-rule="{{ f.rule_id }}" data-run="{{ run_id }}"
+                title="this rule fired WRONGLY here — record a challenge">👎</button>
         <button type="button" class="fb-dispute" data-rule="{{ f.rule_id }}"
                 title="dispute this rule — the model will propose a fix">dispute</button>
         {% endif %}
@@ -232,6 +262,7 @@
         </a>
         {% endif %}
       </li>
+      {% endif %}
       {% endfor %}
     </ul>
   </section>
@@ -395,6 +426,6 @@
 {% block script %}<script>
   /* each guarded so one missing init (e.g. a stale-cached app.js) can't abort the rest.
      initRunTabs runs FIRST so the panels exist before initProposeFix wires disputes. */
-  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch","initRerun","initTestToggle"]
+  ["initRunTabs","initArtifacts","initSapCompare","initTplCompare","initValidRate","initGatePanel","initWebVerify","initProposeFix","initFieldCopy","initRetrainWatch","initRerun","initTestToggle"]
     .forEach(function (fn) { try { mdmdoc[fn] && mdmdoc[fn](); } catch (e) { console.error(fn, e); } });
 </script>{% endblock %}

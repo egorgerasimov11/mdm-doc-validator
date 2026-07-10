@@ -23,3 +23,8 @@ settings.json
 
 # per-instance operator approval state (never travels between machines)
 rules/approvals.json
+
+# operator-local ledgers/backups (E-wave): machine history, not shipped data
+dataset/oplog.jsonl
+rules/challenges.jsonl
+rules/deleted/

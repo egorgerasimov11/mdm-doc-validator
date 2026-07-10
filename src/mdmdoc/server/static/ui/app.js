@@ -259,8 +259,10 @@ window.mdmdoc = (() => {
       validBtn.onclick = async () => {
         validBtn.disabled = true;
         try {
-          await api(`/api/v1/runs/${validBtn.dataset.run}/mark-valid`, { method: "POST" });
+          const res = await api(`/api/v1/runs/${validBtn.dataset.run}/mark-valid`, { method: "POST" });
           validBtn.textContent = "Marked valid ✓";
+          showChallenged(res.challenged || [], validBtn.dataset.class || "bank");
+          if (res.rerun_job_id) watchValidRerun(res.rerun_job_id);
         } catch (e) { validBtn.textContent = "ERROR: " + e.message; validBtn.disabled = false; }
       };
     }
@@ -288,6 +290,141 @@ window.mdmdoc = (() => {
         }
       });
     }
+  }
+
+  /* ---------- run page: mark-valid aftermath (E4) ------------------------ */
+  // the rules the valid-mark overrode, each with a way to act on it NOW
+  function showChallenged(challenged, cls) {
+    let box = document.getElementById("challenged-box");
+    if (!box) {
+      box = document.createElement("section");
+      box.id = "challenged-box";
+      const anchor = document.getElementById("gate-panel") ||
+                     document.querySelector("[data-panel='findings']") || document.body;
+      anchor.parentNode.insertBefore(box, anchor);
+    }
+    if (!challenged.length) {
+      box.innerHTML = `<h2>Marked valid</h2><p class="meta">no rules were overridden — re-running to refresh the verdict…</p>`;
+      return;
+    }
+    box.innerHTML = `<h2>Challenged rules</h2>
+      <p class="meta">your valid-mark contradicts these rules — recorded in the challenge
+      ledger; edit, reject or delete them (or leave them — the count stays visible on Approvals)</p>
+      <ul class="timeline">` + challenged.map(c => `
+      <li class="queue-row" data-rule="${c.id}">
+        <code>${c.id}</code><span class="meta">${c.name || ""}</span>
+        ${c.source ? `<span class="chip">${c.source}</span>` : ""}
+        ${c.tier ? `<span class="chip">${c.tier}</span>` : ""}
+        <span class="grow"></span>
+        <button type="button" class="ch-act" data-act="rejected" data-rule="${c.id}">Reject</button>
+        <button type="button" class="ch-act ch-del" data-act="delete" data-rule="${c.id}">Delete</button>
+        <a href="/ui/rules" title="open the rules editor">Edit</a>
+      </li>`).join("") + `</ul><p class="meta" id="ch-flash"></p>`;
+    box.querySelectorAll(".ch-act").forEach(btn => btn.onclick = async () => {
+      const rule = btn.dataset.rule, act = btn.dataset.act;
+      if (act === "delete" &&
+          !confirm(`Rule ${rule} will be PHYSICALLY removed from the rules file ` +
+                   `(a backup lands in rules/deleted/). Delete?`)) return;
+      const row = btn.closest("li");
+      row.querySelectorAll("button").forEach(b => b.disabled = true);
+      try {
+        if (act === "delete") {
+          await api(`/api/v1/rules/${cls}/delete`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rule_id: rule }),
+          });
+        } else {
+          await api(`/api/v1/rules/${cls}/approve`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rule_id: rule, decision: act }),
+          });
+        }
+        row.style.opacity = 0.45;
+        document.getElementById("ch-flash").textContent = `${rule}: ${act === "delete" ? "deleted" : act}`;
+      } catch (e) {
+        document.getElementById("ch-flash").textContent = "ERROR: " + e.message;
+        row.querySelectorAll("button").forEach(b => b.disabled = false);
+      }
+    });
+  }
+
+  // poll the auto re-run; when it lands, jump to the fresh run (new verdict)
+  function watchValidRerun(jobId) {
+    const log = document.getElementById("job-log");
+    const say = (l) => { if (log) { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; } };
+    say("re-running after mark-valid…");
+    pollJob(jobId,
+      say,
+      (result) => {
+        const rid = result && result.run_id;
+        if (rid) window.location.href = `/ui/runs/${rid}?flash=` +
+          encodeURIComponent("re-run after your valid-mark — this is the fresh verdict");
+        else window.location.reload();
+      },
+      (err) => say("re-run failed (" + err + ") — press Re-analyze to retry"));
+  }
+
+  /* ---------- run page: gate panel + finding challenges (E3/E5) ---------- */
+  function initGatePanel() {
+    const panel = document.getElementById("gate-panel");
+    const rerun = document.getElementById("gate-rerun");
+    const flash = document.getElementById("gate-flash");
+    if (panel) {
+      panel.querySelectorAll(".gate-act").forEach(btn => btn.onclick = async () => {
+        const row = btn.closest(".gate-row");
+        const rule = row.dataset.rule, cls = row.dataset.class;
+        const act = btn.dataset.act;
+        if (act === "delete" &&
+            !confirm(`Rule ${rule} will be PHYSICALLY removed from the rules file ` +
+                     `(a backup lands in rules/deleted/). Delete?`)) return;
+        row.querySelectorAll("button").forEach(b => b.disabled = true);
+        try {
+          if (act === "delete") {
+            await api(`/api/v1/rules/${cls}/delete`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ rule_id: rule }),
+            });
+            row.style.opacity = 0.45;
+            flash.textContent = `${rule} deleted (backup in rules/deleted/)`;
+          } else {
+            await api(`/api/v1/rules/${cls}/approve`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ rule_id: rule, decision: act }),
+            });
+            row.style.opacity = 0.45;
+            flash.textContent = `${rule}: ${act}`;
+          }
+          if (rerun) rerun.hidden = false;
+        } catch (e) {
+          flash.textContent = "ERROR: " + e.message;
+          row.querySelectorAll("button").forEach(b => b.disabled = false);
+        }
+      });
+      if (rerun) rerun.onclick = () => {
+        const btn = document.getElementById("btn-rerun");
+        if (btn) btn.click();
+        else location.reload();
+      };
+    }
+    // per-finding 👎: record a challenge, then show the contradiction warning
+    document.querySelectorAll(".fb-vote").forEach(btn => btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        const res = await api(`/api/v1/runs/${btn.dataset.run}/findings/${btn.dataset.rule}/vote`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vote: "down" }),
+        });
+        const li = btn.closest("li");
+        const warn = document.createElement("div");
+        warn.className = "meta";
+        warn.style.cssText = "flex-basis:100%;color:var(--warn,#b58900)";
+        warn.innerHTML = `⚠ recorded: this response contradicts rule <code>${btn.dataset.rule}</code> ` +
+          `(challenged ×${res.challenges}) — edit or delete it: ` +
+          `<a href="/ui/rules/approve">Approvals</a> · <a href="/ui/rules">Editor</a>`;
+        li.appendChild(warn);
+        btn.textContent = "👎✓";
+      } catch (e) { btn.textContent = "ERR"; btn.title = e.message; }
+    });
   }
 
   /* ---------- run page: compare with template (D8) ----------------------- */
@@ -1042,7 +1179,7 @@ window.mdmdoc = (() => {
   }
   initActivityBadge();
 
-  return { api, pollJob, initDropZone, initTplCompare, initValidRate, initArtifacts, initReview, initTraining,
+  return { api, pollJob, initDropZone, initTplCompare, initValidRate, initGatePanel, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
            initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun, initTestToggle };
 })();

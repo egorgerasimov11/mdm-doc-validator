@@ -188,6 +188,9 @@ def run_page(request: Request, run_id: str, flash: str = ""):
         rating=__import__("mdmdoc.ratings", fromlist=["of"]).of(rid),
         doc_class=meta.get("doc_class", "bank"), label=label,
         gate_stale=_gate_is_stale(findings, meta.get("doc_class", "bank")),
+        pending_rules=meta.get("pending_rules") or [],
+        challenge_counts=__import__("mdmdoc.challenges",
+                                    fromlist=["counts"]).counts(),
         run_is_test=runstore.is_test(meta),
         trace=_learning_trace(label, pub, rep) if label else None,
         artifacts=["meta.json", "stage_a.json", "extraction.json", "reasoning.md", "findings.json",
@@ -456,6 +459,8 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
     doc_class = "w9" if doc_class == "w9" else "bank"
     cfg = yaml.safe_load(rules_io.rules_text(doc_class) or "") or {}
     store = rule_approvals.load()
+    from .. import challenges as _challenges
+    ch_counts = _challenges.counts()
     rows = []
     for r in cfg.get("rules", []) or []:
         if not isinstance(r, dict):
@@ -464,6 +469,8 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
                      "severity": r.get("severity"), "verdict_effect": r.get("verdict_effect"),
                      "applies_to": r.get("applies_to"), "tier": r.get("tier") or "",
                      "source": str(r.get("source") or "").split(":")[0],
+                     "source_full": str(r.get("source") or ""),
+                     "challenges": int(ch_counts.get(str(r.get("id")), 0)),
                      "status": rule_approvals.status(store, doc_class, r)})
     counts = {s: sum(x["status"] == s for x in rows)
               for s in ("approved", "pending", "rejected")}
@@ -476,9 +483,17 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
                      if p.get("doc_class") == doc_class]
     except Exception:  # the approvals page must never fail on stats
         proposals = []
+    # E4/E5: rules the operator's judgement has contradicted, with sample runs
+    challenged = []
+    for row in rows:
+        if row["challenges"]:
+            examples = _challenges.for_rule(str(row["id"]), limit=3)
+            challenged.append({**row,
+                               "runs": [e.get("run_id", "") for e in examples if e.get("run_id")],
+                               "kinds": sorted({e.get("kind", "") for e in examples})})
     return templates.TemplateResponse(request, "rules_approve.html", _ctx(
         page="rules", subpage="approvals", doc_class=doc_class, rows=rows, counts=counts,
-        proposals=proposals))
+        proposals=proposals, challenged=challenged))
 
 
 # --- /ui/tax — bulk US TIN validation tab (tin_bulk.py; tables shared with W9-040/041)

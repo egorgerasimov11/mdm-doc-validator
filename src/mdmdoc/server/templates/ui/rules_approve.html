@@ -31,10 +31,37 @@
   <tr>
     <td class="meta"><code>{{ p.rule_id }}</code></td>
     <td>{{ p.kind }}: {{ p.from_tier }} → <strong>{{ p.to_tier }}</strong></td>
-    <td class="meta">n={{ p.evidence.n }} hits={{ p.evidence.hits }}
-      wilson_lb={{ p.evidence.wilson_lb }}{% if p.evidence.age_days %} · age {{ p.evidence.age_days }}d{% endif %}</td>
-    <td><button type="button" class="tier-apply" data-rule="{{ p.rule_id }}"
-        data-class="{{ doc_class }}" data-tier="{{ p.to_tier }}">Apply {{ p.kind }}</button></td>
+    <td class="meta">{% if p.evidence.challenges %}operator challenges ×{{ p.evidence.challenges }}{% else %}n={{ p.evidence.n }} hits={{ p.evidence.hits }}
+      wilson_lb={{ p.evidence.wilson_lb }}{% if p.evidence.age_days %} · age {{ p.evidence.age_days }}d{% endif %}{% endif %}</td>
+    <td>{% if p.to_tier == 'reject-or-delete' %}<span class="hint">act in Challenged rules below</span>{% else %}<button type="button" class="tier-apply" data-rule="{{ p.rule_id }}"
+        data-class="{{ doc_class }}" data-tier="{{ p.to_tier }}">Apply {{ p.kind }}</button>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if challenged %}
+<h2>Challenged rules</h2>
+<p class="meta">Your judgement on real documents contradicted these rules (valid-marks over
+  stricter findings, 👎 on findings). Validate them: <strong>edit, reject or delete</strong> —
+  or dismiss the challenges if the rule stands.</p>
+<table class="data-table" id="challenged-table">
+  <tr><th>rule</th><th>challenges</th><th>example runs</th><th></th></tr>
+  {% for c in challenged %}
+  <tr data-rule="{{ c.id }}">
+    <td class="meta" style="white-space:nowrap"><code>{{ c.id }}</code><br>{{ c.name }}
+      {% if c.source %}<span class="tag">{{ c.source_full or c.source }}</span>{% endif %}
+      {% if c.tier %}<span class="tag">{{ c.tier }}</span>{% endif %}</td>
+    <td><span class="tag bad">⚠ ×{{ c.challenges }}</span><br>
+      <span class="hint">{{ c.kinds | join(', ') }}</span></td>
+    <td class="meta">{% for rid in c.runs %}<a href="/ui/runs/{{ rid }}"><code>{{ rid[:10] }}</code></a> {% endfor %}</td>
+    <td style="white-space:nowrap">
+      <button type="button" class="rule-reject" data-rule="{{ c.id }}" data-class="{{ doc_class }}">Reject ✗</button>
+      <button type="button" class="rule-delete" data-rule="{{ c.id }}" data-class="{{ doc_class }}">Delete 🗑</button>
+      <a class="btn" href="/ui/rules?doc_class={{ doc_class }}" title="edit this rule">Correct ✎</a>
+      <button type="button" class="ch-dismiss" data-rule="{{ c.id }}" data-class="{{ doc_class }}"
+              title="the rule stands — clear its challenge counter">Dismiss</button>
+    </td>
   </tr>
   {% endfor %}
 </table>
@@ -72,7 +99,9 @@
   <tr data-rule="{{ r.id }}" data-search="{{ r.id }} {{ r.name }} {{ r.message }}"
       data-status="{{ r.status }}" data-tier="{{ r.tier }}" data-source="{{ r.source }}">
     <td class="meta" style="white-space:nowrap"><code>{{ r.id }}</code><br>{{ r.name }}</td>
-    <td class="meta"><span class="tag tier-chip" data-rule="{{ r.id }}">{{ r.tier or '—' }}</span></td>
+    <td class="meta"><span class="tag tier-chip" data-rule="{{ r.id }}">{{ r.tier or '—' }}</span><br>
+      <span class="tag" title="where this rule came from">{{ r.source_full or r.source or 'core' }}</span>
+      {% if r.challenges %}<br><span class="tag bad" title="operator judgement contradicted this rule — see Challenged rules above">⚠ challenged ×{{ r.challenges }}</span>{% endif %}</td>
     <td>{{ r.message }}{% if r.applies_to %} <span class="hint">[{{ r.applies_to | join(', ') }}]</span>{% endif %}</td>
     <td class="meta">{{ r.severity }}{% if r.verdict_effect %} → {{ r.verdict_effect }}{% endif %}</td>
     <td class="status">
@@ -123,6 +152,29 @@
       const chip = document.querySelector(`.tier-chip[data-rule="${b.dataset.rule}"]`);
       if (chip) chip.textContent = r.new_tier;
       b.closest("tr").remove();
+    } catch (e) { say("ERROR: " + e.message); b.disabled = false; }
+  });
+  document.querySelectorAll(".rule-delete").forEach(b => b.onclick = async () => {
+    if (!confirm(`Rule ${b.dataset.rule} will be PHYSICALLY removed from the rules file ` +
+                 `(a backup lands in rules/deleted/). Delete?`)) return;
+    b.disabled = true;
+    try {
+      const r = await api(`/api/v1/rules/${b.dataset.class}/delete`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_id: b.dataset.rule }) });
+      say(`${b.dataset.rule}: deleted (backup ${r.backup ? r.backup.split("/").pop() : "saved"}) — reloading…`);
+      setTimeout(() => location.reload(), 600);
+    } catch (e) { say("ERROR: " + e.message); b.disabled = false; }
+  });
+  document.querySelectorAll(".ch-dismiss").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      await api(`/api/v1/rules/${b.dataset.class}/challenges/dismiss`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_id: b.dataset.rule }) });
+      say(`${b.dataset.rule}: challenges dismissed — the rule stands`);
+      const row = document.querySelector(`#challenged-table tr[data-rule="${b.dataset.rule}"]`);
+      if (row) row.style.opacity = 0.45;
     } catch (e) { say("ERROR: " + e.message); b.disabled = false; }
   });
   const all = document.getElementById("approve-all");

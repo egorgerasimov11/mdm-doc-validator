@@ -85,7 +85,12 @@ already trusts), page bookkeeping (w9_pages/survey_texts), W-8 page targeting,
 the signature vision ensemble (stage_a.signature_probe), and the evidence
 ladder (ladder.py — the pipeline controller's bounded second perception pass).
 None of these are stage_b guards except `corroborate_across_pages` (listed
-n/a above); nothing here is a pending port.
+n/a above); nothing here is a pending port. The operator-console trust layer
+(E-wave 2026-07-10: `oplog.py` audit ledger, `challenges.py` rule-challenge
+ledger, gate-panel/mark-valid/finding-vote endpoints) is equally
+Python-console-only — the ABAP twin has no operator console; rule DATA changes
+made through it (delete/tier) reach ABAP through the normal `gen_rules_abap`
+regeneration, nothing else to port.
 
 ## Bulk table validation (V-wave, Python-console-only) — 2026-07-10
 `src/mdmdoc/bulk/` (mass row-bucket validation of SAP table exports: bank /

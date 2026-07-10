@@ -97,7 +97,8 @@ def _eval_when(when: dict, ext: Extraction, tables: dict) -> tuple[bool, str, st
 
 def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
               enforce_approvals: bool = False,
-              trace: list | None = None) -> list[Finding]:
+              trace: list | None = None,
+              pending_out: list | None = None) -> list[Finding]:
     """enforce_approvals=True is the HARD GATE (live pipeline): a rule fires only
     if a human Approved it in the panel. A rejected rule is skipped; a pending
     (never-reviewed or changed-since-approval) rule that APPLIES to the document
@@ -132,7 +133,10 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
                 st = rule_approvals.status(approvals, ext.doc_class, rule)
                 if st != rule_approvals.APPROVED:
                     if st == rule_approvals.PENDING:
-                        pending_applicable.append(rid)
+                        pending_applicable.append(
+                            {"id": rid, "name": rname,
+                             "source": str(rule.get("source") or ""),
+                             "tier": str(rule.get("tier") or "")})
                     _trace(rid, rname, f"skipped-{st.lower()}",
                            "approval gate" if st == rule_approvals.PENDING
                            else "rejected by operator")
@@ -172,7 +176,15 @@ def run_rules(ext: Extraction, lang: str = "en", policy: str = "masked",
                 f"engine_error: rule {rid} failed ({e.__class__.__name__}: {e}) "
                 "— fail-closed: held for manual review"))
     if pending_applicable:
-        shown = ", ".join(pending_applicable[:8]) + ("…" if len(pending_applicable) > 8 else "")
+        if pending_out is not None:
+            pending_out.extend(pending_applicable)
+
+        def _tag(p):
+            bits = ", ".join(x for x in (p["source"], p["tier"]) if x)
+            return p["id"] + (f" ({bits})" if bits else "")
+
+        shown = ", ".join(_tag(p) for p in pending_applicable[:8]) \
+            + ("…" if len(pending_applicable) > 8 else "")
         findings.insert(0, Finding(
             "RULE-GATE", "WARNING", "NEED_MANUAL_REVIEW",
             f"{len(pending_applicable)} rule(s) that apply to this document await your "

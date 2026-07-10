@@ -23,6 +23,7 @@ _LOCK = threading.Lock()
 # history page offers as filter chips)
 ACTIONS = ("check", "cancel", "label", "mark-valid", "rating", "finding-vote",
            "rule-save", "rule-approve", "rule-tier", "rule-delete",
+           "rule-challenge-dismiss",
            "rule-regenerate", "skill-upload", "settings", "train", "eval",
            "bulk", "run-test", "job-start", "job-end")
 

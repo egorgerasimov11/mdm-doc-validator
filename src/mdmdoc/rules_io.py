@@ -151,6 +151,45 @@ def set_rule_tier(doc_class: str, rule_id: str, tier: str) -> dict:
             "hash_unchanged": True}
 
 
+def delete_rule(doc_class: str, rule_id: str) -> dict:
+    """E6: PHYSICALLY remove one rule block from the rules file (operator
+    decision — the challenge-review 'delete' action). Safety nets: the FULL
+    yaml block is saved to rules/deleted/<rule_id>-<ts>.yaml before removal
+    (git is the second line), the approvals ledger entry is cleared, and the
+    oplog records the action (the caller logs it with context)."""
+    from .rule_propose import _rule_block_span
+    text = rules_text(doc_class)
+    span = _rule_block_span(text, rule_id)
+    if not span:
+        raise ValueError(f"rule {rule_id} not found in the {doc_class} rules")
+    lines = text.splitlines(keepends=True)
+    block = "".join(lines[span[0]:span[1]])
+    # backup first — a delete must never be the only copy's end
+    from . import runstore
+    backup_dir = config.RULES_DIR / "deleted"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    ts = runstore.now_iso().replace(":", "").replace("-", "").rstrip("Z")
+    backup = backup_dir / f"{rule_id}-{ts}.yaml"
+    backup.write_text(f"# deleted from doc_class {doc_class} at {runstore.now_iso()}\n"
+                      + block, encoding="utf-8")
+    del lines[span[0]:span[1]]
+    new_text = "".join(lines)
+    # the remaining file must still be a valid rules file
+    parsed = yaml.safe_load(new_text)
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("rules"), list):
+        raise ValueError("removing the block would corrupt the rules file — aborted")
+    with _LOCK:
+        _write_rules_text(doc_class, new_text)
+    # clear the approvals entry so a future rule reusing the id starts PENDING
+    try:
+        from . import rule_approvals
+        rule_approvals.clear_entry(doc_class, rule_id)
+    except Exception:
+        pass
+    return {"rule_id": rule_id, "doc_class": doc_class,
+            "backup": str(backup), "remaining_rules": len(parsed["rules"])}
+
+
 def regenerate_abap() -> dict:
     """Push the edited YAML rules to the ABAP/SAP side: copy them into the ABAP
     repo and run its generator. Best-effort — reports if the repo is absent."""

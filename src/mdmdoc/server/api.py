@@ -206,7 +206,54 @@ def approve_rule(doc_class: str, body: dict) -> dict:
             from .. import oplog
             oplog.log("rule-approve", rule_id=str(rid), doc_class=doc_class,
                       detail=decision)
+            if decision == "rejected":
+                # a rejected rule no longer fires — its challenges are resolved
+                from .. import challenges as _challenges
+                try:
+                    _challenges.dismiss_rule(str(rid), reason="rule rejected")
+                except Exception:
+                    pass
     return {"ok": True, "updated": n, "decision": decision}
+
+
+@router_teach.post("/rules/{doc_class}/challenges/dismiss", tags=["rules"])
+def dismiss_challenges(doc_class: str, body: dict) -> dict:
+    """E5: the operator looked at a challenged rule and decided it STANDS —
+    clear its live challenge counter (the ledger keeps the history)."""
+    from .. import challenges as _challenges, oplog
+    rid = str(body.get("rule_id") or "")
+    if not rid:
+        raise api_error(400, "bad_request", "rule_id required")
+    _challenges.dismiss_rule(rid, reason=str(body.get("reason") or "operator: rule stands"))
+    oplog.log("rule-challenge-dismiss", rule_id=rid, doc_class=doc_class,
+              detail="operator: rule stands")
+    return {"ok": True, "rule_id": rid}
+
+
+@router_teach.post("/rules/{doc_class}/delete", tags=["rules"])
+def delete_rule(doc_class: str, body: dict) -> dict:
+    """E6: PHYSICAL removal of one rule (operator decision from the challenge
+    review). The full block is backed up under rules/deleted/ first; the
+    approvals entry is cleared; optionally regenerates the ABAP data."""
+    from .. import challenges as _challenges, oplog, rules_io
+    if doc_class not in ("bank", "w9"):
+        raise api_error(400, "bad_request", "doc_class must be 'bank' or 'w9'")
+    rid = str(body.get("rule_id") or "")
+    if not rid:
+        raise api_error(400, "bad_request", "rule_id required")
+    try:
+        out = rules_io.delete_rule(doc_class, rid)
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    oplog.log("rule-delete", rule_id=rid, doc_class=doc_class,
+              detail=f"backup {Path(out['backup']).name}")
+    try:
+        _challenges.dismiss_rule(rid, reason="rule deleted")
+    except Exception:
+        pass
+    if body.get("regen_abap"):
+        out["regenerate"] = rules_io.regenerate_abap()
+    return {"ok": True, **out}
 
 
 @router_teach.get("/rules/stats", tags=["rules"])
@@ -745,10 +792,12 @@ def submit_label(run_id: str, sub: ReviewSubmission) -> dict:
 
 @router_teach.post("/runs/{run_id}/mark-valid", tags=["teach"])
 def mark_valid(run_id: str) -> dict:
-    """One-click 'this document is VALID' (D11c): a confirmed ACCEPT label —
-    the precedent makes it stick for this document (C11 relax gate satisfied
-    by verdict_confirmed) and the pattern memory learns the shape for others.
-    No model call, no retrain."""
+    """One-click 'this document is VALID' (D11c + E4): a confirmed ACCEPT label
+    (precedent sticks via the C11 relax gate, pattern memory learns the shape),
+    PLUS the operator-trust loop: every rule this judgement overrides — stricter
+    findings and the unapproved rules holding the gate — lands in the challenge
+    ledger for review, and the document re-runs in the background so the page
+    can show the flipped verdict without a manual Re-analyze."""
     sub = ReviewSubmission(verdict_gold="ACCEPT", verdict_confirmed=True,
                            retrain=False, notes="", scenarios=[])
     try:
@@ -757,7 +806,81 @@ def mark_valid(run_id: str) -> dict:
         raise api_error(404, "not_found", f"run {run_id} not found")
     except ValueError as e:
         raise api_error(400, "bad_request", str(e))
-    return {**result, "marked_valid": True}
+
+    from .. import challenges as _challenges, patterns
+    from ..rules import engine as rules_engine
+    rid = runstore.resolve_run(run_id) or run_id
+    meta = runstore.load(rid, "meta.json") or {}
+    findings = runstore.load(rid, "findings.json") or []
+    doc_class = meta.get("doc_class", "bank")
+    try:
+        known = {str(r.get("id")): r
+                 for r in rules_engine.load_rules(doc_class).get("rules", [])
+                 if isinstance(r, dict)}
+    except Exception:
+        known = {}
+    ids = set(patterns.overridden_rule_ids(findings, "ACCEPT"))
+    ids |= {str(p.get("id")) for p in (meta.get("pending_rules") or [])}
+    challenged = []
+    for cid in sorted(i for i in ids if i in known):   # real rules only
+        r = known[cid]
+        _challenges.record(cid, doc_class, rid, "valid-mark",
+                           note="operator marked the document valid")
+        challenged.append({"id": cid, "name": str(r.get("name", "")),
+                           "source": str(r.get("source", "") or ""),
+                           "tier": str(r.get("tier", "") or "")})
+
+    rerun_job_id = ""
+    p = Path(meta.get("path", ""))
+    if p.exists():
+        is_test = runstore.is_test(meta)
+
+        def work(log, job):
+            job.label = f"re-run after mark-valid: {p.name}"
+            log("re-running with your valid-mark precedent applied…")
+            out = _run_pipeline(p, doc_class, meta.get("lang", "en"), True,
+                                job=job, is_test=is_test)
+            log(f"new verdict: {out['verdict']} (run {out['run_id']})")
+            return out
+
+        job = jobs.REGISTRY.submit("check", work, pass_job=True)
+        rerun_job_id = job.id
+    return {**result, "marked_valid": True, "challenged": challenged,
+            "rerun_job_id": rerun_job_id}
+
+
+@router_teach.post("/runs/{run_id}/findings/{rule_id}/vote", tags=["teach"])
+def vote_finding(run_id: str, rule_id: str, body: dict) -> dict:
+    """E5: thumbs-down on ONE finding — 'this rule fired wrongly HERE'. The
+    contradiction is remembered in the challenge ledger and surfaces on the
+    run page and Approvals until the operator edits, rejects or deletes the
+    rule (or dismisses the challenge). This is how rules get validated by
+    manual runs. Real rules only — synthetic findings have no rule to fix."""
+    vote = str(body.get("vote", "")).strip().lower()
+    if vote != "down":
+        raise api_error(400, "bad_request", "vote must be 'down'")
+    rid = runstore.resolve_run(run_id)
+    meta = runstore.load(rid, "meta.json") if rid else None
+    if not meta:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    doc_class = meta.get("doc_class", "bank")
+    from .. import challenges as _challenges, oplog
+    from ..rules import engine as rules_engine
+    try:
+        known = {str(r.get("id"))
+                 for r in rules_engine.load_rules(doc_class).get("rules", [])
+                 if isinstance(r, dict)}
+    except Exception:
+        known = set()
+    if rule_id not in known:
+        raise api_error(400, "bad_request",
+                        f"{rule_id} is not a rule in rules.yaml — nothing to challenge")
+    _challenges.record(rule_id, doc_class, rid, "finding-downvote",
+                       note=str(body.get("note", ""))[:200])
+    oplog.log("finding-vote", run_id=rid, rule_id=rule_id, doc_class=doc_class,
+              detail="down: finding contradicts the operator's judgement")
+    return {"ok": True, "rule_id": rule_id,
+            "challenges": _challenges.counts().get(rule_id, 0)}
 
 
 @router_teach.post("/runs/{run_id}/rating", tags=["teach"])

@@ -88,15 +88,20 @@ def _age_days(first_ts: str, now_iso: str) -> float | None:
 
 
 def compute(rows: list[dict], rules_by_class: dict[str, list[dict]],
-            approvals: dict | None = None, now_iso: str = "") -> list[dict]:
+            approvals: dict | None = None, now_iso: str = "",
+            challenge_counts: dict[str, int] | None = None) -> list[dict]:
     """Per-rule stats. precision = of the fired-on-CONFIRMED docs, the fraction
     whose confirmed gold verdict is at least as strict as the rule's
     verdict_effect (its severity was justified). NOTE/null-effect rules get
-    precision None and are never proposed."""
+    precision None and are never proposed. `challenge_counts` (E5) joins the
+    live operator-contradiction ledger — demotion evidence."""
     if not now_iso:
         from . import runstore
         now_iso = runstore.now_iso()
     approvals = approvals or {}
+    if challenge_counts is None:
+        from . import challenges
+        challenge_counts = challenges.counts()
     out: list[dict] = []
     for doc_class, rules in rules_by_class.items():
         for rule in rules:
@@ -125,8 +130,12 @@ def compute(rows: list[dict], rules_by_class: dict[str, list[dict]],
                         "fired": fired, "fired_confirmed": n, "hits": hits,
                         "precision": precision, "wilson_lb": lb,
                         "age_days": round(age, 1) if age is not None else None,
-                        "first_seen": first_ts})
+                        "first_seen": first_ts,
+                        "challenges": int(challenge_counts.get(rid, 0))})
     return out
+
+
+CHALLENGE_DEMOTION_AT = 2   # ≥2 live operator contradictions -> propose demotion
 
 
 def propose(stats: list[dict]) -> list[dict]:
@@ -134,7 +143,16 @@ def propose(stats: list[dict]) -> list[dict]:
     application is a human panel action."""
     proposals: list[dict] = []
     for s in stats:
-        tier, lb, n, age = s["tier"], s["wilson_lb"], s["fired_confirmed"], s["age_days"]
+        tier = s["tier"]
+        ch = int(s.get("challenges") or 0)
+        if ch >= CHALLENGE_DEMOTION_AT and tier in ("corp", "experimental", "learned"):
+            # operator judgement contradicted this rule repeatedly (E5): corp
+            # steps down a tier; experimental/learned -> reject-or-delete review
+            to = "experimental" if tier == "corp" else "reject-or-delete"
+            proposals.append({"rule_id": s["rule_id"], "doc_class": s["doc_class"],
+                              "kind": "demotion", "from_tier": tier, "to_tier": to,
+                              "evidence": {"challenges": ch}})
+        lb, n, age = s["wilson_lb"], s["fired_confirmed"], s["age_days"]
         if s["precision"] is None or lb is None:
             continue    # NOTE/null-effect or never fired on confirmed docs
         nxt = _NEXT_TIER.get(tier)

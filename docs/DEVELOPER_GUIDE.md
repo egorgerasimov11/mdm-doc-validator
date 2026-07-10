@@ -795,3 +795,63 @@ that skill's own marked segment.
 Invariant unchanged everywhere: **verdicts come only from human-approved
 rules** — every learning channel produces PENDING artifacts or informational
 signals, never a verdict change.
+
+## 15. The E-wave: operator trust (2026-07-10)
+
+Egor's UAT verdict on the D-wave console was blunt: actions vanished without
+history, background work died with the tab, Mark valid bounced off rules "of
+unknown origin", and there was no way to say *this one finding is wrong*.
+The E-wave closes exactly that loop.
+
+### 15.1 The operator audit ledger (`oplog.py`)
+`dataset/oplog.jsonl` — append-only, PII-free (ids/actions/short details,
+never document values; same `_LOCK`+append idiom as `ratings.py`). One
+middleware seam in `server/app.py` (`_operator_audit` + `_AUDIT_ROUTES`)
+records every SUCCESSFUL mutating POST; handlers that know more (approve /
+tier / delete / finding-vote / challenge-dismiss) log their own richer row and
+are `None` in the table so nothing double-logs. `jobs.REGISTRY` writes
+`job-start`/`job-end` (kind, label, status, duration) — background history
+survives restarts. Surfaces: `/ui/history` (filter chips, newest first) and
+`/ui/activity` (ALL live jobs of every kind + recently finished; the nav badge
+`Activity ●N` polls `/api/v1/jobs` everywhere). An analysis keeps running when
+the operator navigates away — the page is a VIEW of the job, not its owner.
+
+### 15.2 The transparent RULE-GATE (E3)
+`run_rules(..., pending_out=[])` now reports WHICH rules hold the document:
+id, name, `source`, `tier` — and the RULE-GATE message annotates each id
+(`W8-003 (skill:x, experimental)`). `pipeline` persists `meta.pending_rules`;
+the run page renders the gate as a PANEL ("Blocked by unapproved rules") with
+per-rule Approve / Reject / **Delete** buttons and visible source+tier chips
+instead of one dead findings row. Approvals table shows the same chips.
+
+### 15.3 The challenge ledger (`challenges.py`, E4/E5)
+`rules/challenges.jsonl`: one row whenever the operator's judgement
+contradicts a rule — `valid-mark` (Mark valid over a stricter finding or a
+pending gate rule) or `finding-downvote` (👎 on one finding). A `dismissed`
+row resets the LIVE count (the operator looked and the rule stands); delete
+and reject dismiss automatically. Consumers: the run page (⚠×N chip on
+findings), Approvals ("Challenged rules" section: counts, example runs,
+Reject / Delete / Correct / Dismiss), and `rule_stats.propose` — ≥2 live
+challenges proposes demotion (corp→experimental; experimental/learned→
+"reject-or-delete", acted on in the Challenged panel, never auto-applied).
+This is how rules are validated by manual runs.
+
+### 15.4 Mark valid actually flips the page (E4)
+`POST /runs/{id}/mark-valid` now: records the confirmed-ACCEPT label as
+before, files a challenge against every rule it overrode, and spawns a
+background re-run of the SAME document ("re-run after mark-valid"). The page
+shows the challenged rules with actions and follows the job to the fresh run
+— the operator SEES the verdict flip instead of trusting that "it learned".
+
+### 15.5 Physical rule delete (E6)
+`rules_io.delete_rule`: cut the rule's block from the rules file (span ends
+only at the next `- id:` item or column-0 line — a nested block-style sublist
+must not truncate it), back the FULL block up under `rules/deleted/
+<id>-<ts>.yaml` FIRST, validate the remainder, clear the approvals entry (a
+reused id starts PENDING), dismiss its challenges. Egor's decision: delete is
+physical; oplog + backup file + git are the three lines of history.
+
+oplog/challenges are Python-console-only (PARITY.md perception paragraph) —
+the ABAP twin has no operator console. Verdict invariant untouched: every
+E-wave surface produces audit rows, PENDING states or informational chips —
+never a verdict change without an approved rule.

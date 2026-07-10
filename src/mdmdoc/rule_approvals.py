@@ -119,6 +119,17 @@ def set_decision(doc_class: str, rule: dict, decision: str, note: str = "",
     return store
 
 
+def clear_entry(doc_class: str, rule_id: str) -> None:
+    """Drop a rule's ledger entry entirely (E6 delete): a future rule reusing
+    the id starts life PENDING instead of inheriting a stale decision."""
+    with _LOCK:
+        store = load()
+        if store.pop(_key(doc_class, rule_id), None) is not None:
+            config.ensure_dirs()
+            config.atomic_write_text(_path(),
+                                     json.dumps(store, indent=2, ensure_ascii=False))
+
+
 def summarize(doc_class: str, rules: list) -> dict:
     """Counts + per-rule status for the panel."""
     store = load()

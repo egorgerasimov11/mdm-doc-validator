@@ -44,7 +44,7 @@ _AUDIT_ROUTES = (
     (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/test$"), "run-test", ()),
     (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/propose-fix$"), "propose", ()),
     (_re.compile(r"^/api/v1/runs/(?P<run_id>\w+)/findings/(?P<rule_id>[\w-]+)/vote$"),
-     "finding-vote", ()),
+     None, ()),                                      # handler logs (rule_id + detail)
     (_re.compile(r"^/api/v1/train/(?P<detail>[\w-]+)$"), "train", ()),
     (_re.compile(r"^/api/v1/eval$"), "eval", ()),
 )

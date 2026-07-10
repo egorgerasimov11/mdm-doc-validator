@@ -162,8 +162,10 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
     # rules -> verdict (+ optional SAP comparison as extra findings)
     runctl.checkpoint("rules", 76)
     rules_trace: list = []
+    pending_rules: list = []
     findings = run_rules(ext, lang=lang, policy=policy,
-                         enforce_approvals=enforce_approvals, trace=rules_trace)
+                         enforce_approvals=enforce_approvals, trace=rules_trace,
+                         pending_out=pending_rules)
     from .rules.engine import Finding as _Finding
     if engine_req != "deterministic" and not llm_ok:
         findings.insert(0, _Finding(
@@ -406,7 +408,8 @@ def _run_check_impl(path: Path, doc_class: str, use_vision: bool = True,
             "template_path": str(template_path) if template_path is not None else None,
             "sap_kind": sap_kind,
             "confidence": conf["level"], "confidence_reasons": conf["reasons"],
-            "ladder": ladder_meta, "effort": effort}
+            "ladder": ladder_meta, "effort": effort,
+            "pending_rules": pending_rules}
     report_json = rpt.build_json(pub, findings, verdict, meta)
 
     # reasoning.md is BUILT MASKED regardless of the operator display policy:
