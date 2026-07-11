@@ -758,19 +758,21 @@ def job_detail(job_id: str, after: int = 0) -> dict:
 
 @router_core.post("/jobs/{job_id}/cancel", tags=["jobs"])
 def job_cancel(job_id: str) -> dict:
-    """Cooperative cancel (D2): a queued check dies at the gate without ever
-    running; a running one stops at its next pipeline checkpoint (an in-flight
-    model call finishes first). Only check jobs are cancelable."""
+    """Cooperative cancel (D2 + H2): a queued job dies at the gate without ever
+    running; a running check/bulk stops within a streamed model chunk (~1-2s);
+    study stops between documents; retrain stops between its stages (an
+    in-flight `ollama create` finishes first). Cancelable kinds: jobs.CANCELABLE_KINDS."""
     j = jobs.REGISTRY.get(job_id)
     if not j:
         raise api_error(404, "not_found", f"job {job_id} not found")
-    if j.kind not in ("check", "bulk"):
+    if j.kind not in jobs.CANCELABLE_KINDS:
         raise api_error(409, "conflict", f"jobs of kind '{j.kind}' are not cancelable")
     if j.status in ("done", "error", "canceled"):
         raise api_error(409, "conflict", f"job already {j.status}")
     jobs.REGISTRY.cancel(job_id)
-    return {"ok": True, "status": j.status,
-            "note": "stopping after the current model call finishes"}
+    note = ("stopping between stages (a model rebuild in progress finishes first)"
+            if j.kind == "retrain" else "stopping now")
+    return {"ok": True, "status": j.status, "note": note}
 
 
 # ================================================================= teach =======
@@ -893,28 +895,40 @@ def submit_label(run_id: str, sub: ReviewSubmission) -> dict:
     rid = runstore.resolve_run(run_id)
     meta = runstore.load(rid, "meta.json") or {}
 
-    def work(log):
+    def work(log, job):
+        from .. import runctl
         from ..adoption import build_candidate
         from ..fewshot import build_fewshot
+
+        def bail():   # coarse cancel: stop BEFORE the next stage (H2)
+            if job.cancel.is_set():
+                raise runctl.CheckCanceled("canceled by operator")
+
+        bail()
         log("1/3 rebuilding few-shot exemplars from your corrections…")
         build_fewshot(k=2)
+        bail()
         log("2/3 building the CANDIDATE model on the model host (production "
             "mdmdoc-extract is untouched — adopt it from Training after the gated eval)…")
         try:
             mc.reset_host()
             build_candidate(progress=log)
+        except runctl.CheckCanceled:
+            raise
         except Exception as e:  # noqa: BLE001 — training must not block the precedent
             log(f"    candidate build skipped ({e.__class__.__name__}) — few-shot still applied")
+        bail()
         p = Path(meta.get("path", ""))
         if p.exists():
             log("3/3 re-running the document with the corrections applied…")
-            out = _run_pipeline(p, meta.get("doc_class", "bank"), "en", True)
+            # pass the job so the re-run's model calls are streaming-cancelable too
+            out = _run_pipeline(p, meta.get("doc_class", "bank"), "en", True, job=job)
             log(f"new verdict: {out['verdict']} (was corrected by your precedent)")
             return {**result, "rerun": {"run_id": out["run_id"], "verdict": out["verdict"]}}
         log("3/3 original file missing — skipping re-run (precedent will apply next time)")
         return result
 
-    job = jobs.REGISTRY.submit("retrain", work, capture_stdout=True)
+    job = jobs.REGISTRY.submit("retrain", work, capture_stdout=True, pass_job=True)
     return {**result, "retrain_job_id": job.id}
 
 

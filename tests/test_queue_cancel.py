@@ -134,3 +134,29 @@ def test_job_dict_carries_queue_fields():
     d = j.to_dict()
     for k in ("stage", "percent", "estimate_s", "label", "queue_pos", "cancelable"):
         assert k in d
+
+
+def test_study_and_retrain_are_cancelable_kinds():
+    """H2: the study button used to 409 (endpoint allowed only check/bulk while
+    the button rendered for study). One CANCELABLE_KINDS source of truth now."""
+    import threading
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from mdmdoc.server import jobs
+    from mdmdoc.server.app import create_app
+    assert {"check", "bulk", "study", "retrain"} <= jobs.CANCELABLE_KINDS
+    client = TestClient(create_app("full"))
+    slow = threading.Event()
+
+    def work(log, job):
+        slow.wait(timeout=5)
+        return {}
+
+    j = jobs.REGISTRY.submit("study", work, pass_job=True)
+    time.sleep(0.05)
+    assert j.to_dict()["cancelable"] is True
+    r = client.post(f"/api/v1/jobs/{j.id}/cancel")
+    assert r.status_code == 200 and j.cancel.is_set()
+    slow.set()

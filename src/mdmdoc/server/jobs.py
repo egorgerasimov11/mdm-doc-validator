@@ -146,6 +146,14 @@ class PipelineGate:
 
 
 # --- job registry ---------------------------------------------------------------
+# the ONE source of truth for what the operator can cancel — used by both
+# Job.to_dict (renders the button) and the cancel endpoint (honors it). A kind
+# is cancelable only if its worker actually observes job.cancel: `check`/`bulk`
+# at pipeline/row checkpoints + streamed model calls, `study` between documents,
+# `retrain` between its stages. (A study button that 409'd was the mismatch.)
+CANCELABLE_KINDS = frozenset({"check", "bulk", "study", "retrain"})
+
+
 @dataclass
 class Job:
     id: str
@@ -172,7 +180,7 @@ class Job:
                 "stage": self.stage, "percent": self.percent,
                 "estimate_s": self.estimate_s, "label": self.label,
                 "queue_pos": GATE.position(self.id),
-                "cancelable": self.kind in ("check", "bulk", "study")
+                "cancelable": self.kind in CANCELABLE_KINDS
                 and self.status in ("queued", "running")}
 
 
