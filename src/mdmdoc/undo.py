@@ -219,10 +219,23 @@ def _undo_label(row: dict, rows: list[dict]) -> dict:
         build_fewshot()
     except Exception:
         pass
+    # be honest about what remains: restoring a predecessor label can bring
+    # back an EARLIER precedent (e.g. undoing a Mark valid rolls back to a
+    # correction that ALSO set the verdict) — claiming "the precedent is gone"
+    # then misleads the operator when OPERATOR-2 keeps firing.
+    if restored and prev is not None:
+        relaxing_left = bool(prev.get("verdict_gold")) and not prev.get("verdict_confirmed")
+        note = ("undone — the PREVIOUS label was restored, so this document still "
+                "has an operator precedent"
+                + (f" (verdict {prev.get('verdict_gold')}, unconfirmed — this is what "
+                   "OPERATOR-2 flags; teach the type again or clear the verdict to drop it)"
+                   if relaxing_left else "")
+                + ". Re-analyze to refresh the stored verdict.")
+    else:
+        note = "the precedent is gone; re-analyze the document to refresh its stored verdict."
     return {"label_removed": run_id, "label_restored_ts": restored,
             "challenges_retracted": sorted(set(filter(None, retracted))),
-            "note": "the precedent is gone; re-analyze the document to refresh "
-                    "its stored verdict"}
+            "note": note}
 
 
 def _undo_rating(row: dict, rows: list[dict]) -> dict:

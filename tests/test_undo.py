@@ -176,6 +176,22 @@ def test_undo_label_restores_predecessor(env):
     labels = dataset.load_labels()
     assert len(labels) == 1 and labels[0]["ts"] == "T1"   # predecessor is back
     assert res["label_restored_ts"] == "T1"
+    # the note must NOT claim "the precedent is gone" — a predecessor is back
+    assert "gone" not in res["note"] and "still has an operator precedent" in res["note"]
+
+
+def test_undo_note_flags_a_restored_unconfirmed_relaxation(env):
+    # undoing a Mark valid that rolls back to an EARLIER unconfirmed-ACCEPT
+    # correction must SAY so — that residual precedent is what keeps OPERATOR-2
+    # firing, which is exactly what confused the operator.
+    sha = "cd" * 8
+    dataset.append_label({"doc_sha256": sha, "ts": "P1", "doc_class": "bank",
+                          "verdict_gold": "ACCEPT", "verdict_confirmed": False})
+    dataset.append_label({"doc_sha256": sha, "ts": "P2", "doc_class": "bank",
+                          "verdict_gold": "ACCEPT", "verdict_confirmed": True})
+    row = oplog.log("mark-valid", run_id=sha)
+    res = undo.perform(row["op"])
+    assert "OPERATOR-2" in res["note"] and "unconfirmed" in res["note"]
 
 
 def test_undo_label_stale_after_newer_label(env):
