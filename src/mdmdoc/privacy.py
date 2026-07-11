@@ -84,7 +84,12 @@ def mask(kind: str, value: str) -> str:
             return mask("ssn", v)
         if re.match(r"^\d{2}-\d{7}$", v):
             return mask("ein", v)
-        return ("*" * max(len(d) - 4, 2)) + d[-4:] if len(d) >= 5 else "****"
+        # keep the tail from the ALPHANUMERIC value, not digits only: a CN
+        # taxpayer id / unified-credit code ends in a check LETTER
+        # (…0233T) that a digit-only tail would drop — the letter is not
+        # sensitive and its loss makes the value look truncated/wrong
+        a = re.sub(r"[^0-9A-Za-z]", "", v).upper()
+        return ("*" * max(len(a) - 4, 2)) + a[-4:] if len(a) >= 5 else "****"
     if kind == "iban":
         c = re.sub(r"\s", "", v).upper()
         if len(c) >= 8:
@@ -92,8 +97,9 @@ def mask(kind: str, value: str) -> str:
         return c[:2] + "**…"
     if kind in ("account_number", "routing_aba"):
         return "…" + d[-4:] if len(d) >= 4 else "…" + d
-    # unknown kind: safest generic
-    return ("*" * max(len(d) - 4, 2)) + d[-4:] if len(d) >= 5 else "****"
+    # unknown kind: safest generic — alnum tail so a trailing letter survives
+    a = re.sub(r"[^0-9A-Za-z]", "", v).upper()
+    return ("*" * max(len(a) - 4, 2)) + a[-4:] if len(a) >= 5 else "****"
 
 
 def fake_preserve_shape(kind: str, value: str, seed: str = "mdmdoc") -> str:

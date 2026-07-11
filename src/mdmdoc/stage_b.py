@@ -702,7 +702,7 @@ def _collect_inventory(ext: Extraction, raw: RawDoc) -> None:
     labeled accounts (BNK-031) or corroborates a repeated one."""
     from . import inventory as inv
     from .fields import _norm_id
-    from .privacy import TIN_KINDS, display_value, mask
+    from .privacy import display_value
     # source pick: on scans tesseract mangles CJK into latin junk that WINS the
     # realword count, while the vision transcription keeps the hanzi labels —
     # the inventory needs the text where the LABELS survived (single source,
@@ -729,10 +729,13 @@ def _collect_inventory(ext: Extraction, raw: RawDoc) -> None:
             # ONLY the account family feeds the two-accounts signal — a
             # digit-run in some unknown "other" label must not fake BNK-031
             acct_norms.append(_norm_id(v))
-        if kind in TIN_KINDS:
-            ext.vault.register(kind, v)
-            shown = mask(kind, v)
-        elif kind:
+        if kind:
+            # register the full value so the strict scrub can re-mask it in
+            # reasoning.md / labels; the SHOWN form honors the run policy —
+            # display_value routes TIN through tin_visible/tin_values_policy,
+            # so a console (full) run shows the whole taxpayer id (trailing
+            # letter and all), while api-only stays masked (H1: the inventory
+            # TIN arm used to hardcode mask() and ignore the reveal policy)
             ext.vault.register(kind, v)
             shown = display_value(kind, v, ext.policy)
         else:

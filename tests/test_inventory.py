@@ -35,10 +35,29 @@ def test_families_captured():
 
 
 def test_cn_tax_id_masked_and_vaulted():
-    ext = _run()
+    ext = _run()                                        # default policy = masked
     tax = next(i for i in ext.inventory if i["family"] == "tax_id")
     assert "91110105674299999" not in tax["value"]      # masked in the artifact
+    assert tax["value"].endswith("999T")                # …but the letter survives (H1)
     assert any("91110105674299999T" == s for s in ext.vault.secrets())
+
+
+def test_cn_tax_id_revealed_full_on_the_console(monkeypatch):
+    # H1: the inventory TIN arm used to hardcode mask() and ignore the reveal
+    # policy — on the operator console (full) the whole taxpayer id must show,
+    # trailing letter and all, so it can be typed into SAP Tax Number 1/2.
+    monkeypatch.setenv("MDMDOC_TIN_VALUES", "full")
+    ext = _run()
+    ext_full = Extraction(doc_class="bank", doc_type="payment_instructions")
+    ext_full.fields = {"account_number": "35310188000049999"}
+    ext_full.policy = "full"
+    raw = RawDoc(path="cn.pdf", sha256="0" * 16, ext=".pdf", doc_class="bank")
+    raw.raw_text = CN_DOC
+    stage_b._collect_inventory(ext_full, raw)
+    tax = next(i for i in ext_full.inventory if i["family"] == "tax_id")
+    assert tax["value"] == "91110105674299999T"         # full, letter kept, no mask
+    # the value is still vault-registered so reasoning.md re-masks it
+    assert any("91110105674299999T" == s for s in ext_full.vault.secrets())
 
 
 def test_corroboration_note_for_repeated_account():

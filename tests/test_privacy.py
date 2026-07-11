@@ -13,6 +13,16 @@ def test_mask_hyphen_styles_preserved():
     assert mask("account_number", "1830042757") == "…2757"
 
 
+def test_mask_tin_keeps_a_trailing_letter():
+    # a CN taxpayer id / unified-credit code ends in a check LETTER; a
+    # digit-only tail used to drop it (…0233T -> …0233), making the value
+    # look truncated (H1 bug 2). The letter is not sensitive.
+    m = mask("tin", "91110105674250233T")
+    assert m.endswith("233T") and "91110105674250233" not in m
+    # a plain digit tin is unchanged
+    assert mask("tin", "12345678901234567") == "*" * 13 + "4567"
+
+
 def test_fake_preserves_shape_and_is_deterministic():
     v = "DE44500105175407324931"
     f1 = fake_preserve_shape("iban", v)
