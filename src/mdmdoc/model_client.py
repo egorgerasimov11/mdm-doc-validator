@@ -196,10 +196,45 @@ def _extract_json(text: str):
     return None
 
 
+def _complete(url: str, body: dict, timeout: int, stream: bool) -> str:
+    """Return the model's final text. stream=False is byte-identical to the
+    former blocking call (eval / CLI / tests take this path). stream=True sends
+    stream:true, iterates the NDJSON, checks runctl cancellation on EVERY chunk,
+    and closes the response on cancel so Ollama ABORTS the in-flight generation
+    server-side (real GPU/CPU savings, not just an early return)."""
+    from . import runctl
+    if not stream:
+        r = _SESSION.post(url, json=body, timeout=timeout)
+        r.raise_for_status()
+        d = r.json()
+        return d.get("response", "") or d.get("thinking", "")
+    resp_acc, think_acc = [], []
+    # a streamed `timeout` is per-read (inactivity), not a total cap — keep the
+    # old total-wallclock ceiling with an explicit deadline
+    deadline = time.monotonic() + timeout if isinstance(timeout, (int, float)) else 0
+    with _SESSION.post(url, json={**body, "stream": True}, timeout=timeout, stream=True) as r:
+        r.raise_for_status()                       # a 400 still surfaces HERE, body readable
+        for line in r.iter_lines():
+            runctl.bail_if_canceled("model")       # raises -> `with` closes r -> Ollama stops
+            if deadline and time.monotonic() > deadline:
+                raise requests.Timeout(f"stream exceeded {timeout}s")
+            if not line:
+                continue
+            obj = json.loads(line)
+            if obj.get("response"):
+                resp_acc.append(obj["response"])
+            if obj.get("thinking"):
+                think_acc.append(obj["thinking"])
+            if obj.get("done"):
+                break
+    return "".join(resp_acc) or "".join(think_acc)
+
+
 def generate(role_or_model: str, prompt: str, system: str | None = None,
              options: dict | None = None, fmt: str | None = None,
              keep_alive=0, timeout: int = 300, retries: int = 1, think: bool = False) -> str:
     """think=False disables the qwen3 'thinking' channel so tokens go to the answer."""
+    from . import runctl
     model = resolve(role_or_model) if role_or_model in ROLES else role_or_model
     body = {"model": model, "prompt": prompt, "stream": False, "keep_alive": keep_alive,
             "think": think,
@@ -208,13 +243,13 @@ def generate(role_or_model: str, prompt: str, system: str | None = None,
         body["system"] = system
     if fmt:
         body["format"] = fmt
+    stream = runctl.cancellation_active()          # only a cancelable server job streams
     last = ""
     for attempt in range(retries + 1):
         try:
-            r = _SESSION.post(f"{host()}/api/generate", json=body, timeout=timeout)
-            r.raise_for_status()
-            d = r.json()
-            return d.get("response", "") or d.get("thinking", "")
+            return _complete(f"{host()}/api/generate", body, timeout, stream)
+        except runctl.CheckCanceled:
+            raise                                  # a cancel must NEVER be retried
         except Exception as e:
             last = str(e)
             time.sleep(1.5 * (attempt + 1))
@@ -328,16 +363,18 @@ def vision(role_or_model: str, prompt: str, images: list[str], system: str | Non
             body["format"] = fmt
         return body
 
+    from . import runctl
+    stream = runctl.cancellation_active()          # only a cancelable server job streams
     last = ""
     for attempt in range(retries + 1):
         try:
-            r = _SESSION.post(f"{host()}/api/generate", json=_body(b64), timeout=timeout)
-            r.raise_for_status()
-            resp = r.json().get("response", "")
+            resp = _complete(f"{host()}/api/generate", _body(b64), timeout, stream)
             if resp.strip():
                 LAST_VISION_ERROR = ""
                 return resp
             last = "empty response"
+        except runctl.CheckCanceled:
+            raise                                  # a cancel must NEVER be retried
         except Exception as e:
             last = str(e)
             # the Ollama error BODY names the real cause (e.g. "request (4124

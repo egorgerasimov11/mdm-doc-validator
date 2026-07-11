@@ -70,6 +70,27 @@ def checkpoint(stage: str, pct: int | None = None) -> None:
             pass   # progress reporting must never break a run
 
 
+def bail_if_canceled(stage: str = "model") -> None:
+    """Lightweight cancel check for HOT loops (called per streamed model chunk).
+    Unlike checkpoint() it never touches progress/on_stage, so it is cheap to
+    call thousands of times. NO-OP when no control is active OR no cancel Event
+    is wired (eval / CLI / tests) — so a streaming model call only pays the
+    check where a cancel Event actually exists (a server job)."""
+    ctl = CURRENT.get()
+    if ctl is None or ctl.cancel is None:
+        return
+    if ctl.cancel.is_set():
+        raise CheckCanceled(f"canceled during '{stage}'")
+
+
+def cancellation_active() -> bool:
+    """True iff a control with a LIVE cancel Event is bound to this thread — a
+    server job the operator can cancel. False for eval / CLI / tests, which is
+    how model_client decides to take the plain (non-streaming) transport."""
+    ctl = CURRENT.get()
+    return ctl is not None and ctl.cancel is not None
+
+
 def override(key: str, default=None):
     """Per-run config override: run override > (caller falls back to env/default).
     Returns `default` when no control is active or the key is absent."""
