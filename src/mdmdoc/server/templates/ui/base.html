@@ -13,33 +13,41 @@
     <span class="wordmark">mdmdoc</span>
     <nav class="tabbar">
       <a href="/ui" class="{{ 'current' if page == 'documents' }}">Documents</a>
-      <a href="/ui/rules" class="{{ 'current' if page == 'rules' }}">Rules</a>
-      <a href="/ui/training" class="{{ 'current' if page == 'training' }}">Training</a>
-      <a href="/ui/bulk" class="{{ 'current' if page == 'bulk' }}">Bulk</a>
       {% if consol_enabled %}<a href="/ui/consolidation" class="{{ 'current' if page == 'consolidation' }}">Consolidation</a>{% endif %}
+      <a href="/ui/data" class="{{ 'current' if page == 'data' }}">Data</a>
       <a href="/ui/activity" class="{{ 'current' if page == 'activity' }}">Activity<span id="activity-badge" class="badge" hidden></span></a>
-      <a href="/ui/debug" class="{{ 'current' if page == 'debug' }}">Debug</a>
-      {% if request.app.state.addr_enabled %}<a href="/address/">Address</a>{% endif %}
+      <a href="/ui/settings" class="{{ 'current' if page == 'settings' }}">Settings</a>
     </nav>
     <span id="host-chip" class="meta host-chip">…</span>
   </div>
 </header>
-{# the Documents sub-tabs only appear on the two list pages: a run page sets
-   page='documents' with no subpage, and must not grow a second nav row #}
+{# one sub-tab row per primary group; a run page sets page='documents' with no
+   subpage and must not grow a second nav row #}
 {% if page == 'documents' and subpage %}
 <div class="wrap"><nav class="subtabs">
   <a href="/ui" class="{{ 'current' if subpage == 'documents' }}">Documents</a>
   <a href="/ui/test" class="{{ 'current' if subpage == 'test' }}">Test runs{% if test_count %} <span class="meta">{{ test_count }}</span>{% endif %}</a>
 </nav></div>
-{% elif page == 'rules' %}
+{% elif page == 'data' %}
 <div class="wrap"><nav class="subtabs">
-  <a href="/ui/rules" class="{{ 'current' if subpage == 'editor' }}">Rule editor</a>
-  <a href="/ui/rules/approve" class="{{ 'current' if subpage == 'approvals' }}">Approvals</a>
-</nav></div>
-{% elif page == 'bulk' %}
-<div class="wrap"><nav class="subtabs">
-  <a href="/ui/bulk" class="{{ 'current' if subpage == 'bulk' }}">Documents &amp; tables</a>
+  <a href="/ui/data" class="{{ 'current' if subpage == 'bank' }}">Bank keys</a>
+  {% if request.app.state.addr_enabled %}<a href="/address/">Addresses</a>{% endif %}
+  <a href="/ui/bulk" class="{{ 'current' if subpage == 'bulk' }}">Bulk tables</a>
   <a href="/ui/tax" class="{{ 'current' if subpage == 'tax' }}">US tax numbers</a>
+</nav></div>
+{% elif page == 'settings' %}
+<div class="wrap"><nav class="subtabs">
+  <a href="/ui/rules" class="{{ 'current' if subpage == 'rules' }}">Rules</a>
+  <a href="/ui/rules/approve" class="{{ 'current' if subpage == 'approvals' }}">Approvals</a>
+  <a href="/ui/training" class="{{ 'current' if subpage == 'training' }}">Training</a>
+  <a href="/ui/debug" class="{{ 'current' if subpage == 'debug' }}">Debug</a>
+  <a href="/ui/settings/tags" class="{{ 'current' if subpage == 'tags' }}">Tags</a>
+  <a href="/ui/settings/defaults" class="{{ 'current' if subpage == 'defaults' }}">Defaults</a>
+</nav></div>
+{% elif page == 'activity' %}
+<div class="wrap"><nav class="subtabs">
+  <a href="/ui/activity" class="{{ 'current' if subpage == 'runs' }}">Runs</a>
+  <a href="/ui/history" class="{{ 'current' if subpage == 'history' }}">Journal</a>
 </nav></div>
 {% endif %}
 <main class="wrap">

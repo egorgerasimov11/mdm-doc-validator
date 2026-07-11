@@ -26,7 +26,7 @@ ACTIONS = ("check", "cancel", "label", "mark-valid", "teach-type", "rating",
            "finding-vote",
            "rule-save", "rule-approve", "rule-tier", "rule-delete",
            "rule-restore", "rule-create", "rule-challenge-dismiss",
-           "rule-regenerate", "skill-upload", "settings", "train", "eval",
+           "rule-regenerate", "skill-upload", "settings", "tag", "train", "eval",
            "bulk", "run-test", "job-start", "job-end", "pattern-study", "undo")
 
 

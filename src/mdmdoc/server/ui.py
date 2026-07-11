@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import config, dataset, fields as _fields_mod, model_client as mc, ratings, review_core, runstore
@@ -101,6 +101,7 @@ def dashboard(request: Request):
                                            test_count=len(runstore.list_runs(test=True)),
                                            recent_actions=__import__("mdmdoc.oplog", fromlist=["recent"]).recent(limit=8),
                                            default_effort=config.default_effort(),
+                                           default_lang=config.default_lang(),
                                            engine_default=config.engine_mode(),
                                            engine_modes=list(config.ENGINE_MODES),
                                            engine_env_override=(env_eng if env_eng in config.ENGINE_MODES else ""),
@@ -373,7 +374,7 @@ def training_page(request: Request):
     except Exception:
         pattern_study = None
     return templates.TemplateResponse(request, "training.html", _ctx(
-        page="training", by_class=by_class, history=history,
+        page="settings", subpage="training", by_class=by_class, history=history,
         pattern_study=pattern_study,
         series_json=json.dumps(series), lora_gate=100,
         failures=failures, diff=diff, field_rows=field_rows, recs=recs,
@@ -385,36 +386,74 @@ def training_page(request: Request):
                       if j.status in ("queued", "running")]))
 
 
+def _verdict_bucket(v: str) -> str:
+    """Same bucketing as the dashboard runs list: WARNING/NMR both read as 'review'."""
+    return "accept" if v == "ACCEPT" else "reject" if v == "REJECT" else "review" if v else ""
+
+
+def _activity_feed() -> list[dict]:
+    """One list of every completed RUN — documents, bulk/tax data validations and
+    consolidation cases — newest first, each carrying its operator tags. The feed
+    is the read model behind the Activity 'Runs' sub-tab; the section field drives
+    the client-side filter (Documents / Consolidation / Data)."""
+    from .. import tags as tags_mod
+    from ..consolidation import casestore
+    assign = tags_mod.assignments()
+    feed: list[dict] = []
+    for r in runstore.list_runs(test=None):
+        meta = runstore.load(r["run_id"], "meta.json") or {}
+        if meta.get("kind") == "bulk":
+            rep = runstore.load(r["run_id"], "bulk_report.json") or {}
+            counts = rep.get("counts") or {}
+            verdict = ("REJECT" if counts.get("INVALID")
+                       else "NEED_MANUAL_REVIEW" if counts.get("SUSPICIOUS") else "ACCEPT")
+            ent = "data:" + r["run_id"]
+            feed.append({"entity": ent, "type": "data", "section": "Data · Bulk",
+                         "name": f"{meta.get('case', '?')} · {rep.get('total', '?')} rows",
+                         "verdict": verdict, "vbucket": _verdict_bucket(verdict),
+                         "ts": meta.get("ts", r.get("ts", "")),
+                         "link": f"/api/v1/runs/{r['run_id']}/artifacts/bulk_report.md",
+                         "tags": sorted(assign.get(ent, set()))})
+        else:
+            ent = "doc:" + r["run_id"]
+            feed.append({"entity": ent, "type": "doc", "section": "Document",
+                         "name": r["file"], "sub": r.get("doc_type", ""),
+                         "verdict": r["verdict"], "vbucket": _verdict_bucket(r["verdict"]),
+                         "ts": r["ts"], "link": f"/ui/runs/{r['run_id']}",
+                         "tags": sorted(assign.get(ent, set()))})
+    try:
+        for c in casestore.list_cases():
+            ent = "consol:" + c["case_id"]
+            has_out = bool(casestore.latest_verified_output(c))
+            verdict = "ACCEPT" if has_out else "NEED_MANUAL_REVIEW"
+            feed.append({"entity": ent, "type": "consol", "section": "Consolidation",
+                         "name": f"{c['case_id']} · {len(c.get('vendors', []))} vendor(s)",
+                         "verdict": verdict, "vbucket": _verdict_bucket(verdict),
+                         "ts": c.get("created", ""), "link": f"/ui/consolidation/{c['case_id']}",
+                         "tags": sorted(assign.get(ent, set()))})
+    except Exception:  # a missing/partial consolidation store must not break Activity
+        pass
+    for h in _tax_history():
+        ent = "data:tax:" + h["name"]
+        feed.append({"entity": ent, "type": "data", "section": "Data · Tax",
+                     "name": h["name"], "verdict": "", "vbucket": "",
+                     "ts": h.get("mtime", ""), "link": f"/ui/tax/download/{h['name']}",
+                     "tags": sorted(assign.get(ent, set()))})
+    feed.sort(key=lambda x: x.get("ts") or "", reverse=True)
+    return feed
+
+
 @router_ui.get("/ui/activity", response_class=HTMLResponse)
 def activity_page(request: Request):
-    """E2: every background job — running work survives navigation and lives
-    here; finished work falls back to the persisted oplog after a restart."""
-    from .. import oplog
-    all_jobs = [j.to_dict() for j in jobs.REGISTRY.list()]
-    active = [j for j in all_jobs if j["status"] in ("queued", "running")]
-    finished = []
-    for j in all_jobs:
-        if j["status"] in ("done", "error", "canceled"):
-            finished.append({"kind": j["kind"], "label": j.get("label"),
-                             "status": j["status"], "finished": j.get("finished"),
-                             "run_id": (j.get("result") or {}).get("run_id", "")})
-    if len(finished) < 50:   # older history from the persisted ledger
-        seen = {(f["kind"], f.get("finished")) for f in finished}
-        for r in oplog.recent(limit=200, actions=("job-end",)):
-            det = str(r.get("detail", ""))
-            kind = det.split(" ", 1)[0] if det else "job"
-            key = (kind, r.get("ts"))
-            if key in seen:
-                continue
-            status = "done" if " done" in det else                 ("canceled" if " canceled" in det else
-                 ("error" if " error" in det else ""))
-            finished.append({"kind": kind, "label": det.split("— ")[-1] if "— " in det else "",
-                             "status": status or "finished", "finished": "",
-                             "ts": r.get("ts"), "run_id": ""})
-            if len(finished) >= 50:
-                break
+    """E2: running jobs survive navigation and live in 'Active'; the 'Runs' feed
+    is every completed run across Documents / Consolidation / Data, tag-filterable."""
+    from .. import tags as tags_mod
+    active = [j.to_dict() for j in jobs.REGISTRY.list()
+              if j.status in ("queued", "running")]
     return templates.TemplateResponse(request, "activity.html", _ctx(
-        page="activity", active=active, finished=finished[:50]))
+        page="activity", subpage="runs", active=active,
+        feed_json=json.dumps(_activity_feed()),
+        tags_json=json.dumps(tags_mod.list_with_counts())))
 
 
 @router_ui.get("/ui/history", response_class=HTMLResponse)
@@ -428,7 +467,7 @@ def history_page(request: Request):
         r["undone"] = r.get("op", "") in undone
         r["undoable"] = undo.can_undo(r, undone)
     return templates.TemplateResponse(request, "history.html", _ctx(
-        page="activity", rows=rows))
+        page="activity", subpage="history", rows=rows))
 
 
 @router_ui.get("/ui/debug", response_class=HTMLResponse)
@@ -442,7 +481,7 @@ def debug_page(request: Request):
     sizes = {"runs/": _dir_size(config.RUNS_DIR), "inbox/": _dir_size(config.INBOX_DIR),
              "dataset/": _dir_size(config.DATASET_DIR), "eval/": _dir_size(config.EVAL_DIR)}
     return templates.TemplateResponse(request, "debug.html", _ctx(
-        page="debug", doctor=doc, doctor_json=json.dumps(doc, indent=2, ensure_ascii=False),
+        page="settings", subpage="debug", doctor=doc, doctor_json=json.dumps(doc, indent=2, ensure_ascii=False),
         jobs=[j.to_dict() for j in jobs.REGISTRY.list()], sizes=sizes,
         log_lines=list(jobs.LOG_RING)[-200:]))
 
@@ -466,7 +505,7 @@ def rules_page(request: Request, doc_class: str = "bank"):
     except Exception:  # rendering must never fail on bad YAML
         pass
     return templates.TemplateResponse(request, "rules.html", _ctx(
-        page="rules", subpage="editor", doc_class=doc_class, yaml_text=text, rule_count=n,
+        page="settings", subpage="rules", doc_class=doc_class, yaml_text=text, rule_count=n,
         unified=unified))
 
 
@@ -516,7 +555,7 @@ def rules_approve_page(request: Request, doc_class: str = "bank"):
     deleted = [d for d in rules_io.list_deleted()
                if d.get("doc_class") in ("", doc_class)]
     return templates.TemplateResponse(request, "rules_approve.html", _ctx(
-        page="rules", subpage="approvals", doc_class=doc_class, rows=rows, counts=counts,
+        page="settings", subpage="approvals", doc_class=doc_class, rows=rows, counts=counts,
         proposals=proposals, challenged=challenged, deleted=deleted))
 
 
@@ -538,15 +577,47 @@ def _tax_history() -> list[dict]:
     return out
 
 
+@router_ui.get("/ui/data", response_class=HTMLResponse)
+def data_bank_page(request: Request):
+    """Data → Bank keys: the routing/account quick check (moved off the Documents
+    dashboard). Addresses / Bulk tables / US tax are the sibling sub-tabs."""
+    return templates.TemplateResponse(request, "data_bank.html",
+                                      _ctx(page="data", subpage="bank"))
+
+
+@router_ui.get("/ui/settings", response_class=HTMLResponse)
+def settings_index():
+    return RedirectResponse("/ui/rules")
+
+
+@router_ui.get("/ui/settings/defaults", response_class=HTMLResponse)
+def settings_defaults_page(request: Request):
+    env_eng = os.environ.get("MDMDOC_ENGINE", "").strip().lower()
+    return templates.TemplateResponse(request, "settings_defaults.html", _ctx(
+        page="settings", subpage="defaults",
+        default_effort=config.default_effort(),
+        engine_default=config.engine_mode(),
+        engine_modes=list(config.ENGINE_MODES),
+        engine_env_override=(env_eng if env_eng in config.ENGINE_MODES else ""),
+        default_lang=config.default_lang()))
+
+
+@router_ui.get("/ui/settings/tags", response_class=HTMLResponse)
+def settings_tags_page(request: Request):
+    from .. import tags as tags_mod
+    return templates.TemplateResponse(request, "settings_tags.html", _ctx(
+        page="settings", subpage="tags", tags=tags_mod.list_with_counts()))
+
+
 @router_ui.get("/ui/bulk", response_class=HTMLResponse)
 def bulk_page(request: Request):
-    return templates.TemplateResponse(request, "bulk.html", _ctx(page="bulk", subpage="bulk"))
+    return templates.TemplateResponse(request, "bulk.html", _ctx(page="data", subpage="bulk"))
 
 
 @router_ui.get("/ui/tax", response_class=HTMLResponse)
 def tax_page(request: Request):
     return templates.TemplateResponse(request, "tax.html", _ctx(
-        page="bulk", subpage="tax", result=None, error=None, history=_tax_history()))
+        page="data", subpage="tax", result=None, error=None, history=_tax_history()))
 
 
 @router_ui.post("/ui/tax/validate", response_class=HTMLResponse)
@@ -559,7 +630,7 @@ async def tax_validate(request: Request):
     up = form.get("file")
     if up is None or not getattr(up, "filename", ""):
         return templates.TemplateResponse(request, "tax.html", _ctx(
-            page="bulk", subpage="tax", result=None, error="no file uploaded", history=_tax_history()))
+            page="data", subpage="tax", result=None, error="no file uploaded", history=_tax_history()))
     stem = re.sub(r"[^\w.\-]+", "_", Path(up.filename).stem)[:60] or "export"
     fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{stem}_VALIDATED.xlsx"
     _TAX_DIR.mkdir(parents=True, exist_ok=True)
@@ -575,12 +646,12 @@ async def tax_validate(request: Request):
                 cat_col=str(form.get("cat_col") or "").strip() or None)
     except Exception as exc:  # surface as a page error, never a 500
         return templates.TemplateResponse(request, "tax.html", _ctx(
-            page="bulk", subpage="tax", result=None,
+            page="data", subpage="tax", result=None,
             error=f"validation failed: {exc.__class__.__name__}: {exc}",
             history=_tax_history()))
     summary["fname"] = fname
     return templates.TemplateResponse(request, "tax.html", _ctx(
-        page="bulk", subpage="tax", result=summary, error=None, history=_tax_history()))
+        page="data", subpage="tax", result=summary, error=None, history=_tax_history()))
 
 
 @router_ui.get("/ui/tax/download/{name}")

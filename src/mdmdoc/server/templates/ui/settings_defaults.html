@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — settings / defaults{% endblock %}
+{% block content %}
+<h1>Defaults</h1>
+<p class="meta">Applied to every analysis that doesn't override them. Set once here instead of
+crowding the Documents screen.</p>
+
+<section>
+  <div class="field-row">
+    <label class="name">Default engine</label>
+    <span>
+      <select id="engine-default" style="width:auto" {% if engine_env_override %}disabled title="pinned by MDMDOC_ENGINE={{ engine_env_override }} in the service env"{% endif %}>
+        {% for m in engine_modes %}<option value="{{ m }}" {% if m == engine_default %}selected{% endif %}>{{ m }}</option>{% endfor %}
+      </select>
+      <span class="meta" id="engine-default-state"></span>
+      {% if engine_env_override %}<span class="hint">pinned by env — MDMDOC_ENGINE={{ engine_env_override }}</span>{% endif %}
+    </span>
+  </div>
+  <div class="field-row">
+    <label class="name">Default effort</label>
+    <span class="effort-box">
+      <input type="range" id="effort" min="1" max="5" step="1" value="{{ default_effort }}">
+      <span class="meta" id="effort-label"></span>
+    </span>
+  </div>
+  <div class="field-row">
+    <label class="name">Analysis language</label>
+    <span>
+      <select id="lang-default" style="width:auto">
+        <option value="en" {% if default_lang == 'en' %}selected{% endif %}>en</option>
+        <option value="ru" {% if default_lang == 'ru' %}selected{% endif %}>ru</option>
+      </select>
+      <span class="meta" id="lang-default-state"></span>
+    </span>
+  </div>
+  <p class="hint">Effort: 1 = instant (no LLM) · 3 = standard · 5 = maximum scrutiny (slow).</p>
+</section>
+{% endblock %}
+{% block script %}<script>mdmdoc.initDefaults();</script>{% endblock %}

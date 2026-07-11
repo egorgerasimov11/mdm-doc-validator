@@ -49,63 +49,87 @@ window.mdmdoc = (() => {
     const docClass = () => seg.querySelector(".active").dataset.v;
     const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
 
-    // optional SAP data: a Bank Details screenshot (bank docs) OR a BUT0BK/BUT000
-    // table export (.xlsx — works for w9 too). The API validates the pairing.
-    let sapFile = null;
-    const sapBtn = document.getElementById("sap-attach");
-    const sapInput = document.getElementById("sap-file");
-    const sapName = document.getElementById("sap-name");
-    const sapBp = document.getElementById("sap-bp");
-    if (sapBtn) {
-      sapBtn.onclick = () => sapInput.click();
-      sapInput.onchange = () => {
-        sapFile = sapInput.files[0] || null;
-        sapName.textContent = sapFile ? sapFile.name + " ✓ (will be compared)" : "";
-        if (sapBp) sapBp.hidden = !sapFile;
-      };
-    }
+    // ---- packet state: documents to analyze + one optional SAP/form compare ----
+    // Analysis no longer fires on drop — files accumulate here and the operator
+    // presses "Start analysis", so they can add more documents or a comparison first.
+    let docs = [];                 // File[]
+    let compare = null;            // { file, kind: 'sap' | 'tpl' }
+    const wrap = document.getElementById("loaded-wrap");
+    const listEl = document.getElementById("loaded");
+    const countEl = document.getElementById("loaded-count");
+    const startBtn = document.getElementById("btn-start");
+    const startHint = document.getElementById("start-hint");
 
-    // optional request-form TEMPLATE (D8): the filled MDM workbook — the
-    // document is compared against what the requestor typed into the form
-    let tplFile = null;
-    const tplBtn = document.getElementById("tpl-attach");
-    const tplInput = document.getElementById("tpl-file");
-    const tplName = document.getElementById("tpl-name");
-    if (tplBtn) {
-      tplBtn.onclick = () => tplInput.click();
-      tplInput.onchange = () => {
-        tplFile = tplInput.files[0] || null;
-        tplName.textContent = tplFile ? tplFile.name + " ✓ (form values will be compared)" : "";
-      };
-    }
+    const typeOf = (n) => {
+      const e = (n.split(".").pop() || "").toLowerCase();
+      if (e === "xlsx" || e === "xlsm") return "form";
+      if (e === "eml" || e === "msg") return "email";
+      if (["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"].includes(e)) return "image";
+      if (e === "zip") return "archive";
+      return "pdf";
+    };
 
-    async function send(file) {
-      log.hidden = false; log.textContent = "";
-      say(`uploading ${file.name} (${docClass()})…`);
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("doc_class", docClass());
-      fd.append("lang", document.getElementById("lang").value);
-      fd.append("wait", "false");
-      const eff = document.getElementById("effort");
-      if (eff) fd.append("effort", eff.value);
-      if (sapFile) {
-        fd.append("sap_file", sapFile);
-        if (sapBp && sapBp.value.trim()) fd.append("sap_bp", sapBp.value.trim());
+    function render() {
+      if (!docs.length && !compare) { wrap.hidden = true; return; }
+      wrap.hidden = false;
+      listEl.querySelectorAll(".loaded-row").forEach(r => r.remove());
+      docs.forEach((f, i) => {
+        const row = document.createElement("div");
+        row.className = "loaded-row";
+        row.innerHTML = `<span class="fname"></span><span class="tag"></span>` +
+          `<button class="rm" title="remove" data-i="${i}">&times;</button>`;
+        row.querySelector(".fname").textContent = f.name;
+        row.querySelector(".tag").textContent = typeOf(f.name);
+        listEl.appendChild(row);
+      });
+      if (compare) {
+        const row = document.createElement("div");
+        row.className = "loaded-row";
+        row.innerHTML = `<span class="fname"></span>` +
+          `<span class="chip chip--NOTE">${compare.kind === "sap" ? "compare · SAP" : "compare · form"}</span>` +
+          `<button class="rm" title="remove" data-cmp="1">&times;</button>`;
+        row.querySelector(".fname").textContent = compare.file.name;
+        listEl.appendChild(row);
       }
-      if (tplFile) fd.append("template_file", tplFile);
-      try {
-        const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
-        trackJob(job_id);
-        pollJob(job_id, say,
-          (res) => {
-            if (tracked.size === 1) { say("opening run page…"); location = `/ui/runs/${res.run_id}`; }
-            else say(`done: ${file.name} -> run ${res.run_id}`);
-          },
-          (err) => say("ERROR: " + err),
-          (j) => updateProgress(j));
-      } catch (e) { say("ERROR: " + e.message); }
+      countEl.textContent = docs.length + " doc" + (docs.length === 1 ? "" : "s") + (compare ? " + compare" : "");
+      startBtn.disabled = docs.length === 0;
+      startHint.textContent = docs.length ? `ready: ${docs.length} document(s)` : "add at least one document";
     }
+
+    // primary drop: accumulate documents
+    drop.onclick = () => input.click();
+    input.onchange = () => { if (input.files.length) { docs.push(...input.files); input.value = ""; render(); } };
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("hover"); };
+    drop.ondragleave = () => drop.classList.remove("hover");
+    drop.ondrop = (e) => {
+      e.preventDefault(); drop.classList.remove("hover");
+      const fs = [...e.dataTransfer.files]; if (fs.length) { docs.push(...fs); render(); }
+    };
+
+    // secondary "compare with SAP" drop: an image -> sap_file (a SAP screenshot),
+    // a workbook -> template_file (the filled request form). One compare per packet.
+    const sapDrop = document.getElementById("drop-sap");
+    const sapInput = document.getElementById("sap-file");
+    const setCompare = (f) => {
+      if (!f) return;
+      const e = (f.name.split(".").pop() || "").toLowerCase();
+      compare = { file: f, kind: (e === "xlsx" || e === "xlsm") ? "tpl" : "sap" };
+      render();
+    };
+    if (sapDrop) {
+      sapDrop.onclick = () => sapInput.click();
+      sapInput.onchange = () => { setCompare(sapInput.files[0]); sapInput.value = ""; };
+      sapDrop.ondragover = (e) => { e.preventDefault(); sapDrop.classList.add("hover"); };
+      sapDrop.ondragleave = () => sapDrop.classList.remove("hover");
+      sapDrop.ondrop = (e) => { e.preventDefault(); sapDrop.classList.remove("hover"); setCompare(e.dataTransfer.files[0]); };
+    }
+
+    listEl.onclick = (e) => {
+      const b = e.target.closest(".rm"); if (!b) return;
+      if (b.dataset.cmp) compare = null; else docs.splice(+b.dataset.i, 1);
+      render();
+    };
+    document.getElementById("btn-clear").onclick = () => { docs = []; compare = null; render(); };
 
     /* queue panel (D3): tracked check jobs, live positions, cancel buttons */
     const tracked = new Set();
@@ -178,20 +202,46 @@ window.mdmdoc = (() => {
     }
     renderQueue();
 
-    async function sendAll(files) {
-      for (const f of files) await send(f);
+    // one document -> one /check job; resolves with the run result (or null)
+    function send(file) {
+      say(`uploading ${file.name} (${docClass()})…`);
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("doc_class", docClass());
+      const langEl = document.getElementById("lang");
+      fd.append("lang", (langEl && langEl.value) || "en");
+      fd.append("wait", "false");
+      const eff = document.getElementById("effort");
+      if (eff) fd.append("effort", eff.value);
+      if (compare) fd.append(compare.kind === "sap" ? "sap_file" : "template_file", compare.file);
+      return api("/api/v1/check", { method: "POST", body: fd }).then(({ job_id }) => {
+        trackJob(job_id);
+        return new Promise((resolve) => {
+          pollJob(job_id, say,
+            (res) => resolve(res),
+            (err) => { say("ERROR: " + err); resolve(null); },
+            (j) => updateProgress(j));
+        });
+      });
     }
-    drop.onclick = () => input.click();
-    input.onchange = () => input.files.length && sendAll([...input.files]);
-    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("hover"); };
-    drop.ondragleave = () => drop.classList.remove("hover");
-    drop.ondrop = (e) => {
-      e.preventDefault(); drop.classList.remove("hover");
-      const fs = [...e.dataTransfer.files];
-      if (fs.length) sendAll(fs);
+
+    startBtn.onclick = async () => {
+      if (!docs.length) return;
+      startBtn.disabled = true;
+      log.hidden = false; log.textContent = "";
+      const packet = docs.slice();
+      let firstRun = null;
+      for (const f of packet) {
+        try {
+          const res = await send(f);
+          if (res && res.run_id && !firstRun) firstRun = res.run_id;
+        } catch (e) { say("ERROR: " + e.message); }
+      }
+      if (packet.length === 1 && firstRun) { say("opening run page…"); location = `/ui/runs/${firstRun}`; }
+      else { say("done — see Activity or Recent checks below"); docs = []; compare = null; render(); }
     };
 
-    // effort slider (D4): live label + persisted default
+    // effort slider: live label only (the DEFAULT effort lives in Settings → Defaults)
     const eff = document.getElementById("effort");
     const effLabel = document.getElementById("effort-label");
     const EFFORT_NAMES = { 1: "1 · instant (no LLM)", 2: "2 · fast", 3: "3 · standard",
@@ -200,31 +250,214 @@ window.mdmdoc = (() => {
       const paint = () => effLabel.textContent = EFFORT_NAMES[eff.value] || eff.value;
       paint();
       eff.oninput = paint;
-      eff.onchange = async () => {
-        paint();
-        try {
-          await api("/api/v1/settings", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ default_effort: parseInt(eff.value, 10) }),
-          });
-        } catch (e) { /* non-fatal */ }
-      };
     }
+  }
 
-    // default-engine setting (persists on the server; env pin disables it)
-    const defSel = document.getElementById("engine-default");
-    const defState = document.getElementById("engine-default-state");
-    if (defSel && !defSel.disabled) {
-      defSel.addEventListener("change", async () => {
-        try {
-          await api("/api/v1/settings", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ engine: defSel.value }),
-          });
-          if (defState) { defState.textContent = "✓ saved"; setTimeout(() => defState.textContent = "", 1500); }
-        } catch (e) { if (defState) defState.textContent = "ERROR: " + e.message; }
+  /* ---------- settings: defaults (engine / effort / language) ------------- */
+  function initDefaults() {
+    const save = async (body, stateEl) => {
+      try {
+        await api("/api/v1/settings", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (stateEl) { stateEl.textContent = "✓ saved"; setTimeout(() => stateEl.textContent = "", 1500); }
+      } catch (e) { if (stateEl) stateEl.textContent = "ERROR: " + e.message; }
+    };
+    const engine = document.getElementById("engine-default");
+    const engineState = document.getElementById("engine-default-state");
+    if (engine && !engine.disabled) engine.onchange = () => save({ engine: engine.value }, engineState);
+
+    const eff = document.getElementById("effort");
+    const effLabel = document.getElementById("effort-label");
+    const NAMES = { 1: "1 · instant (no LLM)", 2: "2 · fast", 3: "3 · standard", 4: "4 · thorough", 5: "5 · maximum (~slow)" };
+    if (eff && effLabel) {
+      const paint = () => effLabel.textContent = NAMES[eff.value] || eff.value;
+      paint(); eff.oninput = paint;
+      eff.onchange = () => save({ default_effort: parseInt(eff.value, 10) });
+    }
+    const lang = document.getElementById("lang-default");
+    const langState = document.getElementById("lang-default-state");
+    if (lang) lang.onchange = () => save({ lang: lang.value }, langState);
+  }
+
+  /* ---------- settings: tag manager -------------------------------------- */
+  function initTagsAdmin() {
+    const list = document.getElementById("tag-list");
+    if (!list) return;
+    const flash = document.getElementById("tag-flash");
+    const add = document.getElementById("new-tag-add");
+    add.onclick = async () => {
+      const name = document.getElementById("new-tag-name");
+      const group = document.getElementById("new-tag-group");
+      if (!name.value.trim()) { name.focus(); return; }
+      add.disabled = true;
+      try {
+        await api("/api/v1/tags", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.value.trim(), group: group.value }),
+        });
+        location.reload();
+      } catch (e) { flash.textContent = "ERROR: " + e.message; add.disabled = false; }
+    };
+    list.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-deltag]");
+      if (!b) return;
+      if (!confirm("Delete this tag? It will be removed from every run it's on.")) return;
+      b.disabled = true;
+      try { await api(`/api/v1/tags/${b.dataset.deltag}`, { method: "DELETE" }); location.reload(); }
+      catch (err) { flash.textContent = "ERROR: " + err.message; b.disabled = false; }
+    });
+  }
+
+  /* ---------- activity: active-jobs poller (unified feed page) ------------ */
+  function initActivityJobs() {
+    const ul = document.getElementById("act-active");
+    if (!ul) return;
+    const tick = async () => {
+      let all = [];
+      try { all = await api("/api/v1/jobs"); } catch (e) { return; }
+      const act = all.filter(j => j.status === "queued" || j.status === "running");
+      ul.innerHTML = "";
+      if (!act.length) { ul.innerHTML = '<li class="meta">nothing running</li>'; return; }
+      act.forEach(j => {
+        const li = document.createElement("li");
+        li.className = "queue-row";
+        const state = j.status === "running"
+          ? (j.stage ? `running · ${j.stage} ${j.percent || 0}%` : "running")
+          : (j.queue_pos > 0 ? `waiting #${j.queue_pos}` : "starting…");
+        li.innerHTML = `<span class="dot dot--WARNING"></span>` +
+          `<span class="grow"><strong>${j.label || j.kind}</strong> — ${state}</span>` +
+          (j.status === "running" ? `<progress max="100" value="${j.percent || 0}"></progress>` : "");
+        if (j.cancelable) {
+          const btn = document.createElement("button");
+          btn.type = "button"; btn.className = "queue-cancel"; btn.textContent = "Cancel";
+          btn.onclick = () => { btn.disabled = true; api(`/api/v1/jobs/${j.id}/cancel`, { method: "POST" }).catch(() => {}); };
+          li.appendChild(btn);
+        }
+        ul.appendChild(li);
+      });
+    };
+    tick();
+    setInterval(tick, 2000);
+  }
+
+  /* ---------- activity: unified run feed + tag filter/assign -------------- */
+  function initActivity() {
+    const listEl = document.getElementById("act-list");
+    if (!listEl) return;
+    const feedEl = document.getElementById("feed-data");
+    const tagsEl = document.getElementById("tags-data");
+    let feed = [], tags = [];
+    try { feed = JSON.parse(feedEl.textContent || "[]"); } catch (e) { feed = []; }
+    try { tags = JSON.parse(tagsEl.textContent || "[]"); } catch (e) { tags = []; }
+    const tagFilterEl = document.getElementById("act-tagfilter");
+    const countEl = document.querySelector("[data-actcount]");
+    const filter = { type: "", vbucket: "", q: "", tag: "" };
+    const byId = (id) => tags.filter(t => t.id === id)[0];
+    const esc = (s) => String(s == null ? "" : s);
+
+    function renderTagFilter() {
+      tagFilterEl.querySelectorAll(".tagchip,.emptytag").forEach(n => n.remove());
+      if (!tags.length) {
+        const s = document.createElement("span");
+        s.className = "hint emptytag";
+        s.innerHTML = 'no tags yet — create one in <a href="/ui/settings/tags">Settings → Tags</a>';
+        tagFilterEl.appendChild(s);
+        return;
+      }
+      tags.forEach(t => {
+        const c = document.createElement("span");
+        c.className = "tagchip" + (filter.tag === t.id ? " on" : "");
+        c.innerHTML = `<span class="swatch" style="background:${t.color}"></span>`;
+        c.appendChild(document.createTextNode(t.name));
+        c.title = (t.group ? t.group + " · " : "") + t.name;
+        c.onclick = () => { filter.tag = filter.tag === t.id ? "" : t.id; renderTagFilter(); renderRows(); };
+        tagFilterEl.appendChild(c);
       });
     }
+
+    function renderRows() {
+      listEl.innerHTML = "";
+      let shown = 0;
+      feed.forEach(r => {
+        if (filter.type && r.type !== filter.type) return;
+        if (filter.vbucket && r.vbucket !== filter.vbucket) return;
+        if (filter.tag && (r.tags || []).indexOf(filter.tag) < 0) return;
+        if (filter.q && (esc(r.name) + " " + esc(r.entity)).toLowerCase().indexOf(filter.q) < 0) return;
+        shown++;
+        const li = document.createElement("li");
+        li.className = "run-row";
+        li.dataset.entity = r.entity;
+        const chips = (r.tags || []).map(id => {
+          const t = byId(id); if (!t) return "";
+          return `<span class="run-tag"><span class="swatch" style="background:${t.color}"></span>${esc(t.name)}` +
+                 ` <span class="x" data-untag="${id}" title="remove">&times;</span></span>`;
+        }).join("");
+        const opts = tags.length
+          ? tags.map(t => {
+              const on = (r.tags || []).indexOf(t.id) >= 0;
+              return `<button class="menu-item" data-tagopt="${t.id}"><span class="swatch" style="background:${t.color}"></span>` +
+                     (t.group ? `<span class="meta">${esc(t.group)}·</span>` : "") + esc(t.name) + (on ? " ✓" : "") + `</button>`;
+            }).join("")
+          : '<span class="menu-item meta">create tags in Settings → Tags</span>';
+        const dot = r.verdict ? `dot--${r.verdict}` : "";
+        const link = r.link || "#";
+        li.innerHTML =
+          `<span class="dot ${dot}"></span>` +
+          `<span class="meta" style="min-width:118px">${esc(r.section)}</span>` +
+          `<a class="grow" href="${link}"></a>` +
+          `<span class="row-tags">${chips}</span>` +
+          `<details class="menu"><summary class="add-tag">+ tag</summary><div class="menu-body">${opts}</div></details>` +
+          `<span class="meta">${esc(r.ts)}</span>`;
+        li.querySelector("a.grow").textContent = r.sub ? `${r.name} · ${r.sub}` : r.name;
+        listEl.appendChild(li);
+      });
+      if (countEl) countEl.textContent = shown + " of " + feed.length;
+    }
+
+    async function assign(entity, tagId, on) {
+      const r = feed.filter(x => x.entity === entity)[0];
+      if (!r) return;
+      try {
+        const res = await api("/api/v1/tags/assign", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entity, tag: tagId, on }),
+        });
+        r.tags = res.tags || [];
+        renderRows();
+      } catch (e) { /* leave the row as-is on failure */ }
+    }
+
+    listEl.addEventListener("click", (e) => {
+      const li = e.target.closest("li[data-entity]"); if (!li) return;
+      const entity = li.dataset.entity;
+      const opt = e.target.closest("[data-tagopt]");
+      if (opt) {
+        const r = feed.filter(x => x.entity === entity)[0];
+        const on = !(r && (r.tags || []).indexOf(opt.dataset.tagopt) >= 0);
+        const d = li.querySelector("details"); if (d) d.open = false;
+        assign(entity, opt.dataset.tagopt, on);
+        return;
+      }
+      const x = e.target.closest("[data-untag]");
+      if (x) assign(entity, x.dataset.untag, false);
+    });
+
+    document.querySelectorAll("#act-filter .seg[data-fkey]").forEach(sg => {
+      sg.addEventListener("click", (e) => {
+        const b = e.target.closest("button"); if (!b) return;
+        sg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+        b.classList.add("active");
+        filter[sg.dataset.fkey] = b.dataset.v;
+        renderRows();
+      });
+    });
+    const search = document.getElementById("act-search");
+    if (search) search.addEventListener("input", () => { filter.q = search.value.trim().toLowerCase(); renderRows(); });
+
+    renderTagFilter();
+    renderRows();
   }
 
   /* ---------- run page: section tabs (N3) --------------------------------- */
@@ -1244,5 +1477,5 @@ window.mdmdoc = (() => {
   return { api, pollJob, initDropZone, initTplCompare, initValidRate, initGatePanel, initTeachType, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
            initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun, initTestToggle,
-           initConsolidationAttach };
+           initConsolidationAttach, initDefaults, initTagsAdmin, initActivity, initActivityJobs };
 })();

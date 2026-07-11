@@ -212,3 +212,36 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
    the filmstrip compact enough that the tab row stays on the first screen */
 .preview-section { padding-top: 12px; }
 .preview-section .preview-strip img { height: 150px; }
+
+/* R1: Documents — two drop zones + a loaded-for-analysis list */
+.drop .big { display: block; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.drop small { display: block; color: var(--faint); font-size: 12px; margin-top: 6px; }
+.drop-grid { display: grid; grid-template-columns: 1.7fr 1fr; gap: 14px; margin: 12px 0; }
+.drop--secondary { padding: 24px 16px; background: var(--code-bg); }
+@media (max-width: 640px) { .drop-grid { grid-template-columns: 1fr; } }
+.loaded { border: 1px solid var(--divider); border-radius: 8px; overflow: hidden; margin: 12px 0; }
+.loaded-head { background: var(--code-bg); font-size: 12px; color: var(--secondary);
+               padding: 7px 12px; font-weight: 600; display: flex; justify-content: space-between; }
+.loaded-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--divider); }
+.loaded-row .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.rm { border: none; background: none; color: var(--faint); font-size: 16px; line-height: 1; padding: 2px 6px; cursor: pointer; }
+.rm:hover { color: var(--reject); border: none; background: none; }
+
+/* R2: tags — swatches, run-tag chips, filter chips, the "+ tag" menu */
+.swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.tagfilter { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 2px 0 10px; }
+.tagchip { font-size: 12px; border: 1px solid var(--divider); border-radius: 20px; padding: 2px 10px;
+           cursor: pointer; color: var(--secondary); display: inline-flex; align-items: center; gap: 6px; user-select: none; }
+.tagchip:hover { border-color: var(--secondary); }
+.tagchip.on { border-color: var(--ink); color: var(--ink); font-weight: 600; }
+.row-tags { display: inline-flex; gap: 5px; flex-wrap: wrap; }
+.run-tag { font-size: 11px; border: 1px solid var(--divider); border-radius: 20px; padding: 0 5px 0 8px;
+           display: inline-flex; align-items: center; gap: 5px; color: var(--secondary); white-space: nowrap; }
+.run-tag .x { cursor: pointer; color: var(--faint); font-size: 13px; }
+.run-tag .x:hover { color: var(--reject); }
+.add-tag { font-size: 11px; color: var(--review); border: 1px dashed var(--divider); border-radius: 20px; padding: 1px 9px; cursor: pointer; }
+.timeline li.run-row { flex-wrap: wrap; }
+.menu-item .swatch { margin-right: 1px; }
+/* the feed's "+ tag" popover is compact and right-aligned, unlike the wide run-page menus */
+#act-list .menu-body { min-width: 190px; left: auto; right: 0; }
+#act-list .menu-item { display: flex; align-items: center; gap: 7px; white-space: nowrap; }

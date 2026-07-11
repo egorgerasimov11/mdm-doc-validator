@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — data / bank keys{% endblock %}
+{% block content %}
+<h1>Bank keys</h1>
+<p class="meta">Validate a US routing + account with no document — ABA 3-7-1 checksum, Fed
+prefixes and (optionally) a live directory lookup. For addresses, bulk tables and US tax
+numbers use the sub-tabs above.</p>
+
+<section>
+  <div class="actions" id="bankcheck-row">
+    <input type="text" id="bc-routing" placeholder="routing number (9 digits)" style="width:14em">
+    <input type="text" id="bc-account" placeholder="account number (optional)" style="width:14em">
+    <input type="text" id="bc-bank" placeholder="bank name (optional)" style="width:12em">
+    <label class="meta"><input type="checkbox" id="bc-web" checked> live directory check 🌐</label>
+    <button type="button" id="bc-run" class="primary">Validate</button>
+  </div>
+  <div id="bc-result" hidden>
+    <p><span class="dot" id="bc-dot"></span> <strong id="bc-verdict"></strong>
+       <span class="meta" id="bc-next"></span></p>
+    <p class="meta" id="bc-hint" hidden></p>
+    <ul class="timeline" id="bc-findings"></ul>
+  </div>
+</section>
+{% endblock %}
+{% block script %}<script>mdmdoc.initBankCheck();</script>{% endblock %}

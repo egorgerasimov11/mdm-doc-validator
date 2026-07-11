@@ -1,42 +1,58 @@
 {% extends "base.html" %}
-{% block title %}mdmdoc — dashboard{% endblock %}
+{% block title %}mdmdoc — documents{% endblock %}
 {% block content %}
 <h1>Documents</h1>
-<p class="meta">{{ labels_count }} labels · model host and tesseract status in the header chip (hover for details); full doctor on <a href="/ui/debug">Debug</a></p>
+<p class="meta">One packet at a time — a bank document or a W-9/W-8. Load the documents, optionally
+add a SAP comparison, then start the analysis.</p>
+
+<input type="hidden" id="lang" value="{{ default_lang }}">
 
 <section>
-  <div class="actions">
+  <div class="actions" style="justify-content:space-between">
     <span class="seg" id="class-seg">
       <button type="button" class="active" data-v="auto">Auto</button>
       <button type="button" data-v="bank">Bank document</button>
       <button type="button" data-v="w9">W-9 / W-8</button>
     </span>
-    <select id="lang" style="width:auto">
-      <option value="en">en</option><option value="ru">ru</option>
-    </select>
-    <span class="effort-box" title="how hard the model thinks: 1 = instant, no LLM (patterns only); 2 = fast model only; 3 = standard (fast + escalation); 4 = thorough (strong tier, deeper page ladder); 5 = maximum scrutiny (strong-first, extended thinking, all signature probes)">
-      <label class="meta" for="effort">effort</label>
-      <input type="range" id="effort" min="1" max="5" step="1" value="{{ default_effort }}">
-      <span class="meta" id="effort-label"></span>
-    </span>
-    <span class="meta">default engine:
-      <select id="engine-default" style="width:auto" {% if engine_env_override %}disabled title="pinned by MDMDOC_ENGINE={{ engine_env_override }} in the service env"{% endif %}>
-        {% for m in engine_modes %}<option value="{{ m }}" {% if m == engine_default %}selected{% endif %}>{{ m }}</option>{% endfor %}
-      </select>
-      <span id="engine-default-state"></span>
-    </span>
+    <details style="margin:0">
+      <summary class="meta" style="cursor:pointer">⚙ Options</summary>
+      <div class="actions" style="margin-top:8px">
+        <span class="effort-box" title="how hard the model thinks: 1 = instant (no LLM), 3 = standard, 5 = maximum scrutiny">
+          <label class="meta" for="effort">effort</label>
+          <input type="range" id="effort" min="1" max="5" step="1" value="{{ default_effort }}">
+          <span class="meta" id="effort-label"></span>
+        </span>
+        <a class="meta" href="/ui/settings/defaults">engine &amp; defaults →</a>
+      </div>
+    </details>
   </div>
-  <div class="drop" id="drop">Drop PDFs, images, .eml/.msg, .zip or a request workbook (.xlsx/.xlsm with embedded docs) — several files form the analysis queue</div>
+
+  <div class="drop-grid">
+    <div class="drop" id="drop">
+      <span class="big">Drop documents</span>
+      PDF · images · .eml/.msg · .zip · request workbook (.xlsx/.xlsm)
+      <small>several files form one analysis packet — or click to choose</small>
+    </div>
+    <div class="drop drop--secondary" id="drop-sap">
+      <span class="big">Compare with SAP</span>
+      optional
+      <small>a SAP screenshot or the filled request form (.xlsx/.xlsm)</small>
+    </div>
+  </div>
   <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.eml,.msg,.zip,.xlsx,.xlsm" multiple hidden>
-  <div class="actions" id="sap-row">
-    <button type="button" id="sap-attach">+ SAP data (screenshot or table export, optional)</button>
-    <input type="text" id="sap-bp" placeholder="BP # (optional)" style="width:9em" hidden>
-    <span class="meta" id="sap-name"></span>
-    <input type="file" id="sap-file" accept=".png,.jpg,.jpeg,.pdf,.xlsx,.xlsm" hidden>
-    <button type="button" id="tpl-attach">+ Request form / template (.xlsx/.xlsm, optional)</button>
-    <span class="meta" id="tpl-name"></span>
-    <input type="file" id="tpl-file" accept=".xlsx,.xlsm" hidden>
+  <input type="file" id="sap-file" accept=".png,.jpg,.jpeg,.pdf,.xlsx,.xlsm" hidden>
+
+  <div id="loaded-wrap" hidden>
+    <div class="loaded" id="loaded">
+      <div class="loaded-head"><span>Loaded for analysis</span><span id="loaded-count"></span></div>
+    </div>
+    <div class="actions">
+      <button type="button" class="primary" id="btn-start" disabled>Start analysis</button>
+      <button type="button" id="btn-clear">Clear</button>
+      <span class="meta" id="start-hint">add at least one document</span>
+    </div>
   </div>
+
   <div class="actions" id="progress-row" hidden>
     <progress id="job-progress" max="100" value="0" style="flex:1"></progress>
     <span class="meta" id="job-stage"></span>
@@ -50,30 +66,13 @@
     {% for j in active_jobs %}
     <li class="queue-row"><span class="dot dot--WARNING"></span>
         <span class="grow"><strong>{{ j.label or j.kind }}</strong> — {{ j.status }}{% if j.progress %} · {{ j.progress[-1] }}{% endif %}</span>
-        <a class="meta" href="/ui/debug">log →</a></li>
+        <a class="meta" href="/ui/activity">Activity →</a></li>
     {% endfor %}
   </ul>
 </section>
 
 <section>
-  <h2>Bank keys quick check <span class="meta">US routing + account, no document</span></h2>
-  <div class="actions" id="bankcheck-row">
-    <input type="text" id="bc-routing" placeholder="routing number (9 digits)" style="width:14em">
-    <input type="text" id="bc-account" placeholder="account number (optional)" style="width:14em">
-    <input type="text" id="bc-bank" placeholder="bank name (optional)" style="width:12em">
-    <label class="meta"><input type="checkbox" id="bc-web" checked> live directory check 🌐</label>
-    <button type="button" id="bc-run">Validate</button>
-  </div>
-  <div id="bc-result" hidden>
-    <p><span class="dot" id="bc-dot"></span> <strong id="bc-verdict"></strong>
-       <span class="meta" id="bc-next"></span></p>
-    <p class="meta" id="bc-hint" hidden></p>
-    <ul class="timeline" id="bc-findings"></ul>
-  </div>
-</section>
-
-<section>
-  <h2>Recent runs</h2>
+  <h2>Recent checks</h2>
   <div class="filterbar" id="run-filters" data-filter-root data-filter-list="runs-list">
     <input type="text" data-filter-search autocomplete="off" placeholder="filter by file name or run id…">
     <span class="seg" data-filter-key="class">
@@ -101,8 +100,6 @@
   {% if runs %}
   <ul class="timeline" id="runs-list">
     {% for r in runs %}
-    {# verdict is bucketed here so the generic exact-match filter keeps the old
-       semantics: "needs review" = NEED_MANUAL_REVIEW + WARNING #}
     {% set vb = 'accept' if r.verdict == 'ACCEPT' else 'reject' if r.verdict == 'REJECT' else 'review' %}
     <li data-search="{{ r.file }} {{ r.run_id }}"
         data-class="{{ r.doc_class }}" data-verdict="{{ vb }}"
@@ -117,6 +114,8 @@
     {% endfor %}
   </ul>
   {% else %}<p class="meta">No runs yet — drop a document above.</p>{% endif %}
+  <p class="meta" style="margin-top:10px"><a href="/ui/test">Test runs →</a>
+    <span class="hint">(corpus, synthetic set — kept out of the working list)</span></p>
 </section>
 {% endblock %}
-{% block script %}<script>mdmdoc.initDropZone(); mdmdoc.initBankCheck();</script>{% endblock %}
+{% block script %}<script>mdmdoc.initDropZone();</script>{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — settings / tags{% endblock %}
+{% block content %}
+<h1>Tags</h1>
+<p class="meta">Create a tag — a country, a project, a priority — and pin it to any run. Tagged
+runs become filterable on the Activity feed. You can also assign a tag straight from a run's
+row there (the “+ tag” menu).</p>
+
+<section>
+  <div class="actions">
+    <input type="text" id="new-tag-name" placeholder="tag name, e.g. Germany" style="width:15em">
+    <select id="new-tag-group" style="width:auto">
+      <option value="Country">Country</option>
+      <option value="Project">Project</option>
+      <option value="Priority">Priority</option>
+      <option value="">no group</option>
+    </select>
+    <button type="button" class="primary" id="new-tag-add">Create tag</button>
+    <span class="meta" id="tag-flash"></span>
+  </div>
+  <ul class="timeline" id="tag-list">
+    {% for t in tags %}
+    <li data-tag="{{ t.id }}">
+      <span class="swatch" style="background:{{ t.color }}"></span>
+      <span class="grow">{% if t.group %}<span class="meta">{{ t.group }} · </span>{% endif %}<strong>{{ t.name }}</strong></span>
+      <span class="meta">{{ t.count }} run(s)</span>
+      <button type="button" class="rm" data-deltag="{{ t.id }}" title="delete">&times;</button>
+    </li>
+    {% else %}
+    <li class="meta">no tags yet</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}
+{% block script %}<script>mdmdoc.initTagsAdmin();</script>{% endblock %}

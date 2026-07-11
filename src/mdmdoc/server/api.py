@@ -425,7 +425,8 @@ def get_settings() -> dict:
             "engine_saved": str(config.load_settings().get("engine", "")) or "auto",
             "engine_env_override": env if env in config.ENGINE_MODES else "",
             "engine_modes": list(config.ENGINE_MODES),
-            "default_effort": config.default_effort()}
+            "default_effort": config.default_effort(),
+            "lang": config.default_lang()}
 
 
 @router_teach.post("/settings", tags=["system"])
@@ -445,10 +446,57 @@ def set_settings(body: dict) -> dict:
         if lvl not in (1, 2, 3, 4, 5):
             raise api_error(400, "bad_request", "default_effort must be 1..5")
         config.save_setting("default_effort", lvl)
+    if "lang" in body:
+        lg = str(body.get("lang", "")).strip().lower()
+        if lg not in ("en", "ru"):
+            raise api_error(400, "bad_request", "lang must be 'en' or 'ru'")
+        config.save_setting("lang", lg)
     out.update({"engine": config.engine_mode(),
                 "default_effort": config.default_effort(),
+                "lang": config.default_lang(),
                 "engine_env_override": os.environ.get("MDMDOC_ENGINE", "").strip().lower()})
     return out
+
+
+# ---------------------------------------------------------------- tags --------
+@router_teach.get("/tags", tags=["system"])
+def list_tags() -> dict:
+    """Operator tags (id/name/group/color) with per-tag run counts."""
+    from .. import tags as tags_mod
+    return {"tags": tags_mod.list_with_counts()}
+
+
+@router_teach.post("/tags", tags=["system"])
+def create_tag(body: dict) -> dict:
+    from .. import tags as tags_mod
+    try:
+        tag = tags_mod.create(str(body.get("name", "")), str(body.get("group", "")),
+                              str(body.get("color", "")))
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    return {"ok": True, "tag": tag}
+
+
+@router_teach.delete("/tags/{tag_id}", tags=["system"])
+def delete_tag(tag_id: str) -> dict:
+    from .. import tags as tags_mod
+    tags_mod.delete(tag_id)
+    return {"ok": True}
+
+
+@router_teach.post("/tags/assign", tags=["system"])
+def assign_tag(body: dict) -> dict:
+    """Pin/unpin a tag on an Activity entity ('<kind>:<id>')."""
+    from .. import tags as tags_mod
+    entity = str(body.get("entity", "")).strip()
+    tag_id = str(body.get("tag", "")).strip()
+    if not entity or not tag_id:
+        raise api_error(400, "bad_request", "entity and tag required")
+    try:
+        tags_mod.assign(entity, tag_id, bool(body.get("on", True)))
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    return {"ok": True, "tags": tags_mod.for_entity(entity)}
 
 
 # ---------------------------------------------------------------- check -------

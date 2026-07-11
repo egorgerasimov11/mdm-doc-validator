@@ -31,4 +31,6 @@ rules/deleted/
 dataset/ratings.jsonl
 dataset/patterns.jsonl
 dataset/labels_history.jsonl
+dataset/tags.json
+dataset/tag_links.jsonl
 rules/history/

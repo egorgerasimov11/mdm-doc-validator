@@ -255,6 +255,12 @@ def engine_mode() -> str:
     return v if v in ENGINE_MODES else "auto"
 
 
+def default_lang() -> str:
+    """Operator-panel default OCR/analysis language (settings.json), 'en'|'ru'."""
+    v = str(load_settings().get("lang", "en")).strip().lower()
+    return v if v in ("en", "ru") else "en"
+
+
 def ensure_dirs() -> None:
     for d in (RUNS_DIR, DATASET_DIR, LORA_DIR, EVAL_DIR, FEWSHOT_DIR, MODELS_DIR, INBOX_DIR):
         d.mkdir(parents=True, exist_ok=True)
