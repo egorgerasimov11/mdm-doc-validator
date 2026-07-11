@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — consolidation{% endblock %}
+{% block content %}
+<h1>Consolidation</h1>
+<p class="meta">Vendor request forms (Americas/EU/APAC MDM templates) →
+appended rows in your <code>BusinessPartnerTemplate.xlsx</code>. The template
+you upload may already contain vendors: new ones are appended after the last
+used row, existing rows are hash-verified untouched, and every output is
+re-read and cross-checked before the download unlocks.</p>
+
+{% if not engine_ok %}
+<section><p class="bad">The sap_vendor_autoload package is not installed —
+start the server with
+<code>uv run --with-editable &lt;sap-vendor-autoload&gt; mdmdoc serve</code>.</p></section>
+{% else %}
+<section>
+  <form method="post" action="/ui/consolidation/new">
+    <button type="submit">New case</button>
+    <span class="hint">a case = one working session: forms + template + versioned outputs</span>
+  </form>
+  {% if default_tpl %}<p class="meta">Default blank template: <code>{{ default_tpl }}</code></p>{% endif %}
+</section>
+{% endif %}
+
+{% if cases %}
+<section>
+  <h2>Recent cases</h2>
+  <table>
+    <tr><th>case</th><th>created</th><th>vendors</th><th>template</th><th>outputs</th></tr>
+    {% for c in cases %}
+    <tr>
+      <td><a href="/ui/consolidation/{{ c.case_id }}"><code>{{ c.case_id }}</code></a></td>
+      <td class="meta">{{ c.created }}</td>
+      <td class="meta">{{ c.vendors|length }}</td>
+      <td class="meta">{{ c.template.orig_name if c.template else "—" }}</td>
+      <td class="meta">{{ c.outputs|length }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+{% endblock %}

@@ -21,6 +21,12 @@ router_ui = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates" / "ui"))
 _STATIC_DIR = Path(__file__).resolve().parent / "static" / "ui"
 
+from ..consolidation import available as _consol_available  # noqa: E402
+from .consolidation import router_consol  # noqa: E402
+
+router_ui.include_router(router_consol)
+_CONSOL_ENABLED = _consol_available()
+
 
 def _asset_version() -> str:
     """Cache-bust key for app.js/app.css: newest file mtime. Without it a deploy
@@ -43,6 +49,7 @@ def _ctx(**kw) -> dict:
             "labels_count": dataset.count_labels(),
             "asset_v": _asset_version(),
             "subpage": "",
+            "consol_enabled": _CONSOL_ENABLED,
             **kw}
 
 

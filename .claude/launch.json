@@ -16,6 +16,24 @@
       "port": 8766
     },
     {
+      "name": "mdmdoc-consolidation",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--with-editable",
+        "/Users/egor/.openclaw/workspace/tools/sap-vendor-autoload",
+        "--with-editable",
+        "/Users/egor/Projects/address-validator",
+        "mdmdoc",
+        "serve",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8769"
+      ],
+      "port": 8769
+    },
+    {
       "name": "mdmdoc-ui-v6",
       "runtimeExecutable": "uv",
       "runtimeArgs": [

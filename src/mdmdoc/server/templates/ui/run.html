@@ -81,6 +81,15 @@
         <a class="btn" href="/api/v1/runs/{{ run_id }}/artifacts/reasoning.md" download="{{ meta.file_name }}.reasoning.md"
            title="the full decision trace — perception, every guard, every rule evaluated, the verdict fold; paste it into an external LLM for critique">Export reasoning</a>
       </div>
+      {% if consol_enabled and doc_class in ('bank', 'w9') %}
+      <div class="actions">
+        <form method="post" action="/ui/consolidation/from-run/{{ run_id }}" style="display:inline">
+          {% if report.verdict == 'WARNING' %}<label class="meta"><input type="checkbox" name="confirm"> export despite warnings</label>{% endif %}
+          <button type="submit" {% if report.verdict not in ('ACCEPT', 'WARNING') %}disabled{% endif %}>→ Consolidation</button>
+        </form>
+        <span class="hint">extracted values become a vendor entry in a new consolidation case (BusinessPartnerTemplate.xlsx); with a request form attached and 0 mismatches the form is consolidated as the full vendor</span>
+      </div>
+      {% endif %}
       <div class="actions">
         <button type="button" id="btn-test" data-run="{{ run_id }}" data-test="{{ '1' if run_is_test else '0' }}">
           {{ 'Move to Documents' if run_is_test else 'Move to Test runs' }}</button>

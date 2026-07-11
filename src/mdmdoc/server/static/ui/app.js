@@ -1200,7 +1200,49 @@ window.mdmdoc = (() => {
   }
   initActivityBadge();
 
+  /* ---------- consolidation: analyze a document & attach it (Stage 2) ---- */
+  function initConsolidationAttach() {
+    document.querySelectorAll("[data-attach-vkey]").forEach(box => {
+      const vkey = box.dataset.attachVkey, caseId = box.dataset.case;
+      const btn = box.querySelector(".attach-analyze");
+      const fileInput = box.querySelector(".attach-file");
+      const clsSel = box.querySelector(".attach-class");
+      const log = box.querySelector(".attach-log");
+      if (!btn) return;
+      const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
+      btn.onclick = async () => {
+        const file = fileInput.files[0];
+        if (!file) { say("pick a document first"); return; }
+        btn.disabled = true; log.hidden = false; log.textContent = "";
+        say("analyzing " + file.name + " …");
+        try {
+          const fd = new FormData();
+          fd.append("file", file);
+          fd.append("doc_class", clsSel.value);
+          fd.append("wait", "false");
+          const { job_id } = await api("/api/v1/check", { method: "POST", body: fd });
+          pollJob(job_id, say,
+            async (res) => {
+              say("analysis done — attaching run " + res.run_id);
+              const af = new FormData();
+              af.append("run_id", res.run_id);
+              af.append("confirm", "on");   // WARNING runs allowed from here
+              try {
+                await api(`/ui/consolidation/${caseId}/vendor/${vkey}/attach-run`,
+                          { method: "POST", body: af });
+                location.reload();
+              } catch (e) { say("attach failed: " + e.message); btn.disabled = false; }
+            },
+            (err) => { say("failed: " + err); btn.disabled = false; },
+            null);
+        } catch (e) { say("failed: " + e.message); btn.disabled = false; }
+      };
+    });
+  }
+  initConsolidationAttach();
+
   return { api, pollJob, initDropZone, initTplCompare, initValidRate, initGatePanel, initTeachType, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
-           initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun, initTestToggle };
+           initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun, initTestToggle,
+           initConsolidationAttach };
 })();

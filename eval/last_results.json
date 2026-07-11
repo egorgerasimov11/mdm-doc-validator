@@ -1,248 +1,27 @@
 {
- "ts": "2026-07-04T01:30:46Z",
- "tag": "clean-model-audit-v3",
+ "ts": "2026-07-10T11:30:27Z",
+ "tag": "tin-structural",
  "scenario": null,
  "rows": [
-  {
-   "file": "CERTIFICACION BANCARIA BANCOLOMBIA MARZO 2026.pdf",
-   "run_id": "07f0d54513f25da6",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": true,
-   "scenarios": [],
-   "ok": false,
-   "fields": {
-    "account_holder": false,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": false
-   }
-  },
-  {
-   "file": "MTRC Company information for vendors and customers.pdf",
-   "run_id": "26d2e55a19b584ed",
-   "doc_class": "bank",
-   "doc_type": "ap_document/supplier_letterhead",
-   "verdict": "NEED_MANUAL_REVIEW/ACCEPT",
-   "tier": "strong",
-   "type_ok": false,
-   "verdict_ok": false,
-   "scenarios": [],
-   "ok": false,
-   "fields": {
-    "account_holder": false,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": true
-   }
-  },
-  {
-   "file": "AES Bank Letter-10.9.25 Honorarium Donation from Dr. Clarke.pdf",
-   "run_id": "a0c5cbc35b7ac55b",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": true,
-   "scenarios": [],
-   "ok": true,
-   "fields": {
-    "account_holder": true,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": true
-   }
-  },
-  {
-   "file": "医师协会开户许可证（盖章）.pdf",
-   "run_id": "bbb53e9752541ca2",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "NEED_MANUAL_REVIEW/WARNING",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": false,
-   "scenarios": [],
-   "ok": false,
-   "fields": {
-    "account_holder": true,
-    "bank_name": false,
-    "iban": false,
-    "swift_bic": true,
-    "account_number": false
-   }
-  },
-  {
-   "file": "Bankbestätigung_DB_220623_ConSol Consulting&Solutions Software GmbH.pdf",
-   "run_id": "bdeacd3d08106f88",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": true,
-   "scenarios": [],
-   "ok": true,
-   "fields": {
-    "account_holder": true,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": true
-   }
-  },
-  {
-   "file": "Zajecka Banking Info LV.Nova.61.26.pdf",
-   "run_id": "bed86d7b98961e0a",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": true,
-   "scenarios": [],
-   "ok": true,
-   "fields": {
-    "account_holder": true,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": true
-   }
-  },
-  {
-   "file": "IMIMBH-Bankverbindungen 4er.pdf",
-   "run_id": "e4356657c4b8f033",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/WARNING",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": false,
-   "scenarios": [],
-   "ok": false,
-   "fields": {
-    "account_holder": true,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": false
-   }
-  },
-  {
-   "file": "2.招商通知-麻醉医师年会企业通知.pdf",
-   "run_id": "e80df335b899b334",
-   "doc_class": "bank",
-   "doc_type": "other/other",
-   "verdict": "NEED_MANUAL_REVIEW/NEED_MANUAL_REVIEW",
-   "tier": "strong",
-   "type_ok": true,
-   "verdict_ok": true,
-   "scenarios": [],
-   "ok": true,
-   "fields": {
-    "account_holder": true,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": true
-   }
-  },
-  {
-   "file": "890480239 certitifación bancaria bancolombia.pdf",
-   "run_id": "f4166b63a2b90639",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "NEED_MANUAL_REVIEW/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": false,
-   "scenarios": [],
-   "ok": false,
-   "fields": {
-    "account_holder": false,
-    "bank_name": false,
-    "iban": false,
-    "swift_bic": true,
-    "account_number": false
-   }
-  },
-  {
-   "file": "10.CERTIFICACION BANCARIA DAVIVIENDA CORRIENTE.pdf",
-   "run_id": "003034a81d88f858",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "WARNING/WARNING",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": true,
-   "scenarios": [],
-   "ok": true,
-   "fields": {
-    "account_holder": true,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": true
-   }
-  },
-  {
-   "file": "3ba4dbff673a3eef__Customer Welcome Packet - USD _1_.pdf",
-   "run_id": "3ba4dbff673a3eef",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": true,
-   "scenarios": [],
-   "ok": true,
-   "fields": {
-    "account_holder": true,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": true
-   }
-  },
-  {
-   "file": "Banking support.pdf",
-   "run_id": "a279976592a9c8ba",
-   "doc_class": "bank",
-   "doc_type": "bank_letter/bank_letter",
-   "verdict": "WARNING/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": false,
-   "scenarios": [],
-   "ok": false,
-   "fields": {
-    "account_holder": true,
-    "bank_name": true,
-    "iban": true,
-    "swift_bic": true,
-    "account_number": true
-   }
-  },
   {
    "file": "13-Denver 2026 W9.pdf",
    "run_id": "fe65fd5547742dfe",
    "doc_class": "w9",
    "doc_type": "w9/w9",
    "verdict": "ACCEPT/ACCEPT",
+   "verdict_direction": "",
    "tier": "strong",
    "type_ok": true,
    "verdict_ok": true,
    "scenarios": [],
    "ok": true,
    "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   },
+   "fields_lenient": {
     "line1_name": true,
     "line2_business_name": true,
     "line3_classification": true,
@@ -255,12 +34,19 @@
    "doc_class": "w9",
    "doc_type": "w9/w9",
    "verdict": "ACCEPT/ACCEPT",
+   "verdict_direction": "",
    "tier": "strong",
    "type_ok": true,
    "verdict_ok": true,
    "scenarios": [],
    "ok": true,
    "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   },
+   "fields_lenient": {
     "line1_name": true,
     "line2_business_name": true,
     "line3_classification": true,
@@ -273,12 +59,19 @@
    "doc_class": "w9",
    "doc_type": "w9/w9",
    "verdict": "ACCEPT/ACCEPT",
+   "verdict_direction": "",
    "tier": "fast",
    "type_ok": true,
    "verdict_ok": true,
    "scenarios": [],
    "ok": true,
    "fields": {
+    "line1_name": true,
+    "line2_business_name": true,
+    "line3_classification": true,
+    "tin": true
+   },
+   "fields_lenient": {
     "line1_name": true,
     "line2_business_name": true,
     "line3_classification": true,
@@ -291,86 +84,106 @@
    "doc_class": "w9",
    "doc_type": "w8/w8",
    "verdict": "NEED_MANUAL_REVIEW/NEED_MANUAL_REVIEW",
-   "tier": "fast",
+   "verdict_direction": "",
+   "tier": "strong",
    "type_ok": true,
    "verdict_ok": true,
    "scenarios": [],
    "ok": false,
    "fields": {
-    "line1_name": false,
-    "line2_business_name": true,
-    "line3_classification": false,
-    "tin": true
+    "legal_name": true,
+    "country_incorporation": true,
+    "chapter3_status": false,
+    "treaty_country": true
+   },
+   "fields_lenient": {
+    "legal_name": true,
+    "country_incorporation": true,
+    "chapter3_status": false,
+    "treaty_country": true
    }
   },
   {
    "file": "w9.pdf",
-   "run_id": "457d2745f549cba8",
+   "error": "[Errno 2] No such file or directory: '/Users/egor/Projects/mdm-doc-validator/rules/w9.yaml'",
+   "crash": true,
    "doc_class": "w9",
-   "doc_type": "w9/w9",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": true,
+   "doc_type": "CRASH/w9",
+   "verdict": "CRASH/ACCEPT",
+   "verdict_direction": "",
+   "type_ok": false,
+   "verdict_ok": false,
+   "ok": false,
    "scenarios": [],
-   "ok": true,
-   "fields": {
-    "line1_name": true,
-    "line2_business_name": true,
-    "line3_classification": true,
-    "tin": true
-   }
+   "fields": {},
+   "fields_lenient": {}
   },
   {
    "file": "AES2026 W9 Honorarium Donation from Dr. Clarke.pdf",
-   "run_id": "2e084d3edb89128c",
+   "error": "[Errno 2] No such file or directory: '/Users/egor/Projects/mdm-doc-validator/rules/w9.yaml'",
+   "crash": true,
    "doc_class": "w9",
-   "doc_type": "w9/w9",
-   "verdict": "ACCEPT/ACCEPT",
-   "tier": "fast",
-   "type_ok": true,
-   "verdict_ok": true,
+   "doc_type": "CRASH/w9",
+   "verdict": "CRASH/ACCEPT",
+   "verdict_direction": "",
+   "type_ok": false,
+   "verdict_ok": false,
+   "ok": false,
    "scenarios": [],
-   "ok": true,
-   "fields": {
-    "line1_name": true,
-    "line2_business_name": true,
-    "line3_classification": true,
-    "tin": true
-   }
+   "fields": {},
+   "fields_lenient": {}
   }
  ],
  "diff": {
   "improved": [],
-  "regressed": [],
+  "regressed": [
+   "w9.pdf",
+   "AES2026 W9 Honorarium Donation from Dr. Clarke.pdf"
+  ],
   "unchanged_wrong": [
-   "CERTIFICACION BANCARIA BANCOLOMBIA MARZO 2026.pdf",
-   "MTRC Company information for vendors and customers.pdf",
-   "医师协会开户许可证（盖章）.pdf",
-   "IMIMBH-Bankverbindungen 4er.pdf",
-   "890480239 certitifación bancaria bancolombia.pdf",
-   "Banking support.pdf",
    "2026 05 w8ben.pdf"
   ]
  },
  "metrics": {
-  "n": 18,
-  "doc_type_accuracy": 0.944,
-  "verdict_accuracy": 0.722,
+  "n": 6,
+  "n_scored": 4,
+  "crashes": 2,
+  "crash_rate": 0.333,
+  "skipped_missing": 0,
+  "doc_type_accuracy": 0.667,
+  "doc_type_accuracy_ci": [
+   0.3,
+   0.903
+  ],
+  "verdict_accuracy": 0.667,
+  "verdict_accuracy_ci": [
+   0.3,
+   0.903
+  ],
+  "unsafe_error_rate": 0.0,
+  "safe_disagreement_rate": 0.333,
+  "verdict_cost": 0.667,
   "json_valid_first_try": 1.0,
   "invoice_false_accept_rate": null,
   "fields": {
-   "bank.account_holder": 0.75,
-   "bank.account_number": 0.667,
-   "bank.bank_name": 0.833,
-   "bank.iban": 0.833,
-   "bank.swift_bic": 1.0,
-   "w9.line1_name": 0.833,
+   "w9.chapter3_status": 0.0,
+   "w9.country_incorporation": 1.0,
+   "w9.legal_name": 1.0,
+   "w9.line1_name": 1.0,
    "w9.line2_business_name": 1.0,
-   "w9.line3_classification": 0.833,
-   "w9.tin": 1.0
+   "w9.line3_classification": 1.0,
+   "w9.tin": 1.0,
+   "w9.treaty_country": 1.0
+  },
+  "fields_lenient": {
+   "w9.line1_name": 1.0,
+   "w9.line2_business_name": 1.0
   },
   "scenarios": {},
-  "leakage_count": 0
- }
+  "leakage_count": 1,
+  "precedent_relaxations": 0,
+  "precedent_relaxations_unconfirmed": 0
+ },
+ "gold_review": [],
+ "gold_staleness": []
 }

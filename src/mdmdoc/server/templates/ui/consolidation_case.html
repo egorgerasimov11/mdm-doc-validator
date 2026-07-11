@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — case {{ case.case_id }}{% endblock %}
+{% block content %}
+<h1>Consolidation case <code>{{ case.case_id }}</code></h1>
+<p class="meta"><a href="/ui/consolidation">← all cases</a> · created {{ case.created }}</p>
+
+{% if error %}<section><p class="bad">{{ error }}</p></section>{% endif %}
+
+<section>
+  <h2>1 · Business Partner template</h2>
+  <form method="post" action="/ui/consolidation/{{ case.case_id }}/template" enctype="multipart/form-data">
+    <p><input type="file" name="file" accept=".xlsx" required>
+       <button type="submit">Upload template</button></p>
+    <p><label><input type="checkbox" name="clear_existing">
+       clear existing vendor rows — start from a guaranteed-clean template</label>
+       <span class="hint">wipes data rows on every sheet (headers, formatting &amp; « Read Me » kept); your upload is never modified, you download a new copy</span></p>
+    {% if needs_confirm.replace_template %}
+    <p><label><input type="checkbox" name="confirm_replace"> replace the template and discard this case's consolidated output</label></p>
+    {% endif %}
+  </form>
+  {% if case.template %}
+  <p class="meta"><code>{{ case.template.orig_name }}</code> · uploaded {{ case.template.uploaded }}
+    {% if case.template.cleared %}· <span class="ok">cleared {{ case.template.cleared.rows }} row(s) across {{ case.template.cleared.sheets }} sheet(s)</span>{% endif %}
+    · existing vendors: {{ case.template.existing_names|length }}
+    · existing SOURCE_IDs: {{ case.template.existing_ids|join(", ") or "none" }}</p>
+  <p class="meta">rows in use:
+    {% for s, n in case.template.data_rows.items() %}{{ s.split(" - ")[0] }}×{{ n }} {% endfor %}</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>2 · Vendor request forms</h2>
+  <form method="post" action="/ui/consolidation/{{ case.case_id }}/extract" enctype="multipart/form-data">
+    <p><input type="file" name="file" accept=".xlsx,.xlsm" required>
+       <button type="submit">Extract</button>
+       <span class="hint">Americas / EU / APAC MDM vendor template (.xlsm/.xlsx)</span></p>
+  </form>
+
+  {% for v in vendors %}
+  <details {% if v.status == 'extracted' %}open{% endif %}>
+    <summary>
+      <strong>{{ v.label }}</strong>
+      <span class="tag">{{ v.kind }}{% if v.attached_run_id %} + doc{% endif %}</span>
+      <span class="tag {% if v.status == 'consolidated' %}ok{% elif v.status == 'error' %}bad{% endif %}">{{ v.status }}</span>
+      {% if v.unresolved %}<span class="tag bad">choose {{ v.unresolved|length }} field(s)</span>{% endif %}
+      <span class="meta">{{ v.profile.form_family }} · {{ v.profile.vendor_country or "?" }}
+        · rows: {% for s, n in v.rows_summary.items() %}{{ s.split(" - ")[0] }}×{{ n }} {% endfor %}</span>
+    </summary>
+
+    {% if v.errors %}<p class="bad">{% for e in v.errors %}{{ e }}<br>{% endfor %}</p>{% endif %}
+
+    <form method="post" action="/ui/consolidation/{{ case.case_id }}/vendor/{{ v.vkey }}/source-id">
+      <p><label>SOURCE_ID
+        <input name="source_id" value="{{ v.source_id }}" {% if v.status != 'extracted' %}disabled{% endif %}></label>
+        {% if v.status == 'extracted' %}<button type="submit">Save</button>{% endif %}
+        <span class="hint">ties this vendor's rows across all sheets during SAP import</span></p>
+    </form>
+
+    {# ---- 3 · attach a document (form vendors only) ---- #}
+    {% if v.kind == 'form' %}
+    <div class="card" style="margin:8px 0">
+      <h3 style="margin:0 0 6px">3 · Verify bank data against a document</h3>
+      {% if not v.attached_run_id %}
+        {% if v.status == 'extracted' %}
+        <form method="post" action="/ui/consolidation/{{ case.case_id }}/vendor/{{ v.vkey }}/attach-run">
+          <p><label>Pick an analyzed document:
+            <select name="run_id" required>
+              <option value="">—</option>
+              {% for c in candidates %}<option value="{{ c.run_id }}">{{ c.label }} · {{ c.doc_class }} · {{ c.verdict }}</option>{% endfor %}
+            </select></label>
+            <label class="meta"><input type="checkbox" name="confirm"> use WARNING run</label>
+            <button type="submit">Attach</button></p>
+        </form>
+        <div data-attach-vkey="{{ v.vkey }}" data-case="{{ case.case_id }}">
+          <p class="meta">…or analyze a new document now:
+            <input type="file" class="attach-file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff">
+            <select class="attach-class"><option value="auto">auto</option><option value="bank">bank</option><option value="w9">W-9</option></select>
+            <button type="button" class="attach-analyze">Analyze &amp; attach</button></p>
+          <pre class="attach-log" hidden></pre>
+        </div>
+        <span class="hint">the document is authoritative for bank fields; if it disagrees with the form you pick the final value below</span>
+        {% endif %}
+      {% else %}
+        <p class="meta">Attached: <code>{{ v.merge.doc_label }}</code> · {{ v.merge.doc_class }} · {{ v.merge.verdict }}
+          {% if v.status == 'extracted' %}
+          <form method="post" action="/ui/consolidation/{{ case.case_id }}/vendor/{{ v.vkey }}/detach" style="display:inline">
+            <button type="submit" title="remove the document, keep the form only">detach</button></form>
+          {% endif %}</p>
+
+        {% if v.merge.cross_check %}
+        <table class="data-table">
+          <tr><th>field</th><th>form</th><th>document</th><th>status</th></tr>
+          {% for r in v.merge.cross_check %}
+          <tr>
+            <td class="meta">{{ r.field }}</td>
+            <td>{{ r.form or "—" }}</td>
+            <td>{{ r.document or "—" }}</td>
+            <td>
+              {% if r.status == 'match' %}<span class="tag ok">match ✓</span>
+              {% elif r.status == 'MISMATCH' %}<span class="tag bad">mismatch</span>
+              {% elif r.status == 'document-only' %}<span class="tag">document fills blank</span>
+              {% elif r.status == 'form-only' %}<span class="tag">form only</span>
+              {% else %}<span class="tag">—</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% endif %}
+
+        {% if v.merge.ambiguous_fields and v.status == 'extracted' %}
+        <form method="post" action="/ui/consolidation/{{ case.case_id }}/vendor/{{ v.vkey }}/resolve">
+          <p class="meta">Choose the value to write for each field (document recommended):</p>
+          {% for key in v.merge.ambiguous_fields %}
+          <div class="tag-row">
+            <span class="meta" style="min-width:110px">{{ key }}</span>
+            {% for c in v.merge.candidates[key] %}
+            <label class="tag"><input type="radio" name="choice_{{ key }}" value="{{ c.source }}"
+              {% if c.chosen %}checked{% endif %}> {{ c.label }}: <code>{{ c.display }}</code></label>
+            {% endfor %}
+          </div>
+          {% endfor %}
+          <p><button type="submit">Apply choice(s)</button></p>
+        </form>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if v.warnings %}
+    <p class="meta">Notes:</p>
+    <ul class="meta">{% for w in v.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    {% if v.coverage %}
+    <table class="data-table">
+      <tr><th>field</th><th>value</th><th>source</th><th>target</th><th>status</th></tr>
+      {% for c in v.coverage %}
+      <tr>
+        <td class="meta" style="white-space:nowrap">{{ c.label }}</td>
+        <td>{{ c.value or "—" }}</td>
+        <td class="meta"><code>{{ c.source_ref }}</code></td>
+        <td class="meta">{{ c.target }}</td>
+        <td>
+          {% if c.status == 'uploaded' %}<span class="tag ok">uploaded ✓</span>
+          {% elif c.status == 'audit_only_by_design' %}<span class="tag" title="intentionally not uploaded; stays in the audit trail">audit-only</span>
+          {% elif c.status == 'blank_source' %}<span class="tag">blank</span>
+          {% else %}<span class="tag bad" title="value extracted but not present in the write plan — check before consolidating">not loaded ⚠</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </details>
+  {% endfor %}
+</section>
+
+<section>
+  <h2>4 · Consolidate</h2>
+  <form method="post" action="/ui/consolidation/{{ case.case_id }}/consolidate">
+    {% if needs_confirm.warnings %}
+    <p class="meta">Warnings that need your explicit confirm:</p>
+    <ul class="meta">{% for w in needs_confirm.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+    <p><label><input type="checkbox" name="confirm_warnings"> consolidate with {{ needs_confirm.warnings|length }} warning(s)</label></p>
+    {% endif %}
+    {% if needs_confirm.dups %}
+    <ul class="meta">{% for d in needs_confirm.dups %}<li class="bad">{{ d }}</li>{% endfor %}</ul>
+    <p><label><input type="checkbox" name="override_dup"> append anyway — this is intentionally a second entry for an existing vendor</label></p>
+    {% endif %}
+    <p><button type="submit" {% if not pending or not case.template %}disabled{% endif %}>
+      Consolidate {{ pending|length }} vendor(s) into the template</button>
+      <span class="hint">attaching a document is optional — you can consolidate straight from the form. Appends after the last used row; resolve any highlighted field choices first; verification report below must be green before download</span></p>
+    <p class="meta"><label><input type="checkbox" name="fast_mode"> fast mode — consolidate from the form(s) only, skip all verification</label>
+      <span class="hint">for form-only vendors (no document); writes the form data as-is without the 4 checks — download is allowed but unverified</span></p>
+  </form>
+</section>
+
+{% if report %}
+<section>
+  <h2>5 · Verification
+    {% if report.status == 'verified' %}<span class="tag ok">verified ✓</span>
+    {% elif report.status == 'skipped' %}<span class="tag">no checks (fast mode)</span>
+    {% else %}<span class="tag bad">BLOCKED</span>{% endif %}</h2>
+  <table>
+    <tr><th>pass</th><th>result</th></tr>
+    {% for p in report.passes %}
+    <tr>
+      <td class="meta">{{ p.pass }}{% if p.source_id %} · <code>{{ p.source_id }}</code>{% endif %}
+        {% if p.checked %}<span class="hint">({{ p.checked }} cells)</span>{% endif %}</td>
+      <td>{% if p.errors %}<span class="bad">{% for e in p.errors %}{{ e }}<br>{% endfor %}</span>
+          {% else %}<span class="ok">clean</span>{% if p.notes %} <span class="hint">{{ p.notes|join("; ") }}</span>{% endif %}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+{% if case.outputs %}
+<section>
+  <h2>6 · Outputs</h2>
+  <table>
+    <tr><th>file</th><th>base</th><th>vendors</th><th>verify</th><th>at</th></tr>
+    {% for o in case.outputs %}
+    <tr>
+      <td><code>{{ o.name }}</code></td>
+      <td class="meta">{{ o.base }}{% if o.cleared %} · cleared {{ o.cleared.rows }}r{% endif %}</td>
+      <td class="meta">{{ o.vendors|join(", ") }}</td>
+      <td>{% if o.verify_status == 'verified' %}<span class="tag ok">verified</span>
+          {% elif o.verify_status == 'skipped' %}<span class="tag">no checks</span>
+          {% else %}<span class="tag bad">blocked</span>{% endif %}</td>
+      <td class="meta">{{ o.ts }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if download %}
+  <p><a href="/ui/consolidation/{{ case.case_id }}/download"><button>Download {{ download.name }}</button></a></p>
+  {% else %}
+  <p class="meta">No verified output yet — download stays locked.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
+{% block script %}
+<script>if (window.mdmdoc && mdmdoc.initConsolidationAttach) mdmdoc.initConsolidationAttach();</script>
+{% endblock %}

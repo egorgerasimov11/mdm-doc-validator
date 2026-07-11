@@ -16,6 +16,7 @@
       <a href="/ui/rules" class="{{ 'current' if page == 'rules' }}">Rules</a>
       <a href="/ui/training" class="{{ 'current' if page == 'training' }}">Training</a>
       <a href="/ui/bulk" class="{{ 'current' if page == 'bulk' }}">Bulk</a>
+      {% if consol_enabled %}<a href="/ui/consolidation" class="{{ 'current' if page == 'consolidation' }}">Consolidation</a>{% endif %}
       <a href="/ui/activity" class="{{ 'current' if page == 'activity' }}">Activity<span id="activity-badge" class="badge" hidden></span></a>
       <a href="/ui/debug" class="{{ 'current' if page == 'debug' }}">Debug</a>
       {% if request.app.state.addr_enabled %}<a href="/address/">Address</a>{% endif %}
