@@ -91,6 +91,14 @@ def cancellation_active() -> bool:
     return ctl is not None and ctl.cancel is not None
 
 
+def current_cancel() -> "threading.Event | None":
+    """The live cancel Event for this run, or None. Lets a blocking transport
+    (a streamed model call waiting on the first token) watch cancellation
+    directly instead of only between NDJSON lines."""
+    ctl = CURRENT.get()
+    return ctl.cancel if ctl is not None else None
+
+
 def override(key: str, default=None):
     """Per-run config override: run override > (caller falls back to env/default).
     Returns `default` when no control is active or the key is absent."""

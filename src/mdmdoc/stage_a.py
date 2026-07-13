@@ -189,7 +189,10 @@ def _pdf_page_texts(path: Path, cap: int) -> tuple[list, int]:
 
 
 def _quick_ocr(png: str) -> str:
+    from . import runctl
+    runctl.bail_if_canceled("ocr")          # honor Cancel between tesseract calls
     t = ocr.tesseract_text(png, "eng")
+    runctl.bail_if_canceled("ocr")          # ...and before the CJK retry (2nd pass)
     # CJK retry: a Japanese/Chinese page OCR'd in `eng` returns case-jumbled latin
     # junk that scores >= 8 realwords, so the old realword gate never fired and the
     # whole document was lost as garbage. Fire whenever the page is NOT confidently

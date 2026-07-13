@@ -26,6 +26,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import warnings
 
@@ -208,26 +209,66 @@ def _complete(url: str, body: dict, timeout: int, stream: bool) -> str:
         r.raise_for_status()
         d = r.json()
         return d.get("response", "") or d.get("thinking", "")
-    resp_acc, think_acc = [], []
-    # a streamed `timeout` is per-read (inactivity), not a total cap — keep the
-    # old total-wallclock ceiling with an explicit deadline
+
+    # Responsive cancel: iter_lines() BLOCKS until the first NDJSON line, and with
+    # keep_alive=0 the (vision) model cold-loads for tens of seconds before any
+    # token — so a per-line cancel check never runs during that wait and Cancel
+    # felt dead. Closing the socket from a watcher thread does NOT reliably
+    # interrupt a blocked recv(). So run the blocking read in a HELPER thread and
+    # let THIS (runctl-bound) thread poll the cancel Event: on cancel we abandon
+    # the call in ~0.25s and best-effort close the response so Ollama aborts.
+    cancel_ev = runctl.current_cancel()
     deadline = time.monotonic() + timeout if isinstance(timeout, (int, float)) else 0
-    with _SESSION.post(url, json={**body, "stream": True}, timeout=timeout, stream=True) as r:
-        r.raise_for_status()                       # a 400 still surfaces HERE, body readable
-        for line in r.iter_lines():
-            runctl.bail_if_canceled("model")       # raises -> `with` closes r -> Ollama stops
-            if deadline and time.monotonic() > deadline:
-                raise requests.Timeout(f"stream exceeded {timeout}s")
-            if not line:
-                continue
-            obj = json.loads(line)
-            if obj.get("response"):
-                resp_acc.append(obj["response"])
-            if obj.get("thinking"):
-                think_acc.append(obj["thinking"])
-            if obj.get("done"):
-                break
-    return "".join(resp_acc) or "".join(think_acc)
+    out: dict = {"text": None, "err": None, "resp": None, "canceled": False}
+    done = threading.Event()
+
+    def _pump():
+        resp_acc, think_acc = [], []
+        try:
+            with _SESSION.post(url, json={**body, "stream": True},
+                               timeout=timeout, stream=True) as r:
+                out["resp"] = r
+                r.raise_for_status()               # a 400 still surfaces, body readable
+                for line in r.iter_lines():
+                    if cancel_ev is not None and cancel_ev.is_set():
+                        out["canceled"] = True     # stop -> `with` closes r -> Ollama aborts
+                        break
+                    if deadline and time.monotonic() > deadline:
+                        raise requests.Timeout(f"stream exceeded {timeout}s")
+                    if not line:
+                        continue
+                    obj = json.loads(line)
+                    if obj.get("response"):
+                        resp_acc.append(obj["response"])
+                    if obj.get("thinking"):
+                        think_acc.append(obj["thinking"])
+                    if obj.get("done"):
+                        break
+            out["text"] = "".join(resp_acc) or "".join(think_acc)
+        except Exception as e:                     # noqa: BLE001 — surfaced to caller
+            out["err"] = e
+        finally:
+            done.set()
+
+    if cancel_ev is None:                          # eval/CLI: no cancel plane, run inline
+        _pump()
+    else:
+        threading.Thread(target=_pump, daemon=True).start()
+        while not done.wait(0.25):
+            if cancel_ev.is_set():
+                try:                               # unblock the socket so Ollama aborts
+                    if out.get("resp") is not None:
+                        out["resp"].close()
+                except Exception:
+                    pass
+                raise runctl.CheckCanceled("canceled during model call")
+    # a cancel observed inside the pump (fast/local models finish before the poll)
+    # must surface as a cancel, never as a partial/empty result the retry loop eats
+    if out["canceled"] or (cancel_ev is not None and cancel_ev.is_set()):
+        raise runctl.CheckCanceled("canceled during model call")
+    if out["err"] is not None:
+        raise out["err"]
+    return out["text"] or ""
 
 
 def generate(role_or_model: str, prompt: str, system: str | None = None,

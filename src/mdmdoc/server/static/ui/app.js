@@ -3,9 +3,26 @@ window.mdmdoc = (() => {
   const tokenMeta = document.querySelector('meta[name="mdmdoc-token"]');
   const TOKEN = tokenMeta ? tokenMeta.content : "";
 
+  // "action accepted" feedback: pop a green ✓ over a button (see app.css .flash-ok)
+  function flashOk(el) {
+    if (!el || !el.classList) return;
+    el.classList.remove("flash-ok");
+    void el.offsetWidth;                 // reflow so the animation restarts each time
+    el.classList.add("flash-ok");
+    setTimeout(() => el.classList.remove("flash-ok"), 900);
+  }
+  // remember the last button/control the operator clicked, so a successful action
+  // fired from its handler can flash IT — universal, no per-handler wiring needed
+  let _lastActionEl = null;
+  document.addEventListener("click", (e) => {
+    const el = e.target && e.target.closest && e.target.closest("button, .btn, summary");
+    if (el) _lastActionEl = el;
+  }, true);
+
   async function api(path, opts = {}) {
     opts.headers = Object.assign({}, opts.headers);
     if (TOKEN) opts.headers["Authorization"] = "Bearer " + TOKEN;
+    const btn = _lastActionEl;           // capture before the await (may change during)
     const r = await fetch(path, opts);
     const ct = r.headers.get("content-type") || "";
     const body = ct.includes("json") ? await r.json() : await r.text();
@@ -13,6 +30,9 @@ window.mdmdoc = (() => {
       const msg = body && body.error ? body.error.message : (typeof body === "string" ? body : r.statusText);
       throw new Error(msg);
     }
+    // any mutating call that SUCCEEDED = the operator's action was accepted -> ✓
+    const method = (opts.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") flashOk(btn);
     return body;
   }
 
@@ -509,8 +529,11 @@ window.mdmdoc = (() => {
         goldBtn.disabled = true;
         try {
           await api(`/api/v1/runs/${goldBtn.dataset.run}/confirm-gold`, { method: "POST" });
-          window.location.href = `/ui/runs/${goldBtn.dataset.run}?flash=` +
-            encodeURIComponent("saved as a gold case — operator confirmed ✓");
+          // api() already popped the ✓ on this button — let it play before we leave
+          setTimeout(() => {
+            window.location.href = `/ui/runs/${goldBtn.dataset.run}?flash=` +
+              encodeURIComponent("saved as a gold case — operator confirmed ✓");
+          }, 600);
         } catch (e) { goldBtn.textContent = "ERROR: " + e.message; goldBtn.disabled = false; }
       };
     }
@@ -1496,7 +1519,7 @@ window.mdmdoc = (() => {
   }
   initConsolidationAttach();
 
-  return { api, pollJob, initDropZone, initTplCompare, initValidRate, initGatePanel, initTeachType, initArtifacts, initReview, initTraining,
+  return { api, flashOk, pollJob, initDropZone, initTplCompare, initValidRate, initGatePanel, initTeachType, initArtifacts, initReview, initTraining,
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
            initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun, initTestToggle,
            initConsolidationAttach, initDefaults, initTagsAdmin, initActivity, initActivityJobs };

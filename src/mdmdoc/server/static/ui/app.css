@@ -245,3 +245,25 @@ summary { font-size: 13px; color: var(--secondary); cursor: pointer; }
 /* the feed's "+ tag" popover is compact and right-aligned, unlike the wide run-page menus */
 #act-list .menu-body { min-width: 190px; left: auto; right: 0; }
 #act-list .menu-item { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+
+/* action-accepted feedback: a green ✓ pops over any button whose action
+   (a mutating api call, or a copy) just succeeded — see mdmdoc.flashOk / api() */
+@keyframes mdmdoc-ok-pop {
+  0%   { transform: scale(.5); opacity: 0; }
+  35%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 0; }
+}
+.flash-ok { position: relative; }
+.flash-ok::after {
+  content: "✓";
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #16a34a; font-weight: 800; font-size: 1.25em; line-height: 1;
+  background: rgba(22, 163, 74, .14);
+  border-radius: inherit;
+  pointer-events: none;
+  animation: mdmdoc-ok-pop .85s ease-out forwards;
+}
+@media (prefers-color-scheme: dark) {
+  .flash-ok::after { color: #4ade80; background: rgba(74, 222, 128, .16); }
+}
