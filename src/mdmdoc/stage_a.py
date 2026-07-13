@@ -74,7 +74,12 @@ SIGNATURE_PROMPT = (
     "signature even if you cannot prove it is original ink — then say "
     "'signature-like mark present; wet/original cannot be confirmed from a scan' in "
     "evidence. A DocuSign/Adobe-Sign box with a typed name is an ELECTRONIC signature: "
-    "handwritten_signature=false, but mention it in evidence. A REGULATOR watermark or "
+    "handwritten_signature=false, but mention it in evidence. A red/vermilion East-Asian "
+    "COMPANY SEAL — a Japanese 角印 (square) or 丸印 (round) hanko/inkan, or a Chinese/"
+    "Korean chop — counts as stamp=true EVEN when it overlaps printed text or sits next "
+    "to the company name rather than on a signature line; the ink color is typically red. "
+    "Do NOT confuse it with a printed monochrome company LOGO or letterhead graphic "
+    "(that is stamp=false). A REGULATOR watermark or "
     "margin stamp (e.g. 'VIGILADO Superintendencia Financiera') is NOT a signature "
     "stamp: stamp=false, mention it in evidence. Return strict JSON: "
     '{"handwritten_signature": true/false, "stamp": true/false, '
@@ -185,10 +190,15 @@ def _pdf_page_texts(path: Path, cap: int) -> tuple[list, int]:
 
 def _quick_ocr(png: str) -> str:
     t = ocr.tesseract_text(png, "eng")
-    if ocr.realword_count(t) < 8:
+    # CJK retry: a Japanese/Chinese page OCR'd in `eng` returns case-jumbled latin
+    # junk that scores >= 8 realwords, so the old realword gate never fired and the
+    # whole document was lost as garbage. Fire whenever the page is NOT confidently
+    # English, and adopt the CJK read only when it truly recovered East-Asian
+    # script (collapsing the spaces tesseract inserts between CJK glyphs).
+    if ocr.have_cjk() and not ocr.english_confident(t):
         t2 = ocr.tesseract_text(png, ocr.cjk_lang())
-        if len(t2.strip()) > len(t.strip()):
-            t = t2
+        if ocr.cjk_char_count(t2) >= 4:
+            t = ocr.collapse_cjk_spaces(t2)
     return t
 
 
@@ -209,12 +219,21 @@ def _osd_rotation(png_path: str) -> tuple[int, float]:
         return 0, 0.0
 
 
+def _orientation_score(text: str) -> int:
+    """Legibility of an OCR read, orientation-agnostic across scripts. realword_count
+    is LATIN-ONLY, so a correctly-oriented CJK page scores ~0 and would be mistaken
+    for noise — then brute-force rotation flips the page hunting latin junk (real
+    case: an upright Japanese letter got rotated 180° into garbage). Count recovered
+    CJK glyphs too, so the right-way-up page wins whatever the script."""
+    return ocr.realword_count(text) + ocr.cjk_char_count(text)
+
+
 def _best_rotation(png_path: str, base_text: str) -> tuple[int, str]:
     """Photos come in sideways. OSD detects the orientation; a sideways page
     still yields plenty of GARBAGE pseudo-words, so word counts can't veto a
     confident OSD verdict — apply it directly. Brute-force 90/180/270 only when
     OSD is unsure and the page reads as noise."""
-    base_n = ocr.realword_count(base_text)
+    base_n = _orientation_score(base_text)
     p = Path(png_path)
     osd, conf = _osd_rotation(png_path)
     if osd and conf >= 2.0:
@@ -232,7 +251,7 @@ def _best_rotation(png_path: str, base_text: str) -> tuple[int, str]:
             q = p.with_name(f"{p.stem}.r{rot}.png")
             Image.open(p).rotate(-rot, expand=True).save(q)
             t = _quick_ocr(str(q))
-            n = ocr.realword_count(t)
+            n = _orientation_score(t)
             if n > best_n:
                 best_rot, best_text, best_n = rot, t, n
         except Exception:
@@ -724,6 +743,15 @@ def signature_probe(path: Path, raw: RawDoc, render_dir: Path) -> None:
                 }
             return
         positive = pos_n > neg_n                    # TIE -> negative (safe)
+        # A company seal (Japanese 角印/丸印, common on Asian bank forms) is placed
+        # anywhere on the page — NOT on the signature line the band crops target — so
+        # the band reads legitimately come back negative while the full-PAGE read sees
+        # the red stamp. Don't let signature-line negatives bury a genuine page-level
+        # stamp on a bank document (real case: Lilycolor 角印 — page=pos-stamp, band/
+        # band_hi=neg -> 1v2 tie-to-negative -> wrongly "unsigned"). The regulator-
+        # watermark false positive is still filtered downstream in _resolve_signature.
+        if raw.doc_class == "bank" and votes.get("page") == "pos-stamp":
+            positive = True
         contested = pos_n >= 1 and neg_n >= 1
         # the decisive object: first positive probe when positive, else last usable
         decisive = None
@@ -936,8 +964,15 @@ def perceive(path: Path, doc_class: str, render_dir: Path, use_vision: bool = Tr
         return raw
 
     if not raw.has_text_layer and not raw.editable and ext not in config.EMAIL_EXTS:
-        # prefer the richer transcription as primary text; keep both for regex
-        if ocr.realword_count(raw.vision_text) >= ocr.realword_count(raw.tesseract_text):
+        # prefer the richer transcription as primary text; keep both for regex.
+        # CJK-aware: realword_count is latin-only, so a clean CJK tesseract read
+        # scores ~0 and would lose to a latin-garbled vision transcription — when
+        # the OCR recovered real East-Asian script the vision engine missed, keep it.
+        t_cjk = ocr.cjk_char_count(raw.tesseract_text)
+        v_cjk = ocr.cjk_char_count(raw.vision_text)
+        if t_cjk >= 8 and t_cjk > v_cjk:
+            raw.raw_text = raw.tesseract_text
+        elif ocr.realword_count(raw.vision_text) >= ocr.realword_count(raw.tesseract_text):
             raw.raw_text = raw.vision_text or raw.tesseract_text
         else:
             raw.raw_text = raw.tesseract_text

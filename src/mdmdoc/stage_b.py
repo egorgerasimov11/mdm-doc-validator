@@ -452,7 +452,9 @@ def _fix_jp_form(ext: Extraction, raw: RawDoc) -> None:
     if ext.doc_class != "bank":
         return
     import unicodedata
-    text = unicodedata.normalize("NFKC", raw.raw_text or "")
+
+    from . import ocr
+    text = ocr.collapse_cjk_spaces(unicodedata.normalize("NFKC", raw.raw_text or ""))
     if "〒" not in text and "口座" not in text:
         return
     f = ext.fields
@@ -482,15 +484,69 @@ def _fix_jp_form(ext: Extraction, raw: RawDoc) -> None:
                 f"took …{new[-4:]} from the form-value stream instead; verify")
             f["account_number"] = new
             ext.provenance["account_number"] = {"source": "rule", "page": None}
+    # a real JP branch_code is the 3-4 digit 支店番号; the model often drops the
+    # branch NAME (新宿西口支店) into branch_code instead — relocate it to branch_name
+    # and clear the numeric field.
+    bc = str(f.get("branch_code") or "").strip()
+    if bc and not re.fullmatch(r"\d{3,4}", bc):
+        if "支店" in bc and not str(f.get("branch_name") or "").strip():
+            f["branch_name"] = bc
+            ext.provenance["branch_name"] = {"source": "model", "page": None}
+        f["branch_code"] = ""
+        ext.provenance.pop("branch_code", None)
+        _cross_note(ext, "branch_code cleared: value was the 支店名 branch name, not a numeric 支店番号")
     if not str(f.get("branch_code") or "").strip():
-        m = re.search(r"(?:支店(?:番号|コード|名)?|Branch\s*(?:Name/number|Number|No\.?|Code)?)"
+        m = re.search(r"(?:支店(?:番号|コード)|Branch\s*(?:Number|No\.?|Code))"
                       r"\s*[:：]?\s*0?(\d{3})\b", text)
         if m:
             f["branch_code"] = m.group(1)
             ext.provenance["branch_code"] = {"source": "ocr-regex", "page": None}
-    if "普通" in text and not str(f.get("account_type") or "").strip():
-        f["account_type"] = "普通口座 (ordinary account)"
-        ext.provenance["account_type"] = {"source": "ocr-regex", "page": None}
+    if not str(f.get("account_type") or "").strip():
+        if "普通" in text:
+            f["account_type"] = "普通口座 (ordinary account)"
+            ext.provenance["account_type"] = {"source": "ocr-regex", "page": None}
+        elif "当座" in text:
+            f["account_type"] = "当座預金 (current account)"
+            ext.provenance["account_type"] = {"source": "ocr-regex", "page": None}
+    # labeled-field backstops: OCR now recovers the Japanese labels, but the
+    # extractor model can still leave them empty on a busy form — fill (never
+    # overwrite) from the printed 銀行名 / 口座名義 / 支店名 labels.
+    if not str(f.get("bank_name") or "").strip():
+        m = re.search(r"(?:銀行名|金融機関名)\s*[:：]?\s*([^\n]+?)\s*$", text, re.M)
+        if m and "銀行" in m.group(1):
+            f["bank_name"] = m.group(1).strip()
+            ext.provenance["bank_name"] = {"source": "ocr-regex", "page": None}
+            _cross_note(ext, "bank name taken from the labeled 銀行名 field")
+    if not str(f.get("account_holder") or "").strip():
+        m = re.search(r"口座名義(?:人)?\s*[:：]?\s*([^\n]+)", text)
+        if m:
+            holder = re.sub(r"\s*(?:様|御中)\s*$", "", m.group(1).strip())
+            f["account_holder"] = holder
+            ext.provenance["account_holder"] = {"source": "ocr-regex", "page": None}
+            _cross_note(ext, "account holder taken from the labeled 口座名義 field")
+    # 支店名 is the branch NAME (新宿西口支店) — distinct from the 3-digit branch_code
+    # captured above; carried as a derived field outside BANK_KEYS (national_clearing
+    # pattern), so the model prompt and few-shot contract are unchanged.
+    if not str(f.get("branch_name") or "").strip():
+        m = re.search(r"支店名\s*[:：]?\s*([^\n]+?支店)", text)
+        if m:
+            f["branch_name"] = m.group(1).strip()
+            ext.provenance["branch_name"] = {"source": "ocr-regex", "page": None}
+            _cross_note(ext, "branch name taken from the labeled 支店名 field")
+    # On a JP vendor account-notice the 住所 line is the SENDER company's address —
+    # the bank block (銀行名/支店名) carries no address. The model tends to lift that
+    # 住所 into bank_address (real case: 東京都港区西新橋… is Lilycolor's HQ, not SMBC's).
+    # Clear a bank_address that is the company 住所, i.e. not sitting in the bank block.
+    ba = str(f.get("bank_address") or "").strip()
+    if ba and "住所" in text and "銀行名" in text:
+        apos = text.find(ba[:5])
+        near_bank = apos >= 0 and "銀行" in text[max(0, apos - 24):apos]
+        after_juusho = apos >= 0 and "住所" in text[max(0, apos - 24):apos]
+        if after_juusho and not near_bank:
+            f["bank_address"] = ""
+            ext.provenance.pop("bank_address", None)
+            _cross_note(ext, "bank_address cleared: the 住所 on this form is the sender "
+                             "company's address, not the bank's")
     if not str(f.get("bank_country") or "").strip():
         f["bank_country"] = "JP"
         ext.provenance["bank_country"] = {"source": "rule", "page": None}

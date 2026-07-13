@@ -150,3 +150,38 @@ def test_trail_persisted_and_scrubbed(monkeypatch, letter_pdf, tmp_path):
     stage_b._resolve_signature(ext, r)
     assert ext.signature_probe["trail"][0]["vote"] == "pos-hand"
     assert ext.signature_probe["probes_used"] == 1
+
+
+def test_page_stamp_decisive_for_bank(monkeypatch, letter_pdf, tmp_path):
+    """A red company seal (JP 角印) sits off the signature line: band reads NEG,
+    the full-PAGE read sees the stamp. For a bank doc that page-level stamp wins
+    over the signature-band negatives (real case: Lilycolor 1 stamp vs 2 neg)."""
+    r, fake = _run(monkeypatch, letter_pdf, tmp_path, [NEG, POS_STAMP, NEG])
+    assert fake.calls == 3                        # band, page, band_hi (E-A)
+    sp = r.signature_probe
+    assert sp["votes"]["page"] == "pos-stamp"
+    assert sp["stamp"] is True                    # elevated despite 1 pos vs 2 neg
+    assert sp["contested"] is True                # still flagged for the eye
+    ext = Extraction(doc_class="bank", doc_type="bank_letter")
+    ext.fields = {"signed": False}
+    stage_b._resolve_signature(ext, r)
+    assert ext.fields["signed"] is True
+    assert ext.fields["signature_kind"] == "stamp"
+
+
+def test_page_stamp_not_decisive_for_w9(monkeypatch, letter_pdf, tmp_path):
+    """The page-stamp elevation is bank-only — a stamp is not a W-9 signature."""
+    raw = _raw(letter_pdf, doc_class="w9")
+    r, _ = _run(monkeypatch, letter_pdf, tmp_path, [NEG, POS_STAMP, NEG], raw=raw)
+    assert r.signature_probe["stamp"] is False    # 1 pos vs 2 neg, no elevation
+
+
+def test_seal_label_without_visible_seal_stays_unsigned(monkeypatch, letter_pdf, tmp_path):
+    """Egor's decision: presence of the 印（角印でOK）label is NOT evidence — only a
+    vision-detected seal signs. Text says 印 but the probe sees nothing -> unsigned."""
+    raw = _raw(letter_pdf, text="口座名義 リリカラ株式会社オフィス\n印（角印でOK）\n")
+    r, _ = _run(monkeypatch, letter_pdf, tmp_path, [NEG, NEG], raw=raw)
+    ext = Extraction(doc_class="bank", doc_type="bank_letter")
+    ext.fields = {"signed": False}
+    stage_b._resolve_signature(ext, r)
+    assert ext.fields["signed"] is False

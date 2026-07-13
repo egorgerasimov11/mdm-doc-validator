@@ -28,10 +28,14 @@ an invoice page elsewhere in the packet does not make it an invoice.
 
 Field rules:
 - account_holder: the beneficiary/account OWNER name exactly as printed (a company or person).
+  On a Japanese form this is the 口座名義 field (e.g. リリカラ株式会社オフィス) — NOT the
+  addressee (宛) at the top and NOT the sender block: take the value labeled 口座名義.
 - account_type: the account name/type when labeled (e.g. "CHECKING ACCOUNT", "SAVINGS",
-  "DBS Business Multi-Currency Account", "普通口座" = ordinary account) —
-  this is NOT the holder; never put it into account_holder.
-- bank_name: full official bank name; bank_country: country of the BANK (name or ISO2) —
+  "DBS Business Multi-Currency Account", "普通"/"普通口座" = ordinary account,
+  "当座"/"当座預金" = current/checking account) — this is NOT the holder; never put it
+  into account_holder.
+- bank_name: full official bank name (Japanese label 銀行名 / 金融機関名, e.g. 三井住友銀行);
+  bank_country: country of the BANK (name or ISO2) —
   infer it from the bank's city when not printed (Wichita, KS -> US; 福岡県 -> JP).
   Regulator watermarks in the page margin (e.g. "VIGILADO Superintendencia Financiera
   de Colombia") are NOT the bank name.
@@ -51,13 +55,17 @@ Field rules:
   US letters often list TWO: "Bank ABA (standard)", "ACH routing" -> routing_aba;
   "Bank ABA (domestic wires)", "wire routing" -> routing_aba_wires. Extract BOTH,
   as separate fields — never merge or drop one.
-- branch_code: the bank branch number when labeled (支店 / Branch No / CAB), e.g. "258".
+- branch_code: the bank branch NUMBER when labeled (支店番号 / 支店コード / Branch No / CAB),
+  e.g. "258". The Japanese 支店名 field is the branch NAME (e.g. 新宿西口支店), not the code.
 - doc_date: the date PRINTED in the document body/header. File metadata or today's
   date is NOT a document date — "" when no date is visibly printed. For statements use
   the statement period (e.g. "01-Jun-2026 to 30-Jun-2026"); a DocuSign/e-signature
   timestamp counts as the signing date.
 - currency: if stated.
-- signed: true ONLY for a visible HANDWRITTEN signature or ink stamp. A typed name,
+- signed: true ONLY for a visible HANDWRITTEN signature or ink stamp. A red/vermilion
+  East-Asian company seal (Japanese 角印/丸印 hanko, or a Chinese/Korean chop) IS an ink
+  stamp -> signed=true, even when it overlaps printed text or sits by the company name;
+  the printed label 印（角印でOK）alone, with no actual seal, does NOT count. A typed name,
   title or contact block of a bank officer is NOT a signature -> signed=false and
   describe it in signature_evidence (e.g. "typed officer block"). A statement like
   "this is a computer generated confirmation and requires no signature" also means

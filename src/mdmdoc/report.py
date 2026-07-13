@@ -137,6 +137,7 @@ def _data_rows(pub: dict) -> list[tuple[str, str, str, str]]:
                 and _fmt(f.get("national_clearing")) != "—" else ""),
              "SAP Bank Key (CN/GB/AU/IN domestic)", "national_clearing"),
             ("Branch code", _fmt(f.get("branch_code")), "", "branch_code"),
+            ("Branch name", _fmt(f.get("branch_name")), "", "branch_name"),
             ("Currency", _fmt(f.get("currency")), "", "currency"),
             ("Document date", _fmt(f.get("doc_date"), empty="no visible document date"), "", "doc_date"),
             ("Signed/stamped", signed, "", "signed"),

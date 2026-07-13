@@ -26,9 +26,49 @@ RENDER_DPI = 300
 _WORD = re.compile(r"[A-Za-zÀ-ÿ]{2,}")
 _LATIN_LETTER = re.compile(r"[A-Za-zÀ-ÿ]")
 
+# CJK: Hiragana, Katakana, halfwidth Katakana, CJK Unified + Ext-A + compat.
+# Used to detect whether an OCR pass actually recovered East-Asian script — the
+# reliable signal the latin-only realword_count() is blind to (a Japanese page
+# OCR'd in `eng` returns latin junk that scores plenty of "real words").
+_CJK = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]")
+# common English function/field words — a cheap "this is confidently English"
+# gate so the CJK retry only fires on pages that do NOT look like plain English
+# (keeps the fast eng-only path for the overwhelmingly latin corpus).
+_EN_STOP = re.compile(
+    r"\b(the|and|of|to|for|with|this|is|are|please|dear|sincerely|account|bank|"
+    r"branch|address|date|name|number|company|payment|confirm|kindly|regards)\b",
+    re.IGNORECASE)
+
 
 def realword_count(text: str) -> int:
     return len(_WORD.findall(text or ""))
+
+
+def cjk_char_count(text: str) -> int:
+    return len(_CJK.findall(text or ""))
+
+
+def have_cjk() -> bool:
+    """True when tesseract has at least one East-Asian language pack installed."""
+    return any(l in _LANGS for l in ("kor", "jpn", "chi_sim", "chi_tra"))
+
+
+def english_confident(text: str) -> bool:
+    """A page whose text carries several distinct English function/field words is
+    confidently English — skip the CJK retry. A Japanese page OCR'd in `eng`
+    produces case-jumbled junk ("FatOii", "SSHEASRT") with none of these."""
+    return len({m.group(0).lower() for m in _EN_STOP.finditer(text or "")}) >= 3
+
+
+def collapse_cjk_spaces(text: str) -> str:
+    """tesseract inserts a space between adjacent CJK glyphs ("銀行 名 : 三井 住友
+    銀行", "口座 名 義"): rejoin runs of CJK so downstream label regexes and the
+    extractor model see natural Japanese. No-op for latin text (no CJK adjacency);
+    spaces around non-CJK tokens (digits after 普通, colons) are preserved."""
+    return re.sub(r"(?<=[぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ])"
+                  r"[ \t]+"
+                  r"(?=[぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ])",
+                  "", text or "")
 
 
 def text_layer_garbage(texts: list[str]) -> bool:
@@ -296,14 +336,18 @@ def read_document(path: Path, render_dir: Path, max_pages: int = 2) -> dict:
         images = render_pdf_pages(path, render_dir, max_pages=max_pages)
     else:
         images = [prepare_image(path, render_dir)]
-    has_cjk = any(l in _LANGS for l in ("kor", "jpn", "chi_sim"))
+    can_cjk = have_cjk()
     parts = []
     for im in images:
         t = tesseract_text(im, "eng")
-        if has_cjk and realword_count(t) < 8:           # likely non-Latin -> CJK retry
+        # A Japanese page OCR'd in `eng` returns latin junk that scores >= 8
+        # realwords, so the old count gate never fired. Retry with the CJK model
+        # whenever the page is NOT confidently English, and keep the CJK read only
+        # when it actually recovered East-Asian script.
+        if can_cjk and not english_confident(t):
             t2 = tesseract_text(im, cjk_lang())
-            if len(t2.strip()) > len(t.strip()):
-                t = t2
+            if cjk_char_count(t2) >= 4:
+                t = collapse_cjk_spaces(t2)
         parts.append(t)
     ocr = "\n".join(parts).strip()
     return {"ocr_text": ocr, "regex": regex_fields(ocr), "images": images, "locked": False}

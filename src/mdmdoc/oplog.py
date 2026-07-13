@@ -34,6 +34,16 @@ def _path():
     return config.DATASET_DIR / PATH_NAME
 
 
+def _safe_id(tok: str) -> str:
+    """An opaque hex id (job_id = uuid4().hex[:12]) that comes out ALL-DIGIT and
+    11-18 chars long collides with the strict numeric leak pattern (\\b\\d{11,18}\\b)
+    in the eval leak sweep — a false positive on an id, not sensitive data. Prefix a
+    stable non-digit marker so the token can never be read as a bare long number.
+    Deterministic: job-start and job-end share the same job.id, so they still pair."""
+    t = str(tok)
+    return ("x" + t) if (t.isdigit() and 11 <= len(t) <= 18) else t
+
+
 def log(action: str, run_id: str = "", rule_id: str = "", doc_class: str = "",
         job_id: str = "", detail: str = "") -> dict:
     # `op` uniquely names this row so undo can target it — ts alone collides
@@ -47,7 +57,7 @@ def log(action: str, run_id: str = "", rule_id: str = "", doc_class: str = "",
     if doc_class:
         row["doc_class"] = str(doc_class)[:8]
     if job_id:
-        row["job_id"] = str(job_id)[:16]
+        row["job_id"] = _safe_id(str(job_id)[:16])
     if detail:
         row["detail"] = str(detail)[:200]
     try:
