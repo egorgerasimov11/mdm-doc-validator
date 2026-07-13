@@ -485,21 +485,11 @@ window.mdmdoc = (() => {
     mdmdoc.showRunPanel = show;
   }
 
-  /* ---------- run page: mark valid + thumbs (D11) ------------------------ */
+  /* ---------- run page: rate + save gold + revise verdict (D11) ---------- */
   function initValidRate() {
-    const validBtn = document.getElementById("btn-valid");
-    if (validBtn) {
-      validBtn.onclick = async () => {
-        validBtn.disabled = true;
-        try {
-          const res = await api(`/api/v1/runs/${validBtn.dataset.run}/mark-valid`, { method: "POST" });
-          validBtn.textContent = "Marked valid ✓";
-          showChallenged(res.challenged || [], validBtn.dataset.class || "bank");
-          if (res.rerun_job_id) watchValidRerun(res.rerun_job_id);
-        } catch (e) { validBtn.textContent = "ERROR: " + e.message; validBtn.disabled = false; }
-      };
-    }
     const seg = document.getElementById("rate-seg");
+    const goldBtn = document.getElementById("btn-gold");
+    // 👍 / 👎 rating — a 👍 reveals the explicit "Save gold case" action
     if (seg) {
       seg.querySelectorAll("button").forEach(b => b.onclick = async () => {
         try {
@@ -509,7 +499,39 @@ window.mdmdoc = (() => {
           });
           seg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
           b.classList.add("active");
+          if (goldBtn) goldBtn.hidden = b.dataset.r !== "up";
         } catch (e) { /* non-fatal */ }
+      });
+    }
+    // Save gold case — keep-all confirm: no verdict opinion, no challenges, no retrain
+    if (goldBtn) {
+      goldBtn.onclick = async () => {
+        goldBtn.disabled = true;
+        try {
+          await api(`/api/v1/runs/${goldBtn.dataset.run}/confirm-gold`, { method: "POST" });
+          window.location.href = `/ui/runs/${goldBtn.dataset.run}?flash=` +
+            encodeURIComponent("saved as a gold case — operator confirmed ✓");
+        } catch (e) { goldBtn.textContent = "ERROR: " + e.message; goldBtn.disabled = false; }
+      };
+    }
+    // Revise ▾ → Revise verdict — pick the correct verdict; "I confirm" softens a stricter one
+    const rvForm = document.getElementById("revise-verdict-form");
+    if (rvForm) {
+      rvForm.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const btn = rvForm.querySelector("button[type=submit]");
+        btn.disabled = true;
+        try {
+          const res = await api(`/api/v1/runs/${rvForm.dataset.run}/revise-verdict`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              verdict: document.getElementById("verdict-pick").value,
+              confirmed: document.getElementById("verdict-confirm").checked,
+            }),
+          });
+          showChallenged(res.challenged || [], rvForm.dataset.class || "bank");
+          if (res.rerun_job_id) watchValidRerun(res.rerun_job_id);
+        } catch (e) { btn.textContent = "ERROR: " + e.message; btn.disabled = false; }
       });
     }
     // dispute-box "document is VALID" checkbox: fires mark-valid on propose
@@ -558,11 +580,11 @@ window.mdmdoc = (() => {
       anchor.parentNode.insertBefore(box, anchor);
     }
     if (!challenged.length) {
-      box.innerHTML = `<h2>Marked valid</h2><p class="meta">no rules were overridden — re-running to refresh the verdict…</p>`;
+      box.innerHTML = `<h2>Verdict revised</h2><p class="meta">no rules were overridden — re-running to refresh the verdict…</p>`;
       return;
     }
     box.innerHTML = `<h2>Challenged rules</h2>
-      <p class="meta">your valid-mark contradicts these rules — recorded in the challenge
+      <p class="meta">your verdict contradicts these rules — recorded in the challenge
       ledger; edit, reject or delete them (or leave them — the count stays visible on Approvals)</p>
       <ul class="timeline">` + challenged.map(c => `
       <li class="queue-row" data-rule="${c.id}">
@@ -606,13 +628,13 @@ window.mdmdoc = (() => {
   function watchValidRerun(jobId) {
     const log = document.getElementById("job-log");
     const say = (l) => { if (log) { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; } };
-    say("re-running after mark-valid…");
+    say("re-running to apply your change…");
     pollJob(jobId,
       say,
       (result) => {
         const rid = result && result.run_id;
         if (rid) window.location.href = `/ui/runs/${rid}?flash=` +
-          encodeURIComponent("re-run after your valid-mark — this is the fresh verdict");
+          encodeURIComponent("re-run after your revision — this is the fresh verdict");
         else window.location.reload();
       },
       (err) => say("re-run failed (" + err + ") — press Re-analyze to retry"));
@@ -1154,7 +1176,7 @@ window.mdmdoc = (() => {
       } else if (res.kind === "extraction") {
         route.hidden = false;
         route.innerHTML = (res.hint || "a field was read wrong — fix it in the teach flow") +
-          ' <a href="' + (res.route || ("/ui/runs/" + go.dataset.run + "/review")) + '">Correct — teach the model →</a>';
+          ' <a href="' + (res.route || ("/ui/runs/" + go.dataset.run + "/review")) + '">Revise fields →</a>';
       } else if (res.kind === "needs_code") {
         route.hidden = false;
         route.textContent = (res.hint || "new predicate logic is required") +

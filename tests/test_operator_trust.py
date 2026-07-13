@@ -335,3 +335,75 @@ def test_inline_edit_block_roundtrip(env):
     assert client.post("/api/v1/rules/bank/edit",
                        json={"rule_id": "BNK-T02", "block": "not: [valid"}).status_code == 400
     assert client.get("/api/v1/rules/bank/block/BNK-NOPE").status_code == 404
+
+
+# ------------------------------------------------ UI redesign: gold + revise --
+def test_confirm_gold_is_keep_all_no_challenges_no_verdict_pin(env):
+    """👍 → Save gold case: a confirmed keep-all label (no field diff), NO verdict
+    opinion (teach_only, so a gated NEED_MANUAL_REVIEW is never pinned as gold),
+    and NO rule challenges filed."""
+    from fastapi.testclient import TestClient
+
+    from mdmdoc import challenges, dataset
+    from mdmdoc.server.app import create_app
+    rid = _mk_run(
+        pending=[{"id": "BNK-T02", "name": "always note (test)", "source": "", "tier": "corp"}],
+        findings=[{"rule_id": "BNK-T01", "severity": "CRITICAL",
+                   "verdict_effect": "REJECT", "message": "test reject"}])
+    r = TestClient(create_app("full")).post(f"/api/v1/runs/{rid}/confirm-gold")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["confirmed_gold"] is True
+    assert body["model_diff"] == {}                       # keep-all: nothing changed
+    lab = next(l for l in dataset.load_labels() if l["doc_sha256"] == rid)
+    assert lab["confirmed"] is True
+    assert lab["verdict_gold"] == ""                      # gated verdict NOT pinned
+    assert lab["verdict_confirmed"] is False
+    assert lab["model_predicted"]["fields_diff"] == {}
+    assert challenges.counts() == {}                      # no rules challenged
+
+
+def test_confirm_gold_is_undoable(env):
+    from fastapi.testclient import TestClient
+
+    from mdmdoc import dataset, oplog, undo
+    from mdmdoc.server.app import create_app
+    rid = _mk_run()
+    client = TestClient(create_app("full"))
+    assert client.post(f"/api/v1/runs/{rid}/confirm-gold").status_code == 200
+    assert any(l["doc_sha256"] == rid for l in dataset.load_labels())
+    op = next(r for r in oplog.recent(actions=("confirm-gold",)))["op"]
+    undo.perform(op)
+    assert not any(l["doc_sha256"] == rid for l in dataset.load_labels())
+
+
+def test_revise_verdict_records_chosen_verdict_and_challenges(env):
+    """Revise ▾ → Revise verdict: records the CHOSEN verdict as a confirmed
+    precedent and challenges every rule that disagrees (generalizes Mark valid)."""
+    from fastapi.testclient import TestClient
+
+    from mdmdoc import challenges, dataset
+    from mdmdoc.server.app import create_app
+    rid = _mk_run(
+        pending=[{"id": "BNK-T02", "name": "always note (test)", "source": "", "tier": "corp"}],
+        findings=[{"rule_id": "BNK-T01", "severity": "CRITICAL",
+                   "verdict_effect": "REJECT", "message": "test reject"}])
+    r = TestClient(create_app("full")).post(
+        f"/api/v1/runs/{rid}/revise-verdict", json={"verdict": "WARNING", "confirmed": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["revised_verdict"] == "WARNING"
+    assert {c["id"] for c in body["challenged"]} == {"BNK-T01", "BNK-T02"}
+    lab = next(l for l in dataset.load_labels() if l["doc_sha256"] == rid)
+    assert lab["verdict_gold"] == "WARNING" and lab["verdict_confirmed"] is True
+    assert challenges.counts() == {"BNK-T01": 1, "BNK-T02": 1}
+
+
+def test_revise_verdict_rejects_unknown_verdict(env):
+    from fastapi.testclient import TestClient
+
+    from mdmdoc.server.app import create_app
+    rid = _mk_run()
+    r = TestClient(create_app("full")).post(
+        f"/api/v1/runs/{rid}/revise-verdict", json={"verdict": "MAYBE"})
+    assert r.status_code == 400

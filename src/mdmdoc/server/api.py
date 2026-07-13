@@ -1026,23 +1026,19 @@ def pattern_study(body: dict | None = None) -> "JSONResponse":
     return JSONResponse({"job_id": job.id}, status_code=202)
 
 
-@router_teach.post("/runs/{run_id}/mark-valid", tags=["teach"])
-def mark_valid(run_id: str) -> dict:
-    """One-click 'this document is VALID' (D11c + E4): a confirmed ACCEPT label
-    (precedent sticks via the C11 relax gate, pattern memory learns the shape),
-    PLUS the operator-trust loop: every rule this judgement overrides — stricter
-    findings and the unapproved rules holding the gate — lands in the challenge
-    ledger for review, and the document re-runs in the background so the page
-    can show the flipped verdict without a manual Re-analyze."""
-    sub = ReviewSubmission(verdict_gold="ACCEPT", verdict_confirmed=True,
-                           retrain=False, notes="", scenarios=[])
-    try:
-        result = review_core.submit_review(run_id, sub.model_dump())
-    except review_core.RunNotFound:
-        raise api_error(404, "not_found", f"run {run_id} not found")
-    except ValueError as e:
-        raise api_error(400, "bad_request", str(e))
+_VERDICTS = ("ACCEPT", "WARNING", "NEED_MANUAL_REVIEW", "REJECT")
 
+
+def _apply_verdict_override(run_id: str, verdict: str, confirmed: bool) -> dict:
+    """Shared core of 'Revise verdict' (and legacy Mark valid): record a keep-all
+    label asserting `verdict` as the gold verdict (precedent sticks; the C11 relax
+    gate needs confirmed=True to SOFTEN a stricter machine verdict), file every
+    rule this verdict overrides — stricter findings + the unapproved rules holding
+    the gate — into the challenge ledger, and re-run so the page shows the flipped
+    verdict without a manual Re-analyze."""
+    sub = ReviewSubmission(verdict_gold=verdict, verdict_confirmed=confirmed,
+                           retrain=False, notes="", scenarios=[])
+    result = review_core.submit_review(run_id, sub.model_dump())
     from .. import challenges as _challenges, patterns
     from ..rules import engine as rules_engine
     rid = runstore.resolve_run(run_id) or run_id
@@ -1055,20 +1051,72 @@ def mark_valid(run_id: str) -> dict:
                  if isinstance(r, dict)}
     except Exception:
         known = {}
-    ids = set(patterns.overridden_rule_ids(findings, "ACCEPT"))
+    ids = set(patterns.overridden_rule_ids(findings, verdict))
     ids |= {str(p.get("id")) for p in (meta.get("pending_rules") or [])}
     challenged = []
     for cid in sorted(i for i in ids if i in known):   # real rules only
         r = known[cid]
         _challenges.record(cid, doc_class, rid, "valid-mark",
-                           note="operator marked the document valid")
+                           note=f"operator set the verdict to {verdict}")
         challenged.append({"id": cid, "name": str(r.get("name", "")),
                            "source": str(r.get("source", "") or ""),
                            "tier": str(r.get("tier", "") or "")})
+    rerun_job_id = _spawn_rerun(meta, doc_class, f"re-run after verdict → {verdict}")
+    return {**result, "challenged": challenged, "rerun_job_id": rerun_job_id}
 
-    rerun_job_id = _spawn_rerun(meta, doc_class, "re-run after mark-valid")
-    return {**result, "marked_valid": True, "challenged": challenged,
-            "rerun_job_id": rerun_job_id}
+
+@router_teach.post("/runs/{run_id}/mark-valid", tags=["teach"])
+def mark_valid(run_id: str) -> dict:
+    """Legacy one-click 'this document is VALID' = revise the verdict to a
+    confirmed ACCEPT (kept for the propose-a-fix 'document is VALID' checkbox)."""
+    try:
+        result = _apply_verdict_override(run_id, "ACCEPT", True)
+    except review_core.RunNotFound:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    return {**result, "marked_valid": True}
+
+
+@router_teach.post("/runs/{run_id}/revise-verdict", tags=["teach"])
+def revise_verdict(run_id: str, body: dict) -> dict:
+    """Revise ▾ → Revise verdict: the operator picks the CORRECT verdict when the
+    decision is wrong. Records it as a precedent and challenges any rule that
+    disagrees (see _apply_verdict_override). `confirmed` (the 'I confirm' box) is
+    the C11 opt-in required to SOFTEN a stricter machine verdict."""
+    verdict = str(body.get("verdict") or "").strip().upper()
+    if verdict not in _VERDICTS:
+        raise api_error(400, "bad_request",
+                        f"verdict must be one of {', '.join(_VERDICTS)}")
+    confirmed = bool(body.get("confirmed"))
+    try:
+        result = _apply_verdict_override(run_id, verdict, confirmed)
+    except review_core.RunNotFound:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    return {**result, "revised_verdict": verdict}
+
+
+@router_teach.post("/runs/{run_id}/confirm-gold", tags=["teach"])
+def confirm_gold(run_id: str) -> dict:
+    """Save a fully-correct run as a GOLD CASE (👍 → 'Save gold case'): a keep-all
+    confirmation label — every extracted field confirmed as-is, the doc type
+    confirmed — recorded as an 'operator confirmed ✓' precedent (pattern memory
+    learns the shape). Deliberately records NO verdict opinion (teach_only) so a
+    rule-GATED verdict like NEED_MANUAL_REVIEW is never pinned as gold and cannot
+    tighten future runs; files NO rule challenges; does NOT retrain. This is the
+    clean 'this run is right, remember it' action — contrast /mark-valid, which
+    asserts ACCEPT and challenges every overriding rule."""
+    sub = ReviewSubmission(teach_only=True, retrain=False,
+                           verdict_confirmed=False, notes="", scenarios=[])
+    try:
+        result = review_core.submit_review(run_id, sub.model_dump())
+    except review_core.RunNotFound:
+        raise api_error(404, "not_found", f"run {run_id} not found")
+    except ValueError as e:
+        raise api_error(400, "bad_request", str(e))
+    return {**result, "confirmed_gold": True}
 
 
 @router_teach.post("/runs/{run_id}/teach-type", tags=["teach"])

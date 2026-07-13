@@ -38,13 +38,37 @@
   {{ meta.duration_s }}s · {{ meta.ts }}{% if labeled %} · <span class="tag">labeled ✓</span>{% endif %}</p>
 
 <div class="actions">
-  <a class="btn" href="/ui/runs/{{ run_id }}/review"><strong>Correct</strong> — teach the model</a>
-  <button type="button" id="btn-valid" data-run="{{ run_id }}" data-class="{{ doc_class }}"
-          title="record a confirmed ACCEPT for this document: the precedent sticks, every overriding rule lands in the challenge review, and the document re-runs so the verdict flips right here">Mark valid ✓</button>
   <span class="seg" id="rate-seg" data-run="{{ run_id }}" title="rate this analysis — 👎 pushes the run to the top of the training queue">
     <button type="button" data-r="up" class="{{ 'active' if rating == 'up' }}">👍</button>
     <button type="button" data-r="down" class="{{ 'active' if rating == 'down' }}">👎</button>
   </span>
+  <button type="button" id="btn-gold" data-run="{{ run_id }}" {% if rating != 'up' %}hidden{% endif %}
+          title="save this run as a gold case: confirm every extracted field and the document type as-is (an 'operator confirmed ✓' precedent). Records no verdict opinion, files no rule challenges, no retrain.">Save gold case ✓</button>
+
+  <details class="menu" id="revise-menu">
+    <summary class="btn">Revise ▾</summary>
+    <div class="menu-body">
+      <div class="actions">
+        <a class="btn" href="/ui/runs/{{ run_id }}/review"><strong>Revise fields</strong></a>
+        <span class="hint">some extracted values are wrong — correct the field values and teach the model</span>
+      </div>
+      <div class="actions">
+        <form id="revise-verdict-form" data-run="{{ run_id }}" data-class="{{ doc_class }}"
+              style="display:flex;gap:.4em;align-items:center;flex-wrap:wrap;margin:0">
+          <strong>Revise verdict</strong>
+          <select id="verdict-pick" aria-label="correct verdict">
+            <option value="ACCEPT" {{ 'selected' if report.verdict == 'ACCEPT' }}>ACCEPT</option>
+            <option value="WARNING" {{ 'selected' if report.verdict == 'WARNING' }}>WARNING</option>
+            <option value="NEED_MANUAL_REVIEW" {{ 'selected' if report.verdict == 'NEED_MANUAL_REVIEW' }}>NEED_MANUAL_REVIEW</option>
+            <option value="REJECT" {{ 'selected' if report.verdict == 'REJECT' }}>REJECT</option>
+          </select>
+          <label class="meta"><input type="checkbox" id="verdict-confirm"> I confirm</label>
+          <button type="submit">Apply</button>
+        </form>
+        <span class="hint">the decision is wrong — record the correct verdict; any rule that disagrees goes to the challenge review. Tick “I confirm” to soften a stricter verdict.</span>
+      </div>
+    </div>
+  </details>
   <button type="button" id="btn-copy" data-run="{{ run_id }}">Copy report</button>
   <button type="button" id="btn-rerun" data-run="{{ run_id }}" data-class="{{ doc_class }}"
           title="run this document through the pipeline again — the verdict on this page was decided with the rules, models and settings as they stood at analysis time">Re-analyze</button>

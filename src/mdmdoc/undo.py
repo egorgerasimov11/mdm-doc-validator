@@ -30,14 +30,15 @@ class StaleState(UndoError):
 # for these rows only, and only while no undo row references them)
 UNDOABLE = ("rule-delete", "rule-approve", "rule-tier", "rule-save",
             "rule-restore", "rule-create",
-            "label", "mark-valid", "teach-type", "rating", "finding-vote")
+            "label", "mark-valid", "revise-verdict", "confirm-gold",
+            "teach-type", "rating", "finding-vote")
 
 # whole-file writers: any of these NEWER than a rule-save row means its
 # pre-write snapshot no longer represents "just before the latest change"
 _FILE_WRITERS = ("rule-save", "rule-tier", "rule-delete", "rule-restore",
                  "rule-create", "skill-upload")
 
-_LABEL_FAMILY = ("label", "mark-valid", "teach-type")
+_LABEL_FAMILY = ("label", "mark-valid", "revise-verdict", "confirm-gold", "teach-type")
 
 
 def _all_rows() -> list[dict]:
@@ -193,7 +194,7 @@ def _undo_label(row: dict, rows: list[dict]) -> dict:
     patterns.drop(run_id, removed.get("ts", ""))
     # challenges this valid-mark filed (E4) are taken back one by one
     retracted = []
-    if row.get("action") in ("mark-valid", "teach-type"):
+    if row.get("action") in ("mark-valid", "revise-verdict", "teach-type"):
         for ch in challenges.load():
             if ch.get("run_id") == run_id and ch.get("kind") == "valid-mark":
                 challenges.retract(ch.get("rule_id", ""), run_id,
@@ -272,6 +273,8 @@ _HANDLERS = {
     "rule-create": _undo_rule_created,
     "label": _undo_label,
     "mark-valid": _undo_label,
+    "revise-verdict": _undo_label,
+    "confirm-gold": _undo_label,
     "teach-type": _undo_label,
     "rating": _undo_rating,
     "finding-vote": _undo_finding_vote,
