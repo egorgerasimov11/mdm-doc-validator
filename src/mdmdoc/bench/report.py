@@ -221,8 +221,8 @@ def leaderboard_md(tag: str, table: dict, scored: dict, docs: list[manifest.Doc]
             continue
         lines.append(f"## slice: {sname}")
         lines.append("")
-        lines.append("| engine | docs | field recall (worst · macro) | entity recall (worst · macro) | CER | line recall | median lat | pass | worst doc |")
-        lines.append("|---|---|---|---|---|---|---|---|---|")
+        lines.append("| engine | docs | field recall (worst · macro) | hw-field recall (worst · macro) | entity recall (worst · macro) | CER | line recall | median lat | pass | worst doc |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
         ranked = sorted(engines.items(), key=lambda kv: (
             -(kv[1].get("field_recall_worst") or 0), -(kv[1].get("entity_recall_worst") or 0),
             kv[1].get("cer") if kv[1].get("cer") is not None else 9, kv[1].get("median_latency_s") or 0))
@@ -231,6 +231,7 @@ def leaderboard_md(tag: str, table: dict, scored: dict, docs: list[manifest.Doc]
             wname = next((d.name for d in docs if d.doc_id == worst), worst)
             lines.append(
                 f"| `{eid}` | {a['docs']} | {_fmt(a.get('field_recall_worst'), True)} · {_fmt(a.get('field_recall'), True)} "
+                f"| {_fmt(a.get('field_hw_recall_worst'), True)} · {_fmt(a.get('field_hw_recall'), True)} "
                 f"| {_fmt(a.get('entity_recall_worst'), True)} · {_fmt(a.get('entity_recall'), True)} "
                 f"| {_fmt(a.get('cer'))} | {_fmt(a.get('line_recall'), True)} | {_fmt(a.get('median_latency_s'))}s "
                 f"| {'✅' if a.get('pass') else '❌'} | {wname[:38]} |")

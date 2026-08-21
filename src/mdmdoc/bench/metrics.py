@@ -247,14 +247,38 @@ def _field_value_core(value: str) -> str:
     return re.sub(r"\s+", " ", v).strip(" -:—")
 
 
+_BRACKET_RE = re.compile(r"\[[^\]]*\]|\([^)]*(?:signature|stamp|seal|подпись|印|aláírás|firma|unterschrift)[^)]*\)",
+                         re.IGNORECASE)
+
+
+def _field_value_parts(value: str) -> list[str]:
+    """Page-text parts of a gold value: bracketed descriptions ([signature…], [aláírás])
+    are removed; ' + ' joins several items that are each checked separately."""
+    v = _BRACKET_RE.sub(" ", value)
+    parts = [p.strip(" +:;—-") for p in re.split(r"\s\+\s", v)]
+    return [p for p in parts if len(normalize(p, "loose")) >= 2]
+
+
 def _value_present(value: str, cand_base: str, cand_loose: str) -> bool:
-    vb = normalize(value).replace("\n", " ")
-    if not vb:
+    parts = _field_value_parts(value)
+    if not parts:
         return True
-    if vb in cand_base:
-        return True
-    vl = normalize(value, "loose")
-    return bool(vl) and vl in cand_loose
+    for part in parts:
+        cands = [part]
+        # a writer-added sub-label ("digital signature block: Digitally signed by …")
+        m = re.match(r"^([^\d:]{1,40}):\s+(.{3,})$", part)
+        if m and len(m.group(1).split()) <= 4:
+            cands.append(m.group(2))
+        ok = False
+        for c in cands:
+            vb = normalize(c).replace("\n", " ")
+            vl = normalize(c, "loose")
+            if (vb and vb in cand_base) or (vl and vl in cand_loose):
+                ok = True
+                break
+        if not ok:
+            return False
+    return True
 
 
 def field_value_recall(gold_fields: list[dict], cand_text: str) -> tuple[Recall, Recall]:
@@ -269,7 +293,7 @@ def field_value_recall(gold_fields: list[dict], cand_text: str) -> tuple[Recall,
     hmissing: list[str] = []
     for f in gold_fields or []:
         v = _field_value_core(str(f.get("value", "") or ""))
-        if len(normalize(v, "loose")) < 2:
+        if len(normalize(v, "loose")) < 2 or not _field_value_parts(v):
             continue
         ok = _value_present(v, cand_base, cand_loose)
         tot += 1
@@ -345,11 +369,17 @@ def aggregate_docs(docs: list[dict]) -> dict:
     docs = [d for d in docs if d]
     if not docs:
         return {}
+    def _eligible(d, key):
+        if d.get(key) is None:
+            return False
+        if key == "field_hw_recall":
+            return (d.get("field_hw_total") or 0) > 0      # only docs with handwritten fields
+        return True
     def macro(key):
-        vals = [d[key] for d in docs if d.get(key) is not None]
+        vals = [d[key] for d in docs if _eligible(d, key)]
         return round(sum(vals) / len(vals), 4) if vals else None
     def worst(key, lower_is_better=False):
-        vals = [(d[key], d.get("doc_id", "?")) for d in docs if d.get(key) is not None]
+        vals = [(d[key], d.get("doc_id", "?")) for d in docs if _eligible(d, key)]
         if not vals:
             return None, None
         v = max(vals) if lower_is_better else min(vals)
