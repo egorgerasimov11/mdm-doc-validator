@@ -195,14 +195,23 @@ def test_no_writes_outside_choke_points():
     # at build time; full values live only in the output workbook)
     # tags.py writes dataset/tags.json + tag_links.jsonl — operator tag names,
     # colors and "<kind>:<id>" entity links only, no document PII (like config.py)
+    # bench/* and extract/render.py (transcription benchmark, 2026-08-21) write ONLY
+    # under config.BENCH_DIR — gitignored and outside every leak sweep. By Egor's
+    # decision the benchmark stores FULL-value transcripts (gold + candidates) there;
+    # nothing from it is ever shipped. extract/engines.py only opens os.devnull for a
+    # worker's stderr.
     allowed = {"runstore.py", "modelfile.py", "evalrun.py", "dataset.py",
                "fewshot.py", "lora_export.py", "adoption.py", "rules_io.py",
                "rule_approvals.py", "config.py", "synth.py", "rule_stats.py",
                "webcheck.py", "skill_import.py", "patterns.py",
                "doctype_profiles.py", "casestore.py", "tags.py"}
+    bench_allowed = {"src/mdmdoc/bench", "src/mdmdoc/extract/render.py", "src/mdmdoc/extract/engines.py"}
     offenders = []
     for p in src.rglob("*.py"):
         if p.name in allowed:
+            continue
+        rel = p.relative_to(src.parents[1]).as_posix()
+        if any(rel == b or rel.startswith(b + "/") for b in bench_allowed):
             continue
         body = p.read_text()
         if re.search(r"write_text\(|open\([^)]*['\"]w", body):
