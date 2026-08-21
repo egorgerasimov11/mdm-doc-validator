@@ -231,6 +231,22 @@ def entity_recall(gold_text: str, cand_text: str) -> Recall:
 
 # ── field values ──────────────────────────────────────────────────────────────
 
+_CHECK_WORDS_RE = re.compile(
+    r"[☑☐✓✔✗✘□■▢▣]|\[\s*[xX ]?\s*\]|\b(?:un)?(?:marked|checked|ticked|selected)\b|\b(?:yes|no)\s*(?:box)?\b",
+    re.IGNORECASE)
+
+
+def _field_value_core(value: str) -> str:
+    """Checkbox-state phrasing is the gold writer's, not the page's: '☑ Italy' → 'Italy',
+    '☐ (unmarked)' → '' (skipped). Everything else is returned untouched."""
+    v = value.strip()
+    if not re.search(r"[☑☐✓✔✗✘□■▢▣]|\[\s*[xX ]?\s*\]|\b(?:un)?(?:marked|checked|ticked)\b", v, re.IGNORECASE):
+        return v
+    v = _CHECK_WORDS_RE.sub(" ", v)
+    v = re.sub(r"[()\[\]]", " ", v)
+    return re.sub(r"\s+", " ", v).strip(" -:—")
+
+
 def _value_present(value: str, cand_base: str, cand_loose: str) -> bool:
     vb = normalize(value).replace("\n", " ")
     if not vb:
@@ -252,8 +268,8 @@ def field_value_recall(gold_fields: list[dict], cand_text: str) -> tuple[Recall,
     missing: list[str] = []
     hmissing: list[str] = []
     for f in gold_fields or []:
-        v = str(f.get("value", "") or "").strip()
-        if len(normalize(v, "loose")) < 2 or v in ("☑", "☐", "[x]", "[ ]"):
+        v = _field_value_core(str(f.get("value", "") or ""))
+        if len(normalize(v, "loose")) < 2:
             continue
         ok = _value_present(v, cand_base, cand_loose)
         tot += 1
