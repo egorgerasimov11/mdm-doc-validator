@@ -29,7 +29,9 @@ _VOWELS = set("aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýāăą�
 _NUM_TOKEN = re.compile(r"^[+\-]?\d(?:[\d.,\-/:′″']*\d)?%?$|^\(?\d{2,4}\)?[\d\-. ]{3,}$")
 _MIXED_OK = re.compile(r"^(?:[A-Za-z]{1,3}\d{1,6}[A-Za-z]?|\d{1,6}(?:st|nd|rd|th|er|re|ª|º|[A-Za-z]))$")
 _UPPER_CODE = re.compile(r"^[A-Z0-9][A-Z0-9./-]{2,}$")
-# [CONST:plausibility_symbols] The ONE explicit symbol set. A character above U+007F
+# The ONE explicit symbol set. To be registered in tools/parity/constants.json under
+# the id plausibility_symbols (with the CONST marker) once the ABAP twin carries it —
+# see PARITY.md. A character above U+007F
 # that is NOT in here counts as a letter of some other script (CJK, Cyrillic, Arabic,
 # accented Latin…) — that is how this gate stays unicode-table-free and therefore
 # portable to ABAP 7.50, which has no character-category tables. Verified on the whole
