@@ -236,13 +236,20 @@ _CHECK_WORDS_RE = re.compile(
     re.IGNORECASE)
 
 
+_WRITER_PAREN_RE = re.compile(
+    r"\((?=[^)]*(?:\b(?:un)?(?:marked|checked|ticked|selected)\b|other boxes|not (?:marked|checked|selected|filled)|"
+    r"left blank|blank|empty|illegible|handwritten|printed))[^)]*\)", re.IGNORECASE)
+
+
 def _field_value_core(value: str) -> str:
     """Checkbox-state phrasing is the gold writer's, not the page's: '☑ Italy' → 'Italy',
-    '☐ (unmarked)' → '' (skipped). Everything else is returned untouched."""
+    '☐ (unmarked)' → '' (skipped), '☑ LLC (other boxes unmarked: …)' → 'LLC'.
+    Everything else is returned untouched."""
     v = value.strip()
     if not re.search(r"[☑☐✓✔✗✘□■▢▣]|\[\s*[xX ]?\s*\]|\b(?:un)?(?:marked|checked|ticked)\b", v, re.IGNORECASE):
         return v
-    v = _CHECK_WORDS_RE.sub(" ", v)
+    v = _WRITER_PAREN_RE.sub(" ", v)          # drop the writer's parenthetical first…
+    v = _CHECK_WORDS_RE.sub(" ", v)           # …then the checkbox glyphs/words
     v = re.sub(r"[()\[\]]", " ", v)
     return re.sub(r"\s+", " ", v).strip(" -:—")
 
@@ -265,6 +272,10 @@ def _value_present(value: str, cand_base: str, cand_loose: str) -> bool:
         return True
     for part in parts:
         cands = [part]
+        # a parenthetical the gold writer added ("☑ LLC (other boxes unmarked: …)")
+        bare = re.sub(r"\s*\([^)]*\)", " ", part).strip(" ,;:—-")
+        if bare and bare != part:
+            cands.append(bare)
         # a writer-added sub-label ("digital signature block: Digitally signed by …")
         m = re.match(r"^([^\d:]{1,40}):\s+(.{3,})$", part)
         if m and len(m.group(1).split()) <= 4:
