@@ -11,8 +11,8 @@ Presets (see PRESETS):
   v300   300 dpi RGB, no cap, JPEG
   g300   300 dpi grayscale + autocontrast, PNG — tesseract / Apple Vision
   q120   120 dpi grayscale PNG, no rotation  — survey & OSD
-  gold   150 dpi RGB PNG                    — the full-page image shown to Claude
-  gold300 300 dpi RGB PNG                   — the page the gold tiles are cut from
+  gold   150 dpi RGB JPEG q92               — the full-page image shown to Claude
+  gold300 300 dpi RGB JPEG q92              — the page the gold tiles are cut from
   ac     like v200 + photo fix (EXIF transpose, autocontrast)
 
 Model renders are JPEG on purpose: model_client._load_image_capped downsizes
@@ -55,8 +55,8 @@ PRESETS: dict[str, RenderSpec] = {
     "v300": RenderSpec("v300", 300, None, "rgb", "auto", "jpg"),
     "g300": RenderSpec("g300", 300, None, "gray", "auto", "png"),
     "q120": RenderSpec("q120", 120, None, "gray", "none", "png"),
-    "gold": RenderSpec("gold", 150, None, "rgb", "auto", "png"),
-    "gold300": RenderSpec("gold300", 300, None, "rgb", "auto", "png"),
+    "gold": RenderSpec("gold", 150, None, "rgb", "auto", "jpg", quality=92),
+    "gold300": RenderSpec("gold300", 300, None, "rgb", "auto", "jpg", quality=92),
     "ac": RenderSpec("ac", 200, 2000, "rgb", "auto", "jpg", photo_fix=True),
 }
 
