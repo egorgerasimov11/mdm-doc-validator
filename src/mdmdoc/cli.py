@@ -318,7 +318,20 @@ def _cmd_skill_rules(args) -> int:
     return 0
 
 
+def _cmd_bench(args) -> int:
+    # The benchmark is a separate, optional tool (dependency group "bench");
+    # its own argparse lives in mdmdoc.bench.cli so this module stays thin.
+    from .bench.cli import main as bench_main
+    return bench_main(list(args.bench_args))
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "bench":
+        # Hand the whole tail to the bench parser untouched (so `bench --help`,
+        # `bench run --engines …` etc. are parsed there, not here).
+        from .bench.cli import main as bench_main
+        return bench_main(argv[1:])
     ap = argparse.ArgumentParser(prog="mdmdoc", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -441,6 +454,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("skill-rules", help="show an mdm-*-checker skill's rules + validator mapping")
     p.add_argument("skill", help="skill name (mdm-w9-checker), skill dir, or dynamic_rules.md path")
     p.set_defaults(func=_cmd_skill_rules)
+
+    p = sub.add_parser("bench", help="document-transcription benchmark (manifest / gold / run / report)")
+    p.add_argument("bench_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=_cmd_bench)
 
     args = ap.parse_args(argv)
     return args.func(args)

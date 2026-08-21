@@ -24,6 +24,10 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=8.0",
 ]
+bench = [
+    "rapidfuzz>=3.9",
+    "claude-agent-sdk>=0.2.114",
+]
 
 [build-system]
 requires = ["hatchling"]

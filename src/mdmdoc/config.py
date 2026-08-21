@@ -22,6 +22,8 @@ CORPUS_DIR = Path(os.environ.get("MDMDOC_CORPUS_DIR", str(DATASET_DIR / "corpus"
 LORA_DIR = DATASET_DIR / "mlx-lora"
 EVAL_DIR = PROJECT_ROOT / "eval"
 INBOX_DIR = PROJECT_ROOT / "inbox"      # uploaded documents (raw, gitignored)
+BENCH_DIR = PROJECT_ROOT / "bench"      # extraction benchmark: corpus, renders, gold, results (gitignored)
+VISION_PROMPTS_DIR = PROMPTS_DIR / "vision"   # versioned vision prompts (*.vN.txt)
 # Synthetic eval stratum (П1): PII-free generated corpus, COMMITTED for
 # reproducibility. Never mixed into the headline real-corpus metrics; never
 # visible to load_labels() (few-shot/LoRA/precedents can't train on it).
