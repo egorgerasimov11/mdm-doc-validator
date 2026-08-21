@@ -454,7 +454,10 @@ def materialize(dest: Path | None = None) -> int:
         if d.stratum == "synthetic":
             continue                      # lives in the repo (eval/synthetic/docs)
         src = d.abs_path
-        target = dest / f"{d.doc_id}__{Path(d.path).name}"
+        base = Path(d.path).name
+        if base.startswith(f"{d.doc_id}__"):          # already materialised — do not re-prefix
+            base = base[len(d.doc_id) + 2:]
+        target = dest / f"{d.doc_id}__{base}"
         if not target.exists():
             if not src.exists():
                 continue
