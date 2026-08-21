@@ -266,12 +266,36 @@ def _field_value_parts(value: str) -> list[str]:
     return [p for p in parts if len(normalize(p, "loose")) >= 2]
 
 
-def _value_present(value: str, cand_base: str, cand_loose: str) -> bool:
+_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)\s*$")
+
+
+def _tokens_present(part: str, cand_loose_tokens: Counter) -> bool:
+    """Order-insensitive fallback: every token of the value occurs in the candidate.
+    Reading order is the noisiest part of any transcription (a neighbouring column can
+    split an address), so a value must not be judged lost because its lines drifted
+    apart. Guarded: needs >= 2 tokens and at least one distinctive one (>= 4 chars or
+    containing a digit), and every token must be there in sufficient multiplicity."""
+    toks = [t for t in re.split(r"\s+", normalize(part).strip()) if t]
+    canon = [normalize(t, "loose") for t in toks]
+    canon = [c for c in canon if c]
+    if len(canon) < 2:
+        return False
+    if not any(len(c) >= 4 or any(ch.isdigit() for ch in c) for c in canon):
+        return False
+    need = Counter(canon)
+    return all(cand_loose_tokens.get(k, 0) >= n for k, n in need.items())
+
+
+def _value_present(value: str, cand_base: str, cand_loose: str,
+                   cand_tokens: Counter | None = None) -> bool:
     parts = _field_value_parts(value)
     if not parts:
         return True
     for part in parts:
         cands = [part]
+        trimmed = _ELLIPSIS_RE.sub("", part).strip()
+        if trimmed and trimmed != part:
+            cands.append(trimmed)              # the gold writer truncated the value
         # a parenthetical the gold writer added ("☑ LLC (other boxes unmarked: …)")
         bare = re.sub(r"\s*\([^)]*\)", " ", part).strip(" ,;:—-")
         if bare and bare != part:
@@ -287,6 +311,8 @@ def _value_present(value: str, cand_base: str, cand_loose: str) -> bool:
             if (vb and vb in cand_base) or (vl and vl in cand_loose):
                 ok = True
                 break
+        if not ok and cand_tokens is not None:
+            ok = any(_tokens_present(c, cand_tokens) for c in cands)
         if not ok:
             return False
     return True
@@ -298,6 +324,7 @@ def field_value_recall(gold_fields: list[dict], cand_text: str) -> tuple[Recall,
     punctuation / case) occurs in the loose candidate text."""
     cand_base = normalize(cand_text).replace("\n", " ")
     cand_loose = normalize(cand_text, "loose")
+    cand_tokens = Counter(t for t in (normalize(w, "loose") for w in normalize(cand_text).split()) if t)
     tot = found = 0
     htot = hfound = 0
     missing: list[str] = []
@@ -306,7 +333,7 @@ def field_value_recall(gold_fields: list[dict], cand_text: str) -> tuple[Recall,
         v = _field_value_core(str(f.get("value", "") or ""))
         if len(normalize(v, "loose")) < 2 or not _field_value_parts(v):
             continue
-        ok = _value_present(v, cand_base, cand_loose)
+        ok = _value_present(v, cand_base, cand_loose, cand_tokens)
         tot += 1
         found += int(ok)
         label = str(f.get("label", "") or "")

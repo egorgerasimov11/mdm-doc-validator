@@ -110,3 +110,28 @@ def test_score_page_and_aggregation():
     assert not ok and any("field_recall" in f for f in fails)
     ok2, fails2 = M.passes("print", M.aggregate_docs([dict(M.aggregate_pages([perfect]), doc_id="b")]))
     assert ok2 and not fails2
+
+
+def test_field_value_order_insensitive_and_truncated_gold():
+    # the address is on the page but a neighbouring column split it in reading order
+    cand = ("a wholly owned subsidiary\nof LivaNova PLC\n100 Cyberonics Blvd   Disclaimer: By signing\n"
+            "Houston, TX 77058\nSigned by: B13472197ADB4901 full id")
+    gold = [{"label": "Company address", "value": "100 Cyberonics Blvd Houston, TX 77058"},
+            {"label": "Signed by", "value": "[signature] B13472197ADB490..."},   # gold truncated it
+            {"label": "Bank", "value": "Wells Fargo Bank"}]                      # genuinely absent
+    r, _ = M.field_value_recall(gold, cand)
+    assert r.total == 3 and r.found == 2
+    assert r.missing == ["Bank: Wells Fargo Bank"]
+    # the fallback must not rescue a value made only of short common tokens
+    r2, _ = M.field_value_recall([{"label": "x", "value": "by on"}], cand)
+    assert r2.total == 1 and r2.found == 0        # scored, but no distinctive token → no rescue
+    r3, _ = M.field_value_recall([{"label": "x", "value": "Cyberonics Wells"}], cand)
+    assert r3.found == 0                          # one token missing → still a miss
+
+
+def test_checkbox_and_writer_parentheticals_are_not_page_text():
+    gold = [{"label": "3a", "value": "☑ LLC (other boxes unmarked: Individual/sole proprietor, C corporation)"},
+            {"label": "3b", "value": "☐ (unmarked)"},
+            {"label": "14a", "value": "☑ Italy"}]
+    r, _ = M.field_value_recall(gold, "Federal tax classification LLC\nresident of Italy")
+    assert r.total == 2 and r.recall == 1.0
