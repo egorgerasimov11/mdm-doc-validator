@@ -125,6 +125,18 @@ def _cmd_doctype(a) -> int:
     return doctype.cli_doctype(a)
 
 
+def _cmd_public(a) -> int:
+    from . import public
+    return public.cli_public(a)
+
+
+def _cmd_tag_hw(a) -> int:
+    from . import public
+    n = public.tag_handwriting_from_gold()
+    _p(f"tagged handwriting on {n} document(s) from gold")
+    return 0
+
+
 def _cmd_models(a) -> int:
     from . import models
     return models.cli_models(a)
@@ -222,6 +234,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--engine", default=None, help="only this engine (default: all in tag)")
     p.add_argument("--classifier", default=None, help="ollama text model (default role TEXT)")
     p.set_defaults(func=_cmd_doctype)
+
+    p = sub.add_parser("public", help="fetch public handwriting/form samples into bench/public")
+    p.add_argument("--funsd", type=int, default=0, help="N FUNSD test forms")
+    p.add_argument("--notebooks-en", type=int, default=0, help="N handwritten EN notebook pages")
+    p.add_argument("--notebooks-ru", type=int, default=0, help="N handwritten RU notebook pages")
+    p.set_defaults(func=_cmd_public)
+    p = sub.add_parser("tag-handwriting", help="tag docs as handwriting when gold says so")
+    p.set_defaults(func=_cmd_tag_hw)
 
     p = sub.add_parser("models", help="model waves: status / pull commands")
     p.add_argument("--wave", type=int, default=1)
