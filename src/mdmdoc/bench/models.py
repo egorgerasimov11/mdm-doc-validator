@@ -136,3 +136,47 @@ def cli_doctor(a) -> int:
     free_gb = shutil.disk_usage(str(config.PROJECT_ROOT)).free / 1e9
     print(f"disk free    : {free_gb:.0f} GB")
     return 0
+
+
+def cli_status(a) -> int:
+    """Progress overview: gold coverage and cells per engine per tag."""
+    import json as _json
+    from collections import Counter
+    from . import manifest
+    from .gold import gold_path
+    from .run import load_cell, results_dir
+    docs = manifest.load("all")
+    by_stratum = Counter(d.stratum for d in docs)
+    print(f"corpus: {len(docs)} docs ({dict(by_stratum)}), {sum(len(d.pages) for d in docs)} pages")
+    need = [(d, p) for d in docs if d.gold_source != "textlayer" for p in d.pages]
+    have = ok = 0
+    noise = []
+    for d, p in need:
+        gp = gold_path(d.doc_id, p)
+        if gp.exists():
+            try:
+                g = _json.loads(gp.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            have += 1
+            if g.get("status") not in (None, "error"):
+                ok += 1
+                if g.get("disagreement_cer") is not None:
+                    noise.append(g["disagreement_cer"])
+    med = sorted(noise)[len(noise) // 2] if noise else None
+    print(f"gold: {ok}/{len(need)} pages verified ({have - ok} errors); median pass1↔pass2 CER {med}")
+    root = config.BENCH_DIR / "results"
+    if root.exists():
+        for tdir in sorted(p for p in root.iterdir() if p.is_dir()):
+            st = {}
+            if (tdir / "engines.json").exists():
+                st = _json.loads((tdir / "engines.json").read_text(encoding="utf-8"))
+            print(f"tag {tdir.name}:")
+            for edir in sorted(p for p in tdir.iterdir() if p.is_dir() and p.name != "diffs"):
+                cells = list(edir.glob("*/p*.json"))
+                errs = sum(1 for c in cells if (load_cell(c) or {}).get("error"))
+                eid = next((load_cell(c) or {}).get("engine_id") for c in cells[:1]) if cells else edir.name
+                s = st.get(eid, {})
+                print(f"   {eid[:70]:70s} {len(cells):4d} cells {errs:3d} err  {s.get('state', '')} "
+                      f"{('median ' + str(s.get('median_latency_s')) + 's') if s.get('median_latency_s') else ''}")
+    return 0

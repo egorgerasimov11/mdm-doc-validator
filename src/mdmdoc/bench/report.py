@@ -117,7 +117,64 @@ def score_tag(tag: str, docs: list[manifest.Doc] | None = None) -> dict:
                 docs_out[d.doc_id] = {"pages": pages, "agg": agg}
         if engine_id:
             out[engine_id] = {"docs": docs_out, "status": status.get(engine_id, {})}
+    out.update(_virtual_layer_engines(tag, out, by_id))
     return out
+
+
+def _virtual_layer_engines(tag: str, scored: dict, by_id: dict) -> dict:
+    """`layer>E`: the extractor's merge policy evaluated from cached cells — the PDF
+    text layer when it is present and plausible, otherwise engine E's output."""
+    if "textlayer" not in scored:
+        return {}
+    tl_dir = engine_dir(tag, "textlayer")
+    virt: dict = {}
+    for eid, data in scored.items():
+        if eid == "textlayer" or eid.startswith("layer>") or eid.startswith("layer+"):
+            continue
+        e_dir = engine_dir(tag, eid)
+        docs_out: dict = {}
+        docs_union: dict = {}
+        for did, v in data["docs"].items():
+            d = by_id[did]
+            pages: dict = {}
+            pages_union: dict = {}
+            for page, sc in v["pages"].items():
+                tl = load_cell(tl_dir / did / f"p{page}.json") or {}
+                usable = bool((tl.get("meta") or {}).get("usable"))
+                ecell = load_cell(e_dir / did / f"p{page}.json") or {}
+                gold = load_gold(d, page)
+                if gold is None:
+                    continue
+                if usable:
+                    s2 = M.score_page(gold["text"], gold["fields"], tl.get("text") or "")
+                    s2["latency_s"] = tl.get("latency_s")
+                    s2["error"] = None
+                    s2["source"] = "textlayer"
+                    pages[page] = s2
+                    # union: layer first, then whatever the engine saw that the layer lacks
+                    # (handwritten entries, stamps, image-only numbers)
+                    union = E.merge_tile_texts([tl.get("text") or "", ecell.get("text") or ""])
+                    s3 = M.score_page(gold["text"], gold["fields"], union)
+                    s3["latency_s"] = ecell.get("latency_s")
+                    s3["error"] = None
+                    s3["source"] = "textlayer+" + eid
+                    pages_union[page] = s3
+                else:
+                    pages[page] = dict(sc, source=eid)
+                    pages_union[page] = dict(sc, source=eid)
+            if pages:
+                agg = M.aggregate_pages(list(pages.values()))
+                agg["doc_id"] = did
+                agg["doc_name"] = d.name
+                docs_out[did] = {"pages": pages, "agg": agg}
+                agg_u = M.aggregate_pages(list(pages_union.values()))
+                agg_u["doc_id"] = did
+                agg_u["doc_name"] = d.name
+                docs_union[did] = {"pages": pages_union, "agg": agg_u}
+        if docs_out:
+            virt[f"layer>{eid}"] = {"docs": docs_out, "status": {"state": "virtual"}}
+            virt[f"layer+{eid}"] = {"docs": docs_union, "status": {"state": "virtual"}}
+    return virt
 
 
 def slice_table(scored: dict, docs: list[manifest.Doc]) -> dict:

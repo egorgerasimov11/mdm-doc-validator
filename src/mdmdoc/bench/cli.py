@@ -147,6 +147,11 @@ def _cmd_doctor(a) -> int:
     return models.cli_doctor(a)
 
 
+def _cmd_status(a) -> int:
+    from . import models
+    return models.cli_status(a)
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="mdmdoc bench",
                                  description="document-transcription benchmark")
@@ -250,6 +255,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_models)
     p = sub.add_parser("doctor", help="ollama host, vision capabilities, tesseract, swift, mlx worker")
     p.set_defaults(func=_cmd_doctor)
+    p = sub.add_parser("status", help="progress: gold coverage, cells per engine per tag")
+    p.set_defaults(func=_cmd_status)
     return ap
 
 
