@@ -125,3 +125,51 @@ def test_every_synthetic_layer_passes():
     low = [(p.name, plausibility(_layer(p))) for p in docs
            if len(_layer(p).strip()) >= 40 and plausibility(_layer(p)) < 0.85]
     assert not low, low
+
+
+def test_gate_is_unicode_table_free():
+    """The gate must not consult unicode category tables: the ABAP twin (7.50) has none,
+    and the two sides have to compute the SAME function, not two similar ones."""
+    src = (Path(__file__).resolve().parents[1] / "src" / "mdmdoc" / "extract" / "plausibility.py").read_text()
+    assert "unicodedata" not in src, "plausibility.py must stay portable to ABAP 7.50"
+
+
+def test_other_script_tokens_are_letters():
+    from mdmdoc.extract.plausibility import _has_other_script
+    for tok in ("계좌번호", "銀行名", "账户名称", "Кассир", "شهادة", "Grüßen", "Müller"):
+        assert _has_other_script(tok), tok
+    for tok in ("Account", "4830", "BOFAUS3N", "q=€+", "d€qql€"):
+        assert not _has_other_script(tok), tok
+
+
+def test_score_milli_is_the_parity_unit():
+    from mdmdoc.extract.plausibility import plausibility, score_milli
+    for text in list(REAL_TEXTS.values()) + [KOREAN_MOJIBAKE, FONT_SOUP]:
+        assert score_milli(text) == round(plausibility(text) * 1000)
+    assert score_milli(KOREAN_MOJIBAKE) < 700          # ABAP c_trust_layer
+    assert min(score_milli(t) for t in REAL_TEXTS.values()) >= 850
+
+
+@pytest.mark.skipif(not (config.PROJECT_ROOT / "bench" / "corpus").exists(),
+                    reason="benchmark corpus not present")
+def test_corpus_separation_holds():
+    """Calibration guard: every real text layer in the corpus stays clearly above the
+    threshold and every known garbage layer clearly below, with a wide margin."""
+    from mdmdoc.extract.plausibility import plausibility
+    docs = sorted((config.PROJECT_ROOT / "bench" / "corpus").iterdir())
+    scores = []
+    for p in docs:
+        if p.suffix.lower() != ".pdf":
+            continue
+        try:
+            t = _layer(p)
+        except Exception:
+            continue
+        if len(t.strip()) >= 40:
+            scores.append((plausibility(t), p.name))
+    assert len(scores) >= 30, f"corpus too small to calibrate on: {len(scores)}"
+    bad = [s for s in scores if s[0] < TRUST_LAYER]
+    good = [s for s in scores if s[0] >= TRUST_LAYER]
+    assert bad, "the known garbage layer disappeared from the corpus — recalibrate"
+    assert min(g[0] for g in good) - max(b[0] for b in bad) > 0.2, (
+        f"margin collapsed: worst real {min(good)}, best garbage {max(bad)}")

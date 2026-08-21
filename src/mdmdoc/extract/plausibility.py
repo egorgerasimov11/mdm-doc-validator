@@ -11,13 +11,14 @@ runs) and so was trusted, while the real page is Hangul.  Calibration targets
 (see tests/test_extract_plausibility.py): that string < 0.6; every synthetic
 PDF text layer and every clean digital document >= 0.75.
 
-The score is deliberately script-agnostic: CJK, Cyrillic, Arabic, Thai tokens
-are *letters* to unicodedata and count as well-formed.
+The score is deliberately script-agnostic AND unicode-table-free: any character above
+U+007F that is not in the explicit symbol set counts as a letter of some other script.
+That keeps Python and the ABAP twin (7.50, no character-category tables) computing the
+SAME function rather than two similar ones — see PARITY.md.
 """
 from __future__ import annotations
 
 import re
-import unicodedata
 
 from .. import ocr
 
@@ -28,7 +29,21 @@ _VOWELS = set("aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýāăą�
 _NUM_TOKEN = re.compile(r"^[+\-]?\d(?:[\d.,\-/:′″']*\d)?%?$|^\(?\d{2,4}\)?[\d\-. ]{3,}$")
 _MIXED_OK = re.compile(r"^(?:[A-Za-z]{1,3}\d{1,6}[A-Za-z]?|\d{1,6}(?:st|nd|rd|th|er|re|ª|º|[A-Za-z]))$")
 _UPPER_CODE = re.compile(r"^[A-Z0-9][A-Z0-9./-]{2,}$")
-_WEIRD_INSIDE = re.compile(r"[{}\[\]<>|^~`=@#$%*\\€£¥₩§©®™°]")
+# [CONST:plausibility_symbols] The ONE explicit symbol set. A character above U+007F
+# that is NOT in here counts as a letter of some other script (CJK, Cyrillic, Arabic,
+# accented Latin…) — that is how this gate stays unicode-table-free and therefore
+# portable to ABAP 7.50, which has no character-category tables. Verified on the whole
+# corpus: the discriminating power lives entirely in the ASCII range (the Korean
+# mojibake that motivated this gate carries exactly one non-ASCII character: €).
+_SYMBOLS = "{}[]<>|^~`=@#$%*\\€£¥₩§©®™°±×÷•·●○■□▪▫◆★☆←→↑↓☑☐✓✔✗✘"
+_WEIRD_INSIDE = re.compile("[" + re.escape("{}[]<>|^~`=@#$%*\\€£¥₩§©®™°") + "]")
+
+
+def _has_other_script(text: str) -> bool:
+    """A character of a non-Latin script (or an accented Latin one): above U+007F and
+    not a symbol. Replaces the former CJK-only test — same verdict on the corpus
+    (max |delta| 0.023, zero threshold flips) and expressible in ABAP without tables."""
+    return any(ord(c) > 127 and c not in _SYMBOLS for c in text)
 _SHORT_OK = {
     "a", "i", "o", "y", "an", "at", "as", "be", "by", "do", "go", "he", "if", "in", "is", "it",
     "me", "my", "no", "of", "on", "or", "so", "to", "up", "us", "we", "ok", "am", "pm", "de",
@@ -46,9 +61,14 @@ def _strip_edges(tok: str) -> str:
     return tok.strip(_EDGE_PUNCT)
 
 
+_ASCII_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+
 def _is_letters(tok: str) -> bool:
-    return all(unicodedata.category(c).startswith("L") or c in "'’-·" for c in tok) and \
-        any(unicodedata.category(c).startswith("L") for c in tok)
+    """Letters-only token. Only ever reached for pure-ASCII tokens: anything carrying a
+    character of another script was already accepted by _has_other_script, so an ASCII
+    test is exact here — and ABAP can express it as `CA` against a literal."""
+    return all(c in _ASCII_LETTERS or c in "'-" for c in tok) and any(c in _ASCII_LETTERS for c in tok)
 
 
 def _latin_word_ok(tok: str) -> bool:
@@ -69,7 +89,7 @@ def _wellformed(tok: str) -> bool:
     core = _strip_edges(tok)
     if not core:
         return True                      # pure punctuation (bullets, dashes, brackets)
-    if ocr.cjk_char_count(core) > 0:     # CJK, also glued to digits/latin (第3条, 10月, 〒123)
+    if _has_other_script(core):          # any other script, also glued to digits/latin (第3条, 〒123, ул.5)
         return True
     if _WEIRD_INSIDE.search(core):
         # symbols are fine only as the whole token (currency signs, ©) — never mid-word
@@ -97,7 +117,7 @@ def _short_junk(tok: str) -> bool:
     core = _strip_edges(tok)
     if len(core) == 0 or len(core) > 2:
         return False
-    if core.isdigit() or ocr.cjk_char_count(core) > 0:
+    if core.isdigit() or _has_other_script(core):
         return False
     if len(core) == 1:
         return not core.isalpha()        # a single letter is fine (initials, list markers)
@@ -114,8 +134,7 @@ def features(text: str) -> dict:
     improbable = (sum(1 for w in latin_words if ocr._word_improbable(w)) / len(latin_words)) \
         if latin_words else 0.0
     nonspace = [c for c in text if not c.isspace()]
-    sym = sum(1 for c in nonspace
-              if unicodedata.category(c) in ("So", "Sm", "Sc", "Sk") or c in "{}[]|<>^~`\\")
+    sym = sum(1 for c in nonspace if c in _SYMBOLS)
     symbol_density = sym / max(1, len(nonspace))
     # vowel share over latin letters (real language ~35-50%; mojibake drifts low/high)
     latin_letters = [c.lower() for c in text if ("A" <= c <= "Z") or ("a" <= c <= "z") or ("À" <= c <= "ɏ")]
@@ -142,6 +161,13 @@ def plausibility(text: str) -> float:
              + 0.10 * f["vowel_ok"]
              + 0.15 * (1.0 - min(1.0, f["short_junk"] * 4)))
     return round(max(0.0, min(1.0, score)), 3)
+
+
+def score_milli(text: str) -> int:
+    """plausibility() as an integer 0..1000 — the unit both sides compare in.
+    The ABAP twin has no floating-point API (the package computes only TYPE i), so
+    parity is asserted on this integer, not on a float."""
+    return int(round(plausibility(text) * 1000))
 
 
 def layer_usable(text: str, min_chars: int = 40) -> tuple[bool, str]:
