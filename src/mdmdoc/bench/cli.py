@@ -47,6 +47,13 @@ def _cmd_manifest_synth(a) -> int:
     return 0
 
 
+def _cmd_manifest_materialize(a) -> int:
+    from . import manifest
+    n = manifest.materialize()
+    _p(f"manifest now points at bench/corpus/ copies ({n} path(s) rewritten)")
+    return 0
+
+
 def _cmd_manifest_sniff(a) -> int:
     import json
     from pathlib import Path
@@ -66,7 +73,7 @@ def _cmd_render(a) -> int:
     n = 0
     for d in docs:
         for idx in d.pages:
-            png = render.render_page(d, idx, spec)
+            png = render.render_page(d.abs_path, d.render_dir, idx, spec)
             n += 1
             if a.verbose:
                 _p(f"  {d.doc_id} p{idx} -> {png}")
@@ -151,6 +158,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_manifest_show)
     p = ms.add_parser("build-synthetic", help="add eval/synthetic/docs with text-layer gold")
     p.set_defaults(func=_cmd_manifest_synth)
+    p = ms.add_parser("materialize", help="copy real docs into bench/corpus/ and use relative paths (portable bench/)")
+    p.set_defaults(func=_cmd_manifest_materialize)
     p = ms.add_parser("sniff", help="print what the sniffer sees for a file (no manifest change)")
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=_cmd_manifest_sniff)

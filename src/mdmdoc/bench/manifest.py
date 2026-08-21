@@ -441,6 +441,32 @@ def build_synthetic() -> int:
     return n
 
 
+def materialize(dest: Path | None = None) -> int:
+    """Copy every real document into bench/corpus/<doc_id>__<name> and point the
+    manifest at that copy (relative path) so the corpus travels with bench/ to
+    another machine (the Mac mini runs the sweeps). Idempotent."""
+    import shutil as _sh
+    dest = dest or (config.BENCH_DIR / "corpus")
+    dest.mkdir(parents=True, exist_ok=True)
+    docs = load_all()
+    n = 0
+    for d in docs:
+        if d.stratum == "synthetic":
+            continue                      # lives in the repo (eval/synthetic/docs)
+        src = d.abs_path
+        target = dest / f"{d.doc_id}__{Path(d.path).name}"
+        if not target.exists():
+            if not src.exists():
+                continue
+            _sh.copy2(src, target)
+        if d.path != rel_path(target):
+            d.notes = (d.notes + f" | origin: {d.path}").strip(" |") if "origin:" not in d.notes else d.notes
+            d.path = rel_path(target)
+            n += 1
+    save_all(docs)
+    return n
+
+
 def text_layer(doc: Doc, idx: int) -> str:
     """The PDF text layer of one page in reading order ('' for images)."""
     if render.is_image(doc.abs_path):
