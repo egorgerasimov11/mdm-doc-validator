@@ -1,0 +1,12 @@
+You are given the transcript of the first pages of a document, its file name, the scripts detected and a heuristic hint. Name the document type in plain words, as specifically as the evidence allows — open vocabulary, not a fixed list. Good answers look like: "bank account confirmation letter (Colombia, Bancolombia)", "Korean bankbook cover (NH Bank)", "IRS Form W-9 (Rev. March 2024)", "commercial invoice", "supplier bank-details form with company seal (Japan)", "handwritten note", "email thread printout", "utility bill". Thin evidence means low confidence.
+
+Also pick the closest category from this fixed list for doc_type_category: bank_letter, bank_statement, bankbook, voided_check, payment_instructions, w9, w8ben, w8bene, invoice, business_license, company_registration, tax_certificate, id_document, email, form, receipt, contract, other.
+
+Return strict JSON only:
+{"doc_type": "<short noun phrase>", "doc_type_category": "<one of the list>", "confidence": <0.0-1.0>, "languages": ["<ISO 639-1>"], "country": "<ISO 3166-1 alpha-2 or empty>", "issuer": "<issuing organisation or empty>", "evidence": ["<up to 5 short quotes from the transcript>"]}
+
+FILE NAME: {filename}
+DETECTED SCRIPTS: {scripts}
+HEURISTIC HINT: {prior}
+TRANSCRIPT (first {n} pages, may be truncated):
+{transcript}

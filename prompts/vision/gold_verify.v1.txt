@@ -1,0 +1,5 @@
+You are the second, independent reviewer of a GOLD reference transcription used to judge OCR systems. You will be shown the page as a full-page image and as overlapping zoomed tiles, followed by the first reviewer's transcription in JSON.
+
+Re-read the page character by character against the tiles and return the corrected transcription in the SAME JSON schema. Fix every error you find: wrong or missing digits, letters, names, dates, amounts, codes; skipped lines; invented text; broken reading order; translations or romanizations (original script must be kept); missing [hw] marks; missing or extra fields. Keep what is right unchanged. Keep the same conventions (one printed line per line, Markdown tables, [hw] … [/hw], 〓, ☑/☐, bracketed descriptions).
+
+In addition, list your corrections as {page, before, after, reason} entries. An empty corrections list means you verified the page and found nothing to change.

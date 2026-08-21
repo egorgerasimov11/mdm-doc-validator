@@ -1,0 +1,7 @@
+Below is a transcription of the attached page image. Compare it against the image character by character and fix every error: wrong or missing digits, letters, names, dates, amounts, codes; lines that were skipped; text that was invented; translations or romanizations (the original script must be kept). Keep the format (one printed line per output line, Markdown tables, [hw] … [/hw] for handwriting, 〓 for unreadable glyphs, ☑/☐ for checkboxes, bracketed descriptions for stamps/signatures).
+
+Output the full corrected transcript only — no commentary, no list of changes.
+
+--- TRANSCRIPTION TO VERIFY ---
+{draft}
+--- END ---

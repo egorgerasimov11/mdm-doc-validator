@@ -1,0 +1,1 @@
+Extract the text content from this image. Keep the original language and script; never translate or romanize. Output the text only.
