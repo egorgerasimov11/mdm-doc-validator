@@ -75,6 +75,12 @@ Statuses: `ported` (ABAP carries a `[GUARD:name]` marker in `zcl_mdmdoc_extract`
 
 ## Guards (continued, 2026-07-09 accuracy wave)
 - normalize_tin — ported (already listed)
+- scrub_cjk_garbage — n/a (2026-07-13 handwriting-honesty layer: on a CJK/JP scan it blanks
+  an identity field (bank_name/account_holder/branch_name) whose value is a script-mash or
+  latin gibberish — the signature of OCR failing on HANDWRITING — so the operator sees '—' and
+  the shared BNK-023 rule fires instead of a confident garbage value. Depends on the Python
+  OCR/vision perception of a scanned handwritten form, which the ABAP twin does not have; the
+  verdict itself rides the shared BNK-023/BNK-050 rule DATA)
 The signature 3-state change (band/page/text votes + `uncertain`) is inside the
 existing `resolve_signature` (n/a — vision). The confidence gate (`confidence.py`
 → CONF-001) is a Python pipeline layer, not a stage_b guard; ABAP corp v1 is
@@ -145,9 +151,36 @@ Known §8-documented gap: the ABAP EIN/SSN regex lacks Python's hyphen-adjacency
 guards (phantom-EIN fix) — port candidate, tracked in the manifest note.
 
 ## Pending ABAP logic ports (Python has it, ABAP not yet — remove the line once applied)
-(none — the US numeric-IBAN guard was applied to `p_iban_valid` + test
-`pred_iban_numeric_us_ok` on 2026-07-09, together with the wave-5 extract-guard pack.
-The golden ABAP twin above is data/test generation, not a logic port.)
+
+- **Text-layer plausibility gate** (`src/mdmdoc/extract/plausibility.py`, 2026-08-21).
+  ABAP decides "is there a text layer" by `strlen( cv_text ) < 40` alone
+  (`zmdmdoc.prog.abap:214`, finding `EXT-001`). A scanned document whose embedded OCR
+  layer is mojibake passes that test and is trusted as if it were the document.
+  Evidence: `doct/Bank account_Pf_Nam.PDF` (Korean NH bankbook) carries **1304 characters**
+  of latin/symbol soup — ABAP would accept it, Python now rejects it
+  (plausibility 0.58 < TRUST_LAYER 0.7) and reads the page instead. This is case
+  C-2026-08-21-02; the Python original had exactly the same bug until this gate.
+  Port: `plausibility(text) -> 0..1` is pure string math (no regex engine features
+  beyond 7.50 classic): 0.40·well-formed-token share + 0.20·(1 − improbable-latin-word
+  share) + 0.15·(1 − symbol density·10, capped) + 0.10·vowel-ratio sanity +
+  0.15·(1 − short-junk share·4, capped); reject below 0.7. Calibrated so that every one
+  of the 77 real/synthetic text layers in the corpus scores ≥ 0.90 and both known
+  garbage layers score ≤ 0.58. Suggested home: `ZCL_MDMDOC_PDF` (new method
+  `is_layer_plausible`) so `ZMDMDOC` can route a garbage layer to `EXT-001` exactly as
+  it routes an empty one.
+
+- **Vision transcription prompt** (`prompts/vision/transcribe_md.v1.txt`, 2026-08-21).
+  `ZCL_MDMDOC_LLM=>system_vision` is three sentences ("You are an OCR transcriber…");
+  the Python prompt states nine rules the benchmark showed to matter — never translate
+  or romanize (CJK pages come back as latin junk without it), tables as Markdown,
+  `[hw] … [/hw]` for handwriting, `〓` for an unreadable glyph, `☑/☐` for checkboxes,
+  bracketed descriptions for stamps/seals/signatures, page furniture included.
+  These must be ONE text; the Python file is the source.
+
+- **Vision model default** (`p_ovis`, currently documented as `qwen2.5vl:7b`).
+  To be set from the benchmark winner once `bench/DECISION.md` is written — the ABAP
+  twin reaches only its own PDF text layer plus Ollama, so the model choice IS the
+  extraction quality there.
 
 ## Coordination requests → rules-editor/ABAP session (2026-07-07, audit milestone)
 1. ~~US-IBAN port reminder~~ — **closed 2026-07-09**: applied by the audit session
