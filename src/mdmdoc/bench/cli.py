@@ -226,6 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tag", required=True)
     p.add_argument("--compare", help="previous tag to diff against")
     p.add_argument("--decide", action="store_true", help="also write bench/DECISION.md")
+    p.add_argument("--platform", choices=("any", "macos", "windows", "linux", "abap"), default="any",
+                   help="only engines that can run on this target (abap = the SAP twin ZMDMDOC)")
     p.add_argument("--no-diffs", action="store_true")
     p.set_defaults(func=_cmd_report)
     p = sub.add_parser("worst", help="worst pages for an engine")

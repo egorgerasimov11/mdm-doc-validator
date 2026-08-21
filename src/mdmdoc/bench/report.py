@@ -210,9 +210,21 @@ def _fmt(v, pct=False):
     return f"{v:.3f}" if isinstance(v, float) else str(v)
 
 
-def leaderboard_md(tag: str, table: dict, scored: dict, docs: list[manifest.Doc]) -> str:
+def filter_platform(table: dict, platform: str | None) -> dict:
+    """Keep only engines that can run on the target platform (see engines.platforms_of)."""
+    if not platform or platform == "any":
+        return table
+    return {sname: {eid: a for eid, a in engines.items() if E.runs_on(eid, platform)}
+            for sname, engines in table.items()}
+
+
+def leaderboard_md(tag: str, table: dict, scored: dict, docs: list[manifest.Doc],
+                   platform: str | None = None) -> str:
+    plat_note = (f"Target platform: **{platform}** — only engines that can run there are listed "
+                 f"(`abap` = reachable from the SAP twin ZMDMDOC: its own PDF text layer + Ollama over HTTP).\n"
+                 if platform and platform != "any" else "")
     lines = [f"# Leaderboard — tag `{tag}`", "",
-             f"_generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_", "",
+             f"_generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_", "", plat_note,
              "Ranking is lexicographic: worst-doc field recall → worst-doc entity recall → CER → latency. "
              "`field` = every gold label→value must appear in the transcript; `entity` = digit runs and "
              "IBAN/SWIFT/EIN/SSN (multiset); `line` = fuzzy line recall; CER secondary.", ""]
@@ -343,10 +355,11 @@ def append_history(tag: str, table: dict) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def decision_md(tag: str, table: dict) -> str:
+def decision_md(tag: str, table: dict, platform: str | None = None) -> str:
+    table = filter_platform(table, platform)
     real = table.get("real", {})
     hw = table.get("handwriting", {})
-    lines = [f"# Decision — tag `{tag}`", ""]
+    lines = [f"# Decision — tag `{tag}`" + (f" · target platform `{platform}`" if platform and platform != "any" else ""), ""]
     if not real:
         return "\n".join(lines + ["no real-corpus results yet"])
     ranked = sorted(real.items(), key=lambda kv: (
@@ -388,7 +401,8 @@ def cli_report(a) -> int:
         _log(f"no scored cells for tag {a.tag!r} (no results, or no gold yet)")
         return 2
     table = slice_table(scored, docs)
-    md = leaderboard_md(a.tag, table, scored, docs)
+    platform = getattr(a, "platform", None)
+    md = leaderboard_md(a.tag, filter_platform(table, platform), scored, docs, platform)
     out = config.BENCH_DIR / "leaderboard.md"
     config.atomic_write_text(out, md)
     (results_dir(a.tag) / "leaderboard.md").write_text(md, encoding="utf-8")
@@ -399,7 +413,7 @@ def cli_report(a) -> int:
     n = 0 if a.no_diffs else write_diffs(a.tag, scored, docs)
     append_history(a.tag, table)
     if a.decide:
-        dm = decision_md(a.tag, table)
+        dm = decision_md(a.tag, table, platform)
         config.atomic_write_text(config.BENCH_DIR / "DECISION.md", dm)
         print(dm)
     print(md)

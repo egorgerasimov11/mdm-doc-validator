@@ -96,12 +96,19 @@ def resolve_prompt(name: str) -> tuple[str, str, str]:
 
 # ── base ──────────────────────────────────────────────────────────────────────
 
+# Where an engine can actually run. "abap" = reachable from the SAP ABAP twin
+# (ZMDMDOC): it has its own pure-ABAP PDF text layer and an Ollama HTTP client,
+# and nothing else — no tesseract binary, no Apple frameworks, no Python.
+PLATFORMS_ALL = ("macos", "windows", "linux")
+
+
 class PageEngine:
     family = "base"
     render: R.RenderSpec = R.PRESETS["g300"]
     id: str = "base"
     version: str = CODE_VERSION
     default_timeout_s = 120
+    platforms: tuple[str, ...] = PLATFORMS_ALL
 
     def available(self) -> tuple[bool, str]:
         return True, ""
@@ -128,6 +135,7 @@ class TextLayerEngine(PageEngine):
     family = "textlayer"
     id = "textlayer"
     render = R.PRESETS["q120"]
+    platforms = PLATFORMS_ALL + ("abap",)      # ZCL_MDMDOC_PDF is the ABAP equivalent
 
     def transcribe(self, job: PageJob) -> PageResult:
         import fitz
@@ -189,6 +197,7 @@ def _tesseract(png: Path, lang: str, psm: int, timeout: int = 120) -> tuple[str,
 class TesseractEngine(PageEngine):
     family = "tess"
     render = R.PRESETS["g300"]
+    platforms = PLATFORMS_ALL                  # a binary — not reachable from ABAP
 
     def __init__(self, lang: str = "auto", psm: int = 3, render_spec: R.RenderSpec | None = None):
         self.lang = lang or "auto"
@@ -264,6 +273,7 @@ def ensure_visionocr() -> tuple[bool, str]:
 class AppleVisionEngine(PageEngine):
     family = "applevision"
     render = R.PRESETS["g300"]
+    platforms = ("macos",)
 
     def __init__(self, mode: str = "legacy", langs: list[str] | None = None,
                  render_spec: R.RenderSpec | None = None, correct: bool = True):
@@ -413,6 +423,7 @@ class OllamaVLMEngine(PageEngine):
     family = "ollama"
     render = R.PRESETS["v170"]
     default_timeout_s = 300
+    platforms = PLATFORMS_ALL + ("abap",)      # ZCL_MDMDOC_LLM talks to Ollama over HTTP
 
     def __init__(self, model: str, render_spec: R.RenderSpec | None = None, prompt: str | None = None,
                  tiles: str | None = None, ocrhint: bool = False, twopass: bool = False,
@@ -531,6 +542,7 @@ class MLXVLMEngine(PageEngine):
     family = "mlx"
     render = R.PRESETS["v200"]
     default_timeout_s = 300
+    platforms = ("macos",)                     # Apple Silicon only
 
     def __init__(self, repo: str, render_spec: R.RenderSpec | None = None, prompt: str | None = None,
                  tiles: str | None = None, ocrhint: bool = False, twopass: bool = False):
@@ -763,3 +775,24 @@ def parse_many(specs: str | list[str], **kw) -> list[PageEngine]:
 def safe_id(engine_id: str) -> str:
     """Filesystem-safe name for an engine id."""
     return re.sub(r"[^A-Za-z0-9._=+-]+", "_", engine_id).strip("_")[:120]
+
+
+def platforms_of(engine_id: str) -> tuple[str, ...]:
+    """Platforms an engine id can run on — works for the virtual layer>/layer+ ids too."""
+    eid = engine_id
+    for prefix in ("layer>", "layer+"):
+        if eid.startswith(prefix):
+            eid = eid[len(prefix):]
+    family = eid.split(":", 1)[0].split("@", 1)[0]
+    table = {"textlayer": TextLayerEngine, "tess": TesseractEngine,
+             "applevision": AppleVisionEngine, "ollama": OllamaVLMEngine, "mlx": MLXVLMEngine}
+    cls = table.get(family)
+    plats = tuple(getattr(cls, "platforms", PLATFORMS_ALL)) if cls else PLATFORMS_ALL
+    if engine_id.startswith(("layer>", "layer+")):
+        # the merge policy needs a text layer as well — both parts must be available
+        plats = tuple(p for p in plats if p in TextLayerEngine.platforms)
+    return plats
+
+
+def runs_on(engine_id: str, platform: str) -> bool:
+    return platform in platforms_of(engine_id)
