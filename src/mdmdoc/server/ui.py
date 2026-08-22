@@ -23,8 +23,10 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static" / "ui"
 
 from ..consolidation import available as _consol_available  # noqa: E402
 from .consolidation import router_consol  # noqa: E402
+from .extract_ui import router_extract  # noqa: E402
 
 router_ui.include_router(router_consol)
+router_ui.include_router(router_extract)
 _CONSOL_ENABLED = _consol_available()
 
 
@@ -101,6 +103,8 @@ def dashboard(request: Request):
                                            test_count=len(runstore.list_runs(test=True)),
                                            recent_actions=__import__("mdmdoc.oplog", fromlist=["recent"]).recent(limit=8),
                                            default_effort=config.default_effort(),
+                                           default_mode=config.default_mode(),
+                                           modes=list(config.MODES),
                                            default_lang=config.default_lang(),
                                            engine_default=config.engine_mode(),
                                            engine_modes=list(config.ENGINE_MODES),
@@ -596,6 +600,8 @@ def settings_defaults_page(request: Request):
     return templates.TemplateResponse(request, "settings_defaults.html", _ctx(
         page="settings", subpage="defaults",
         default_effort=config.default_effort(),
+        default_mode=config.default_mode(),
+        modes=list(config.MODES),
         engine_default=config.engine_mode(),
         engine_modes=list(config.ENGINE_MODES),
         engine_env_override=(env_eng if env_eng in config.ENGINE_MODES else ""),

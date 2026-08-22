@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}mdmdoc — {{ file }}{% endblock %}
+{% block content %}
+<p class="meta"><a href="/ui/extract">← extract</a> · <a href="/ui/extract/{{ name }}/markdown">download Markdown</a></p>
+<h1>{{ file }}</h1>
+<p class="meta"><b>Document type (guess):</b> {{ doc.doc_type }} · <b>pages:</b> {{ doc.pages }} ·
+<b>engines:</b> {{ doc.engines|join(', ') }} · <b>time:</b> {{ doc.elapsed_s }} s · fully offline</p>
+
+<section>
+  <h2>Ready to use ({{ ready|length }})</h2>
+  <p class="meta">Confirmed by independent engines or by checksum.</p>
+  <table class="list">
+    <thead><tr><th>page</th><th>value</th><th>how</th><th>read by</th></tr></thead>
+    <tbody>{% for v in ready %}
+      <tr><td>{{ v.page }}</td><td><code>{{ v.value }}</code></td><td>{{ v.status }}</td><td class="meta">{{ v.families|join(', ') }}</td></tr>
+    {% else %}<tr><td colspan="4" class="meta">none</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Needs a human look ({{ review|length }})</h2>
+  <p class="meta">Read by one engine only, engines disagree, or the glyphs are confusable — compare with the crop.</p>
+  <table class="list">
+    <thead><tr><th>page</th><th>value</th><th>read by</th><th>crop</th></tr></thead>
+    <tbody>{% for v in review %}
+      <tr><td>{{ v.page }}</td><td><code>{{ v.value }}</code></td><td class="meta">{{ v.voices|join(', ') }}</td>
+          <td>{% if v.crop %}<img src="/ui/extract/{{ name }}/crop/{{ v.crop }}" alt="" style="max-width:420px;max-height:120px;border:1px solid #ddd">{% else %}—{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4" class="meta">none</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Transcript</h2>
+  <p class="meta">Union of the engines, for reading — not for copying values.</p>
+  <pre style="white-space:pre-wrap;font-size:12px">{{ doc.transcript }}</pre>
+</section>
+{% endblock %}
