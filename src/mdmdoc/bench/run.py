@@ -41,7 +41,9 @@ def load_cell(path: Path) -> dict | None:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # microseconds: report.py picks the newest engine_version by `ts`, and two runs
+    # can land in the same second
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _log(msg: str) -> None:

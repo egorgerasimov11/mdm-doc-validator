@@ -20,6 +20,8 @@ casefolds, maps Arabic-Indic digits to ASCII and drops punctuation and spaces.
 """
 from __future__ import annotations
 
+import math
+
 import re
 import unicodedata
 from collections import Counter
@@ -375,11 +377,31 @@ def score_page(gold_text: str, gold_fields: list[dict], cand_text: str) -> dict:
     }
 
 
-def aggregate_pages(pages: list[dict]) -> dict:
-    """Document-level numbers: CER weighted by gold length; recalls pooled."""
+DOC_TIME_LIMIT_S = 60          # the user waits for the WHOLE document, not one page
+
+
+def percentile_nearest_rank(vals: list[float], q: float) -> float | None:
+    """Nearest-rank percentile (k = ceil(q·n)); exact for small n, never off-by-one."""
+    vals = sorted(v for v in vals if v is not None)
+    if not vals:
+        return None
+    k = max(1, math.ceil(q * len(vals)))
+    return vals[min(k, len(vals)) - 1]
+
+
+def aggregate_pages(pages: list[dict], *, pages_total: int | None = None) -> dict:
+    """Document-level numbers: CER weighted by gold length; recalls pooled.
+
+    `doc_time_s` is what a user would wait for the whole document: mean measured
+    page latency × pages_total. The benchmark measures only the first few pages of
+    long documents, so the figure is extrapolated (and flagged) when pages_total
+    exceeds the measured pages."""
     pages = [p for p in pages if p]
     if not pages:
         return {}
+    lats = [p["latency_s"] for p in pages if p.get("latency_s") is not None]
+    n_total = max(int(pages_total or 0), len(pages))
+    doc_time = round(sum(lats) / len(lats) * n_total, 1) if lats else None
     w = sum(p["gold_chars"] for p in pages) or 1
     def pooled(key):
         tot = sum(p[key]["total"] for p in pages)
@@ -399,6 +421,10 @@ def aggregate_pages(pages: list[dict]) -> dict:
         "field_recall": fld, "field_total": fld_n,
         "field_hw_recall": hw, "field_hw_total": hw_n,
         "empty_pages": sum(1 for p in pages if p["empty"]),
+        "pages_measured": len(lats),
+        "pages_total": n_total,
+        "doc_time_s": doc_time,
+        "extrapolated": n_total > len(pages),
     }
 
 
@@ -430,16 +456,32 @@ def aggregate_docs(docs: list[dict]) -> dict:
         out[key + "_worst"] = wv[0] if wv else None
         out[key + "_worst_doc"] = wv[1] if wv else None
     out["empty_pages"] = sum(d.get("empty_pages", 0) for d in docs)
+    timed = [(d["doc_time_s"], d.get("doc_id", "?")) for d in docs if d.get("doc_time_s") is not None]
+    times = [t for t, _ in timed]
+    out["doc_time_median_s"] = round(percentile_nearest_rank(times, 0.5), 1) if times else None
+    out["doc_time_p90_s"] = round(percentile_nearest_rank(times, 0.9), 1) if times else None
+    out["within_60s_share"] = round(sum(1 for t in times if t <= DOC_TIME_LIMIT_S) / len(times), 4) if times else None
+    worst = max(timed) if timed else (None, None)
+    out["doc_time_worst_s"] = worst[0]
+    out["doc_time_worst_doc"] = worst[1]
+    out["docs_over_60s"] = [did for t, did in sorted(timed, reverse=True) if t > DOC_TIME_LIMIT_S]
+    out["extrapolated_docs"] = sum(1 for d in docs if d.get("extrapolated"))
     return out
 
 
 # ── thresholds / decision ─────────────────────────────────────────────────────
 
 THRESHOLDS = {
-    # slice kind → (field_recall_worst, entity_recall_worst, cer_macro, line_recall_macro)
-    "print": {"field_recall_worst": 1.0, "entity_recall_worst": 0.995, "cer": 0.01, "line_recall": 0.98},
-    "photo": {"field_recall_worst": 1.0, "entity_recall_worst": 0.995, "cer": 0.02, "line_recall": 0.98},
-    "handwriting": {"field_recall_worst": 0.95, "entity_recall_worst": 0.95, "cer": 0.05, "line_recall": 0.90},
+    # slice kind → field_recall_worst, entity_recall_worst, cer_macro, line_recall_macro,
+    # doc_time_p90_s (9 of 10 documents fully extracted within this many seconds;
+    # 60 s is the product requirement for the automatic path, handwriting goes to a
+    # human queue anyway so it gets 90 s)
+    "print": {"field_recall_worst": 1.0, "entity_recall_worst": 0.995, "cer": 0.01, "line_recall": 0.98,
+              "doc_time_p90_s": DOC_TIME_LIMIT_S},
+    "photo": {"field_recall_worst": 1.0, "entity_recall_worst": 0.995, "cer": 0.02, "line_recall": 0.98,
+              "doc_time_p90_s": DOC_TIME_LIMIT_S},
+    "handwriting": {"field_recall_worst": 0.95, "entity_recall_worst": 0.95, "cer": 0.05, "line_recall": 0.90,
+                    "doc_time_p90_s": 90},
 }
 
 
@@ -454,4 +496,7 @@ def passes(slice_kind: str, agg: dict) -> tuple[bool, list[str]]:
         fails.append(f"cer {agg.get('cer')} > {th['cer']}")
     if (agg.get("line_recall") or 0) < th["line_recall"]:
         fails.append(f"line_recall {agg.get('line_recall')} < {th['line_recall']}")
+    p90 = agg.get("doc_time_p90_s")
+    if p90 is not None and p90 > th["doc_time_p90_s"]:
+        fails.append(f"doc_time_p90 {p90}s > {th['doc_time_p90_s']}s")
     return (not fails), fails

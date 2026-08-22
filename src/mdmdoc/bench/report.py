@@ -78,8 +78,28 @@ def load_gold(doc: manifest.Doc, page: int) -> dict | None:
 
 # ── scoring ───────────────────────────────────────────────────────────────────
 
+def _newest_version_cells(cells: list[dict]) -> tuple[list[dict], dict, str | None]:
+    """Cells of one engine may carry several `engine_version`s (a partial re-run after
+    a version change). Scoring them together would silently mix old and new behaviour
+    in one leaderboard row, so keep ONLY the version whose newest cell is the most
+    recent, and report the rest as stale. → (kept, {version: count}, newest_version)"""
+    counts: dict = {}
+    latest_ts: dict = {}
+    for c in cells:
+        v = str(c.get("engine_version") or "?")
+        counts[v] = counts.get(v, 0) + 1
+        ts = str(c.get("ts") or "")
+        if ts > latest_ts.get(v, ""):
+            latest_ts[v] = ts
+    if not counts:
+        return [], {}, None
+    newest = max(counts, key=lambda v: (latest_ts.get(v, ""), counts[v]))
+    return [c for c in cells if str(c.get("engine_version") or "?") == newest], counts, newest
+
+
 def score_tag(tag: str, docs: list[manifest.Doc] | None = None) -> dict:
-    """→ {engine_id: {"docs": {doc_id: {pages: {p: score}, agg}}, "status": …}}"""
+    """→ {engine_id: {"docs": {doc_id: {pages: {p: score}, agg}}, "status": …,
+    "versions": {version: cells}, "stale_cells": n}}"""
     docs = docs if docs is not None else manifest.load("all")
     by_id = {d.doc_id: d for d in docs}
     rdir = results_dir(tag)
@@ -88,35 +108,45 @@ def score_tag(tag: str, docs: list[manifest.Doc] | None = None) -> dict:
         status = json.loads((rdir / "engines.json").read_text(encoding="utf-8"))
     out: dict = {}
     for edir in sorted(p for p in rdir.iterdir() if p.is_dir() and p.name != "diffs"):
-        engine_id = None
-        docs_out: dict = {}
+        cells: list[dict] = []
         for ddir in sorted(p for p in edir.iterdir() if p.is_dir()):
-            d = by_id.get(ddir.name)
-            if not d:
+            if ddir.name not in by_id:
                 continue
-            pages: dict = {}
             for cp in sorted(ddir.glob("p*.json")):
                 cell = load_cell(cp)
-                if not cell:
-                    continue
-                engine_id = engine_id or cell.get("engine_id")
-                page = int(cell["page"])
-                gold = load_gold(d, page)
-                if gold is None:
-                    continue
-                cand = cell.get("text") or ""
-                sc = M.score_page(gold["text"], gold["fields"], cand)
-                sc["latency_s"] = cell.get("latency_s")
-                sc["error"] = cell.get("error")
-                sc["gold_status"] = gold.get("status")
-                pages[page] = sc
-            if pages:
-                agg = M.aggregate_pages(list(pages.values()))
-                agg["doc_id"] = d.doc_id
-                agg["doc_name"] = d.name
-                docs_out[d.doc_id] = {"pages": pages, "agg": agg}
-        if engine_id:
-            out[engine_id] = {"docs": docs_out, "status": status.get(engine_id, {})}
+                if cell:
+                    cells.append(cell)
+        if not cells:
+            continue
+        engine_id = next((c.get("engine_id") for c in cells if c.get("engine_id")), None)
+        if not engine_id:
+            continue
+        kept, versions, newest = _newest_version_cells(cells)
+        stale = len(cells) - len(kept)
+        if stale:
+            old = sorted(v for v in versions if v != newest)
+            _log(f"[{engine_id}] tag {tag}: {stale} stale cell(s) from version(s) {old} ignored; "
+                 f"scoring {len(kept)} cell(s) of {newest} only — re-run the engine to complete it")
+        docs_out: dict = {}
+        for cell in kept:
+            d = by_id[cell["doc_id"]]
+            page = int(cell["page"])
+            gold = load_gold(d, page)
+            if gold is None:
+                continue
+            sc = M.score_page(gold["text"], gold["fields"], cell.get("text") or "")
+            sc["latency_s"] = cell.get("latency_s")
+            sc["error"] = cell.get("error")
+            sc["gold_status"] = gold.get("status")
+            docs_out.setdefault(d.doc_id, {"pages": {}})["pages"][page] = sc
+        for did, v in list(docs_out.items()):
+            d = by_id[did]
+            agg = M.aggregate_pages(list(v["pages"].values()), pages_total=d.pages_total)
+            agg["doc_id"] = d.doc_id
+            agg["doc_name"] = d.name
+            v["agg"] = agg
+        out[engine_id] = {"docs": docs_out, "status": status.get(engine_id, {}),
+                          "versions": versions, "stale_cells": stale}
     out.update(_virtual_layer_engines(tag, out, by_id))
     return out
 
@@ -155,7 +185,9 @@ def _virtual_layer_engines(tag: str, scored: dict, by_id: dict) -> dict:
                     # (handwritten entries, stamps, image-only numbers)
                     union = E.merge_tile_texts([tl.get("text") or "", ecell.get("text") or ""])
                     s3 = M.score_page(gold["text"], gold["fields"], union)
-                    s3["latency_s"] = ecell.get("latency_s")
+                    # the union pays for BOTH reads: the layer and the engine
+                    s3["latency_s"] = ((tl.get("latency_s") or 0) + (ecell.get("latency_s") or 0)
+                                       if ecell.get("latency_s") is not None else tl.get("latency_s"))
                     s3["error"] = None
                     s3["source"] = "textlayer+" + eid
                     pages_union[page] = s3
@@ -163,11 +195,11 @@ def _virtual_layer_engines(tag: str, scored: dict, by_id: dict) -> dict:
                     pages[page] = dict(sc, source=eid)
                     pages_union[page] = dict(sc, source=eid)
             if pages:
-                agg = M.aggregate_pages(list(pages.values()))
+                agg = M.aggregate_pages(list(pages.values()), pages_total=d.pages_total)
                 agg["doc_id"] = did
                 agg["doc_name"] = d.name
                 docs_out[did] = {"pages": pages, "agg": agg}
-                agg_u = M.aggregate_pages(list(pages_union.values()))
+                agg_u = M.aggregate_pages(list(pages_union.values()), pages_total=d.pages_total)
                 agg_u["doc_id"] = did
                 agg_u["doc_name"] = d.name
                 docs_union[did] = {"pages": pages_union, "agg": agg_u}
@@ -191,15 +223,37 @@ def slice_table(scored: dict, docs: list[manifest.Doc]) -> dict:
             if not aggs:
                 continue
             agg = M.aggregate_docs(aggs)
+            # per-PAGE median, kept for history continuity only; decisions use doc_time_*
             lats = [p["latency_s"] for v in data["docs"].values() if v["agg"]["doc_id"] in ids
                     for p in v["pages"].values() if p.get("latency_s") is not None]
             agg["median_latency_s"] = round(statistics.median(lats), 2) if lats else None
-            agg["p90_latency_s"] = round(sorted(lats)[int(len(lats) * 0.9) - 1], 2) if len(lats) >= 2 else agg["median_latency_s"]
             ok, fails = M.passes(SLICE_KIND.get(sname, "print"), agg)
             agg["pass"] = ok
             agg["fails"] = fails
             table[sname][eid] = agg
     return table
+
+
+def _rank_key(a: dict) -> tuple:
+    """Completeness first (worst-doc field, then entity recall), then how many documents
+    fit the one-minute budget, then CER, then median document time. Speed matters, but
+    it never outranks a lost value."""
+    return (-(a.get("field_recall_worst") or 0), -(a.get("entity_recall_worst") or 0),
+            -(a.get("within_60s_share") or 0),
+            a.get("cer") if a.get("cer") is not None else 9,
+            a.get("doc_time_median_s") if a.get("doc_time_median_s") is not None else 10**6)
+
+
+def _fmt_doc_time(a: dict) -> str:
+    if a.get("doc_time_median_s") is None:
+        return "—"
+    star = "*" if a.get("extrapolated_docs") else ""
+    return (f"{a['doc_time_median_s']:.0f}s · {a['doc_time_p90_s']:.0f}s · "
+            f"{(a.get('within_60s_share') or 0) * 100:.0f}%{star}")
+
+
+def _fmt_s(v) -> str:
+    return "—" if v is None else f"{v:.0f}s"
 
 
 def _fmt(v, pct=False):
@@ -225,19 +279,23 @@ def leaderboard_md(tag: str, table: dict, scored: dict, docs: list[manifest.Doc]
                  if platform and platform != "any" else "")
     lines = [f"# Leaderboard — tag `{tag}`", "",
              f"_generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_", "", plat_note,
-             "Ranking is lexicographic: worst-doc field recall → worst-doc entity recall → CER → latency. "
+             "Ranking is lexicographic: worst-doc field recall → worst-doc entity recall → share of "
+             "documents extracted within 60 s → CER → median document time. "
              "`field` = every gold label→value must appear in the transcript; `entity` = digit runs and "
-             "IBAN/SWIFT/EIN/SSN (multiset); `line` = fuzzy line recall; CER secondary.", ""]
+             "IBAN/SWIFT/EIN/SSN (multiset); `line` = fuzzy line recall; CER secondary. "
+             "`doc time` = median · p90 · share ≤ 60 s of the time to extract a WHOLE document "
+             "(mean measured page latency × page count; `*` = some documents extrapolated from their "
+             f"first pages). Pass requires p90 ≤ {M.THRESHOLDS['print']['doc_time_p90_s']} s "
+             f"(handwriting {M.THRESHOLDS['handwriting']['doc_time_p90_s']} s). "
+             "Rows scored before 2026-08-22 used per-page latency and are not comparable.", ""]
     for sname, engines in table.items():
         if not engines:
             continue
         lines.append(f"## slice: {sname}")
         lines.append("")
-        lines.append("| engine | docs | field recall (worst · macro) | hw-field recall (worst · macro) | entity recall (worst · macro) | CER | line recall | median lat | pass | worst doc |")
+        lines.append("| engine | docs | field recall (worst · macro) | hw-field recall (worst · macro) | entity recall (worst · macro) | CER | line recall | doc time (median · p90 · ≤60s) | pass | worst doc |")
         lines.append("|---|---|---|---|---|---|---|---|---|---|")
-        ranked = sorted(engines.items(), key=lambda kv: (
-            -(kv[1].get("field_recall_worst") or 0), -(kv[1].get("entity_recall_worst") or 0),
-            kv[1].get("cer") if kv[1].get("cer") is not None else 9, kv[1].get("median_latency_s") or 0))
+        ranked = sorted(engines.items(), key=lambda kv: _rank_key(kv[1]))
         for eid, a in ranked:
             worst = a.get("field_recall_worst_doc") or ""
             wname = next((d.name for d in docs if d.doc_id == worst), worst)
@@ -245,7 +303,7 @@ def leaderboard_md(tag: str, table: dict, scored: dict, docs: list[manifest.Doc]
                 f"| `{eid}` | {a['docs']} | {_fmt(a.get('field_recall_worst'), True)} · {_fmt(a.get('field_recall'), True)} "
                 f"| {_fmt(a.get('field_hw_recall_worst'), True)} · {_fmt(a.get('field_hw_recall'), True)} "
                 f"| {_fmt(a.get('entity_recall_worst'), True)} · {_fmt(a.get('entity_recall'), True)} "
-                f"| {_fmt(a.get('cer'))} | {_fmt(a.get('line_recall'), True)} | {_fmt(a.get('median_latency_s'))}s "
+                f"| {_fmt(a.get('cer'))} | {_fmt(a.get('line_recall'), True)} | {_fmt_doc_time(a)} "
                 f"| {'✅' if a.get('pass') else '❌'} | {wname[:38]} |")
         lines.append("")
     # engine status
@@ -253,8 +311,12 @@ def leaderboard_md(tag: str, table: dict, scored: dict, docs: list[manifest.Doc]
     lines.append("")
     for eid, data in scored.items():
         st = data.get("status") or {}
+        vers = data.get("versions") or {}
+        vtxt = " ".join(f"v={v}:{n}" for v, n in sorted(vers.items()))
+        stale = data.get("stale_cells") or 0
         lines.append(f"- `{eid}`: {st.get('state', '?')} errors={st.get('errors', 0)} "
-                     f"median={st.get('median_latency_s')}s")
+                     f"median page={st.get('median_latency_s')}s {vtxt}"
+                     + (f" ⚠ {stale} stale cell(s) ignored" if stale else ""))
     rdir = results_dir(tag)
     if (rdir / "engines.json").exists():
         for eid, st in json.loads((rdir / "engines.json").read_text(encoding="utf-8")).items():
@@ -349,38 +411,52 @@ def append_history(tag: str, table: dict) -> None:
     for sname, engines in table.items():
         row["slices"][sname] = {eid: {k: a.get(k) for k in ("docs", "field_recall_worst", "field_recall",
                                                           "entity_recall_worst", "entity_recall", "cer",
-                                                          "line_recall", "median_latency_s", "pass")}
+                                                          "line_recall", "median_latency_s",
+                                                          "doc_time_median_s", "doc_time_p90_s",
+                                                          "within_60s_share", "pass")}
                                 for eid, a in engines.items()}
     with hp.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def decision_md(tag: str, table: dict, platform: str | None = None) -> str:
+def decision_md(tag: str, table: dict, platform: str | None = None,
+                docs: list[manifest.Doc] | None = None) -> str:
     table = filter_platform(table, platform)
     real = table.get("real", {})
     hw = table.get("handwriting", {})
+    names = {d.doc_id: d.name for d in (docs or [])}
     lines = [f"# Decision — tag `{tag}`" + (f" · target platform `{platform}`" if platform and platform != "any" else ""), ""]
     if not real:
         return "\n".join(lines + ["no real-corpus results yet"])
-    ranked = sorted(real.items(), key=lambda kv: (
-        -(kv[1].get("field_recall_worst") or 0), -(kv[1].get("entity_recall_worst") or 0),
-        kv[1].get("cer") if kv[1].get("cer") is not None else 9, kv[1].get("median_latency_s") or 0))
+    ranked = sorted(real.items(), key=lambda kv: _rank_key(kv[1]))
     best_id, best = ranked[0]
-    print_ok = all(table.get(s, {}).get(best_id, {}).get("pass", False)
-                   for s in ("digital", "scan", "photo", "cjk", "latin", "rtl") if table.get(s, {}).get(best_id))
-    lat_ok = (best.get("median_latency_s") or 0) <= 90
+    print_slices = [s for s in ("digital", "scan", "photo", "cjk", "latin", "rtl") if table.get(s, {}).get(best_id)]
+    print_ok = all(table[s][best_id].get("pass", False) for s in print_slices)
     hw_ok = bool(hw.get(best_id, {}).get("pass")) if hw else False
+    limit = M.DOC_TIME_LIMIT_S
+    over = best.get("docs_over_60s") or []
+    n_timed = sum(1 for _ in real) and best.get("docs")
     lines += [f"Best engine on the real corpus: `{best_id}`", "",
               f"- worst-doc field recall: {_fmt(best.get('field_recall_worst'), True)} (macro {_fmt(best.get('field_recall'), True)})",
               f"- worst-doc entity recall: {_fmt(best.get('entity_recall_worst'), True)} (macro {_fmt(best.get('entity_recall'), True)})",
-              f"- CER {_fmt(best.get('cer'))}, line recall {_fmt(best.get('line_recall'), True)}, median latency {_fmt(best.get('median_latency_s'))}s",
-              f"- print slices pass: {'yes' if print_ok else 'no'}; handwriting pass: {'yes' if hw_ok else 'no' if hw else 'n/a'}; latency ≤ 90 s: {'yes' if lat_ok else 'no'}",
+              f"- CER {_fmt(best.get('cer'))}, line recall {_fmt(best.get('line_recall'), True)}",
+              f"- document time: median {_fmt_s(best.get('doc_time_median_s'))}, p90 {_fmt_s(best.get('doc_time_p90_s'))}, "
+              f"{_fmt(best.get('within_60s_share'), True)} of documents within {limit} s"
+              + (f" ({best.get('extrapolated_docs')} extrapolated from their first pages)" if best.get("extrapolated_docs") else ""),
+              f"- print slices pass: {'yes' if print_ok else 'no'}; handwriting pass: {'yes' if hw_ok else 'no' if hw else 'n/a'}",
               ""]
-    if print_ok and hw_ok and lat_ok:
-        verdict = "IMPLEMENT — a local engine meets the print and handwriting thresholds."
-    elif print_ok and lat_ok:
-        verdict = ("HYBRID — print documents can be extracted locally; handwritten pages must be flagged "
-                   "for human/remote transcription.")
+    if over:
+        lines.append(f"{len(over)} of {n_timed} real documents would make the user wait longer than {limit} s:")
+        for did in over[:15]:
+            lines.append(f"- {names.get(did, did)}")
+        if len(over) > 15:
+            lines.append(f"- … and {len(over) - 15} more (`mdmdoc bench latency --tag {tag} --engine '{best_id}'`)")
+        lines.append("")
+    if print_ok and hw_ok:
+        verdict = "IMPLEMENT — a local engine meets the print and handwriting thresholds (quality AND time)."
+    elif print_ok:
+        verdict = ("HYBRID — print documents can be extracted locally within the time budget; handwritten "
+                   "pages must be flagged for human/remote transcription.")
     else:
         verdict = "NO-GO (for now) — see the leaderboard for which slices fail and by how much."
     lines += [f"**{verdict}**", ""]
@@ -413,7 +489,7 @@ def cli_report(a) -> int:
     n = 0 if a.no_diffs else write_diffs(a.tag, scored, docs)
     append_history(a.tag, table)
     if a.decide:
-        dm = decision_md(a.tag, table, platform)
+        dm = decision_md(a.tag, table, platform, docs)
         config.atomic_write_text(config.BENCH_DIR / "DECISION.md", dm)
         print(dm)
     print(md)
@@ -440,4 +516,54 @@ def cli_worst(a) -> int:
         if r["missing_entities"]:
             print(f"      missing entities: {', '.join(r['missing_entities'])}")
         print(f"      diff: {results_dir(a.tag) / 'diffs' / E.safe_id(eid) / (r['doc_id'] + '.html')}")
+    return 0
+
+
+# ── latency ───────────────────────────────────────────────────────────────────
+
+def latency_rows(scored: dict, engine_id: str, docs: list[manifest.Doc], slice_expr: str = "all") -> list[dict]:
+    data = scored.get(engine_id)
+    if not data:
+        return []
+    ids = {d.doc_id for d in docs if manifest.matches(d, slice_expr)}
+    rows = []
+    for did, v in data["docs"].items():
+        a = v["agg"]
+        if did not in ids or a.get("doc_time_s") is None:
+            continue
+        rows.append({"doc_id": did, "doc_name": a["doc_name"], "doc_time_s": a["doc_time_s"],
+                     "pages_measured": a["pages_measured"], "pages_total": a["pages_total"],
+                     "extrapolated": a["extrapolated"], "field_recall": a.get("field_recall")})
+    rows.sort(key=lambda r: -r["doc_time_s"])
+    return rows
+
+
+def cli_latency(a) -> int:
+    docs = manifest.load("all")
+    scored = score_tag(a.tag, docs)
+    eid = a.engine
+    if eid not in scored:
+        cands = [k for k in scored if k.startswith(eid)]
+        if len(cands) == 1:
+            eid = cands[0]
+        else:
+            _log(f"engine {a.engine!r} not in tag {a.tag}; have: {list(scored)}")
+            return 2
+    rows = latency_rows(scored, eid, docs, a.slice)
+    if not rows:
+        _log("no timed cells")
+        return 2
+    limit = M.DOC_TIME_LIMIT_S
+    print(f"# {eid} — time per WHOLE document (tag {a.tag}, slice {a.slice}); ⚠️ > {limit}s, * = extrapolated")
+    for r in rows:
+        flag = "⚠️" if r["doc_time_s"] > limit else "  "
+        star = "*" if r["extrapolated"] else " "
+        print(f"{flag} {r['doc_time_s']:7.1f}s{star} {r['pages_measured']}/{r['pages_total']}p  "
+              f"field {r['field_recall'] if r['field_recall'] is not None else '—'}  {r['doc_name'][:60]}")
+    times = [r["doc_time_s"] for r in rows]
+    med = M.percentile_nearest_rank(times, 0.5)
+    p90 = M.percentile_nearest_rank(times, 0.9)
+    within = sum(1 for t in times if t <= limit)
+    print(f"\n{len(rows)} docs · median {med:.1f}s · p90 {p90:.1f}s · {within}/{len(rows)} "
+          f"({within / len(rows) * 100:.0f}%) within {limit}s · {sum(1 for r in rows if r['extrapolated'])} extrapolated")
     return 0

@@ -120,6 +120,11 @@ def _cmd_worst(a) -> int:
     return report.cli_worst(a)
 
 
+def _cmd_latency(a) -> int:
+    from . import report
+    return report.cli_latency(a)
+
+
 def _cmd_doctype(a) -> int:
     from . import doctype
     return doctype.cli_doctype(a)
@@ -236,6 +241,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--slice", default="all")
     p.add_argument("-n", type=int, default=5)
     p.set_defaults(func=_cmd_worst)
+    p = sub.add_parser("latency", help="time per WHOLE document for an engine (the user's wait)")
+    p.add_argument("--tag", required=True)
+    p.add_argument("--engine", required=True)
+    p.add_argument("--slice", default="all")
+    p.set_defaults(func=_cmd_latency)
     p = sub.add_parser("doctype", help="classify doc type from candidate transcripts")
     p.add_argument("--tag", required=True)
     p.add_argument("--engine", default=None, help="only this engine (default: all in tag)")

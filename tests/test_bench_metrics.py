@@ -135,3 +135,25 @@ def test_checkbox_and_writer_parentheticals_are_not_page_text():
             {"label": "14a", "value": "☑ Italy"}]
     r, _ = M.field_value_recall(gold, "Federal tax classification LLC\nresident of Italy")
     assert r.total == 2 and r.recall == 1.0
+
+
+def test_doc_time_and_percentile():
+    pg = lambda lat: dict(M.score_page("Name: Acme\nEIN 84-0273800", [{"label": "Name", "value": "Acme"}],
+                                        "Name: Acme\nEIN 84-0273800"), latency_s=lat)
+    # 2 measured pages of a 4-page document: 10 s + 20 s → mean 15 × 4 = 60 s, extrapolated
+    a = M.aggregate_pages([pg(10), pg(20)], pages_total=4)
+    assert a["doc_time_s"] == 60.0 and a["extrapolated"] and a["pages_measured"] == 2 and a["pages_total"] == 4
+    b = M.aggregate_pages([pg(10), pg(20)])
+    assert b["doc_time_s"] == 30.0 and not b["extrapolated"]
+    assert M.percentile_nearest_rank([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.9) == 9
+    assert M.percentile_nearest_rank([5, 1], 0.9) == 5 and M.percentile_nearest_rank([], 0.9) is None
+    docs = [dict(a, doc_id=f"d{i}", doc_time_s=t) for i, t in enumerate([20, 30, 40, 50, 55, 58, 59, 61, 70, 200])]
+    agg = M.aggregate_docs(docs)
+    assert agg["doc_time_p90_s"] == 70 and agg["doc_time_median_s"] == 55
+    assert agg["within_60s_share"] == 0.7 and agg["docs_over_60s"] == ["d9", "d8", "d7"]
+    assert agg["doc_time_worst_doc"] == "d9" and agg["extrapolated_docs"] == 10
+    ok, fails = M.passes("print", agg)
+    assert not ok and any("doc_time_p90 70s > 60s" in f for f in fails)
+    hw = dict(agg, doc_time_p90_s=80)
+    assert not any("doc_time" in f for f in M.passes("handwriting", hw)[1])
+    assert not any("doc_time" in f for f in M.passes("print", dict(agg, doc_time_p90_s=None))[1])

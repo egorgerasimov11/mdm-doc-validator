@@ -154,3 +154,71 @@ def test_merge_tile_texts_dedups_overlap():
     merged = E.merge_tile_texts([top, bottom])
     assert merged.count("Shared overlap line here") == 1
     assert merged.splitlines() == ["Header line", "Account 4830 2291 0077", "Shared overlap line here", "Footer line"]
+
+
+# ── versions: options touch only the VLM families ────────────────────────────
+
+def test_engine_version_options_only_touch_vlm(monkeypatch):
+    assert E.TextLayerEngine().version.startswith("1")
+    base = E.parse("ollama:qwen2.5vl:7b")
+    v1 = base.version
+    assert v1.startswith("1-") and "-o" in v1
+    prof = dict(E.profile_for("qwen2.5vl:7b"))
+    prof["repeat_penalty"] = 1.4
+    monkeypatch.setattr(E, "profile_for", lambda m: dict(prof))
+    v2 = E.parse("ollama:qwen2.5vl:7b").version
+    assert v2 != v1 and v2.startswith("1-")
+    assert E.TextLayerEngine().version == "1"          # untouched by a VLM option
+
+
+# ── loop recovery ────────────────────────────────────────────────────────────
+
+LOOPED = "| Banque |\n" + "| 30003 | 02110 | 00037262223 | 29 |\n" * 12
+CLEAN = "RELEVE D'IDENTITE BANCAIRE\nATREEC\n| 30003 | 02110 | 00037262223 | 29 |\nIBAN FR76 3000 3021 1000 0372 6222 329"
+
+
+def _vlm_page(bench):
+    docs = manifest.load("all")
+    d = docs[0]
+    eng = E.parse("ollama:qwen2.5vl:7b")
+    job = E.PageJob(d.doc_id, d.abs_path, 0, d.render_dir)
+    return eng, job
+
+
+def test_ollama_retry_on_loop(bench):
+    eng, job = _vlm_page(bench)
+    calls = []
+
+    def fake_call(prompt, images, timeout, repeat_penalty=None):
+        calls.append((len(images), repeat_penalty))
+        if len(calls) == 1:
+            return LOOPED, {"done_reason": "length", "eval_count": 4096}
+        return CLEAN, {"done_reason": "stop", "eval_count": 50}
+
+    eng._call = fake_call
+    res = eng.transcribe(job)
+    assert res.text == CLEAN
+    assert res.meta["loop_detected"] and res.meta["truncated"]
+    assert res.meta["retry"][0]["layout"] == "h2" and len(res.meta["retry"]) == 1
+    assert res.meta["recovered"] == "h2"
+    assert res.meta["calls"] == 3 and len(calls) == 3          # 1 page + 2 h2 tiles
+    assert calls[0][1] is None and all(c[1] == E.RETRY_REPEAT_PENALTY for c in calls[1:])
+
+
+def test_ollama_retry_exhausted_collapses(bench):
+    from mdmdoc.extract.loops import collapse_repeats
+    eng, job = _vlm_page(bench)
+    eng._call = lambda prompt, images, timeout, repeat_penalty=None: (LOOPED, {"done_reason": "length"})
+    res = eng.transcribe(job)
+    assert [r["layout"] for r in res.meta["retry"]] == ["h2", "q4"]
+    assert res.meta["recovered"] == "collapsed"
+    assert res.text != LOOPED and res.text == collapse_repeats(E.merge_tile_texts([LOOPED] * 4))
+    assert "00037262223" in res.text
+
+
+def test_ollama_clean_page_is_untouched(bench):
+    eng, job = _vlm_page(bench)
+    eng._call = lambda prompt, images, timeout, repeat_penalty=None: (CLEAN, {"done_reason": "stop"})
+    res = eng.transcribe(job)
+    assert res.text == CLEAN and res.meta["calls"] == 1 and res.meta["retry"] == []
+    assert not res.meta["loop_detected"]

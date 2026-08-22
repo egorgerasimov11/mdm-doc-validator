@@ -173,10 +173,14 @@ def cli_status(a) -> int:
                 st = _json.loads((tdir / "engines.json").read_text(encoding="utf-8"))
             print(f"tag {tdir.name}:")
             for edir in sorted(p for p in tdir.iterdir() if p.is_dir() and p.name != "diffs"):
-                cells = list(edir.glob("*/p*.json"))
-                errs = sum(1 for c in cells if (load_cell(c) or {}).get("error"))
-                eid = next((load_cell(c) or {}).get("engine_id") for c in cells[:1]) if cells else edir.name
+                loaded = [c for c in (load_cell(p) for p in edir.glob("*/p*.json")) if c]
+                errs = sum(1 for c in loaded if c.get("error"))
+                eid = next((c.get("engine_id") for c in loaded if c.get("engine_id")), edir.name)
+                vers = Counter(str(c.get("engine_version") or "?") for c in loaded)
+                vtxt = " ".join(f"v={v}:{n}" for v, n in sorted(vers.items()))
+                if len(vers) > 1:
+                    vtxt += " ⚠ mixed"
                 s = st.get(eid, {})
-                print(f"   {eid[:70]:70s} {len(cells):4d} cells {errs:3d} err  {s.get('state', '')} "
-                      f"{('median ' + str(s.get('median_latency_s')) + 's') if s.get('median_latency_s') else ''}")
+                print(f"   {eid[:70]:70s} {len(loaded):4d} cells {errs:3d} err  {s.get('state', '')} "
+                      f"{('median ' + str(s.get('median_latency_s')) + 's ') if s.get('median_latency_s') else ''}{vtxt}")
     return 0

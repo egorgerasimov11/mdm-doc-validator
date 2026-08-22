@@ -34,9 +34,20 @@ from pathlib import Path
 
 from .. import config, ocr
 from . import render as R
+from .loops import collapse_repeats, looks_looped
 from .plausibility import layer_usable, plausibility
 
-CODE_VERSION = "2"   # 2: repeat_penalty in the Ollama options
+# Bump ONLY for code changes that alter what every engine family produces. Generation
+# options (temperature, repeat_penalty, num_predict …) are folded per family via
+# _opts_sha8() so that changing an Ollama option invalidates Ollama cells and nothing
+# else — bumping this for the repeat_penalty change threw away 900 valid textlayer/
+# tesseract/applevision cells for no reason.
+CODE_VERSION = "1"
+
+
+def _opts_sha8(opts: dict) -> str:
+    """Stable 8-hex digest of a generation-options dict (part of a VLM engine's version)."""
+    return hashlib.sha256(json.dumps(opts, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:8]
 
 
 # ── data ──────────────────────────────────────────────────────────────────────
@@ -419,6 +430,45 @@ def merge_tile_texts(texts: list[str], cutoff: int = 90) -> str:
     return "\n".join(out)
 
 
+RETRY_REPEAT_PENALTY = 1.3
+RETRY_LAYOUTS = ("h2", "q4")
+
+
+def _recover_from_loop(text: str, truncated: bool, meta: dict, page: Path, used_layout: str | None,
+                       read) -> str:
+    """Policy shared by the VLM engines: a page that came back looped or cut off at the
+    token limit is re-read as tiles (h2, then q4 — skipping a layout already used),
+    `read(images) -> (text, truncated)`. The first re-read that is non-empty, not
+    looped and not truncated wins. If none qualifies the last non-empty re-read is
+    kept after collapse_repeats(). Invariant: once a re-read produced ANY text the
+    original looped output is never returned."""
+    looped, why = looks_looped(text)
+    meta["loop_detected"] = looped
+    meta["loop_reason"] = why
+    meta["retry"] = []
+    if not (looped or truncated):
+        return text
+    last_nonempty = ""
+    for layout in RETRY_LAYOUTS:
+        if layout == used_layout:
+            continue
+        imgs = R.tiles(page, layout)
+        t2, tr2 = read(imgs)
+        l2, why2 = looks_looped(t2)
+        meta["retry"].append({"layout": layout, "tiles": len(imgs), "chars": len(t2),
+                              "looped": l2, "truncated": tr2, "reason": why2})
+        if t2.strip():
+            last_nonempty = t2
+            if not l2 and not tr2:
+                meta["recovered"] = layout
+                return t2
+    if last_nonempty:
+        meta["recovered"] = "collapsed"
+        return collapse_repeats(last_nonempty)
+    meta["recovered"] = "collapsed-original"
+    return collapse_repeats(text)
+
+
 class OllamaVLMEngine(PageEngine):
     family = "ollama"
     render = R.PRESETS["v170"]
@@ -456,7 +506,7 @@ class OllamaVLMEngine(PageEngine):
             extra += "-" + resolve_prompt("ocrhint")[2]
         if twopass:
             extra += "-" + resolve_prompt("verify")[2]
-        self.version = f"{CODE_VERSION}-{psha}{extra}"
+        self.version = f"{CODE_VERSION}-{psha}{extra}-o{_opts_sha8(self._options())}"
 
     def available(self) -> tuple[bool, str]:
         if not self.O.alive(self.host):
@@ -481,21 +531,37 @@ class OllamaVLMEngine(PageEngine):
     def teardown(self) -> None:
         self.O.unload(self.model, self.host)
 
-    def _options(self) -> dict:
+    def _options(self, repeat_penalty: float | None = None) -> dict:
         # repeat_penalty is load-bearing, not tuning: without it qwen2.5vl:7b fell into
         # a loop on a French RIB (one table cell repeated to the 4096-token limit, 279 s,
         # zero values extracted); with 1.15 the same page took 90 s and every key
-        # value was present. 3-10% of wave-1 pages looped this way.
+        # value was present. 3-10% of wave-1 pages looped this way. The retry path
+        # passes a stronger penalty explicitly.
         return {"temperature": 0, "seed": 7, "num_ctx": self.prof["num_ctx"],
                 "num_predict": self.prof["num_predict"],
-                "repeat_penalty": self.prof.get("repeat_penalty", 1.15)}
+                "repeat_penalty": repeat_penalty if repeat_penalty is not None
+                else self.prof.get("repeat_penalty", 1.15)}
 
-    def _call(self, prompt: str, images: list[Path], timeout: int) -> tuple[str, dict]:
+    def _call(self, prompt: str, images: list[Path], timeout: int,
+              repeat_penalty: float | None = None) -> tuple[str, dict]:
         think = False if "thinking" in self.caps else None
-        text, stats = self.O.generate(self.model, prompt, images, options=self._options(),
+        text, stats = self.O.generate(self.model, prompt, images, options=self._options(repeat_penalty),
                                       keep_alive=self.keep_alive, timeout=timeout, think=think,
                                       h=self.host)
         return _strip_fences(text), stats
+
+    def _read(self, prompt: str, images: list[Path], timeout: int, meta: dict, *,
+              repeat_penalty: float | None = None) -> tuple[str, bool]:
+        """Transcribe one image list (a page, or its tiles) → (merged text, truncated?)."""
+        texts = []
+        truncated = False
+        for img in images:
+            text, stats = self._call(prompt, [img], timeout, repeat_penalty)
+            meta["calls"] += 1
+            truncated = truncated or stats.get("done_reason") == "length"
+            meta["eval_count"] = meta.get("eval_count", 0) + (stats.get("eval_count") or 0)
+            texts.append(text)
+        return (merge_tile_texts(texts) if len(texts) > 1 else (texts[0] if texts else "")), truncated
 
     def transcribe(self, job: PageJob) -> PageResult:
         page = self.page_image(job)
@@ -516,15 +582,11 @@ class OllamaVLMEngine(PageEngine):
         if self.tiles:
             images = R.tiles(page, self.tiles)
             meta["tiles"] = len(images)
-        texts = []
-        for img in images:
-            text, stats = self._call(prompt, [img], timeout)
-            meta["calls"] += 1
-            meta["truncated"] = meta["truncated"] or stats.get("done_reason") == "length"
-            meta.setdefault("eval_count", 0)
-            meta["eval_count"] += stats.get("eval_count") or 0
-            texts.append(text)
-        text = merge_tile_texts(texts) if len(texts) > 1 else (texts[0] if texts else "")
+        text, truncated = self._read(prompt, images, timeout, meta)
+        meta["truncated"] = truncated
+        text = _recover_from_loop(text, truncated, meta, page, self.tiles,
+                                  lambda imgs: self._read(prompt, imgs, timeout, meta,
+                                                          repeat_penalty=RETRY_REPEAT_PENALTY))
         if self.twopass and text.strip():
             vprompt = resolve_prompt("verify")[0].replace("{draft}", text[:12000])
             text2, stats2 = self._call(vprompt, [page], timeout)
@@ -564,7 +626,7 @@ class MLXVLMEngine(PageEngine):
         self.twopass = twopass
         mods = (f"~tiles:{tiles}" if tiles else "") + ("~ocrhint" if ocrhint else "") + ("~twopass" if twopass else "")
         self.id = f"mlx:{short}@{self.render.name}#{self.prompt_tag}{mods}"
-        self.version = f"{CODE_VERSION}-{psha}"
+        self.version = f"{CODE_VERSION}-{psha}-o{_opts_sha8(self._gen_options())}"
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._restarts = 0
@@ -635,6 +697,9 @@ class MLXVLMEngine(PageEngine):
             raise TimeoutError(f"mlx worker timed out after {timeout}s")
         return box[0] if box else ""
 
+    def _gen_options(self) -> dict:
+        return {"max_tokens": self.prof.get("num_predict", 4096)}
+
     def _call(self, prompt: str, images: list[Path], timeout: int) -> tuple[str, dict]:
         with self._lock:
             if self._proc is None or self._proc.poll() is not None:
@@ -643,8 +708,7 @@ class MLXVLMEngine(PageEngine):
                 self._restarts += 1
                 self.setup()
             assert self._proc and self._proc.stdin
-            req = {"images": [str(p) for p in images], "prompt": prompt,
-                   "max_tokens": self.prof.get("num_predict", 4096)}
+            req = {"images": [str(p) for p in images], "prompt": prompt, **self._gen_options()}
             self._proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
             self._proc.stdin.flush()
             raw = self._readline(timeout)
@@ -654,6 +718,18 @@ class MLXVLMEngine(PageEngine):
         if out.get("error"):
             raise RuntimeError(out["error"])
         return _strip_fences(out.get("text", "")), out
+
+    def _read(self, prompt: str, images: list[Path], timeout: int, meta: dict) -> tuple[str, bool]:
+        texts = []
+        truncated = False
+        for img in images:
+            text, stats = self._call(prompt, [img], timeout)
+            meta["calls"] += 1
+            truncated = truncated or bool(stats.get("truncated"))
+            meta["peak_mem_gb"] = stats.get("peak_mem_gb")
+            meta["gen_tokens"] = meta.get("gen_tokens", 0) + (stats.get("gen_tokens") or 0)
+            texts.append(text)
+        return (merge_tile_texts(texts) if len(texts) > 1 else (texts[0] if texts else "")), truncated
 
     def transcribe(self, job: PageJob) -> PageResult:
         page = self.page_image(job)
@@ -672,16 +748,11 @@ class MLXVLMEngine(PageEngine):
         images = R.tiles(page, self.tiles) if self.tiles else [page]
         if self.tiles:
             meta["tiles"] = len(images)
-        texts = []
-        for img in images:
-            text, stats = self._call(prompt, [img], timeout)
-            meta["calls"] += 1
-            meta["truncated"] = meta["truncated"] or bool(stats.get("truncated"))
-            meta["peak_mem_gb"] = stats.get("peak_mem_gb")
-            meta.setdefault("gen_tokens", 0)
-            meta["gen_tokens"] += stats.get("gen_tokens") or 0
-            texts.append(text)
-        text = merge_tile_texts(texts) if len(texts) > 1 else (texts[0] if texts else "")
+        text, truncated = self._read(prompt, images, timeout, meta)
+        meta["truncated"] = truncated
+        # the worker has no repetition penalty yet — recovery is tiles only
+        text = _recover_from_loop(text, truncated, meta, page, self.tiles,
+                                  lambda imgs: self._read(prompt, imgs, timeout, meta))
         if self.twopass and text.strip():
             vprompt = resolve_prompt("verify")[0].replace("{draft}", text[:12000])
             text2, _ = self._call(vprompt, [page], timeout)
