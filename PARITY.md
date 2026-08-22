@@ -153,9 +153,11 @@ guards (phantom-EIN fix) — port candidate, tracked in the manifest note.
 ## Pending ABAP logic ports (Python has it, ABAP not yet — remove the line once applied)
 
 - **Vision model default** (`p_ovis`, currently documented as `qwen2.5vl:7b`).
-  To be set from the benchmark winner once `bench/DECISION.md` is written — the ABAP
-  twin reaches only its own PDF text layer plus Ollama, so the model choice IS the
-  extraction quality there.
+  Benchmark verdict 2026-08-22 (`docs/EXTRACTOR_DECISION.md`): **HYBRID** — no local
+  vision model met the quality or the 60-s-per-document budget, so `p_ovis` stays
+  as is and is NOT the automatic path; ZMDMDOC should trust its text layer through
+  the plausibility gate and route scans/photos/handwriting to a human or remote queue.
+  Revisit only if the work machine gets a GPU (re-run `mdmdoc bench run` there).
 
 ## Ported extraction logic (Python has it, ABAP carries it, both are pinned)
 
