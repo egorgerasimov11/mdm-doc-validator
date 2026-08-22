@@ -76,10 +76,13 @@ async def extract_upload(files: list[UploadFile] = File(...), vlm: str = Form(""
             job.stage = "reading"
             log(f"{path.name}: text layer + tesseract + RapidOCR"
                 + (f" + {use_vlm} (Ollama, if reachable)" if use_vlm else ""))
-            doc = extract_document(path, vlm=use_vlm, out_dir=OUT_ROOT / path.stem)
+            # save_upload() names the file <sha16>__<name>; the result dir keeps the
+            # original name so the list reads like the operator's folder
+            stem = Path(path.name.split("__", 1)[-1]).stem or path.stem
+            doc = extract_document(path, vlm=use_vlm, out_dir=OUT_ROOT / stem)
             n = sum(len(pg["values"]) for pg in doc["pages_out"])
             log(f"done: {doc['doc_type']} · {doc['pages']} page(s) · {n} values · {doc['elapsed_s']} s")
-            return {"name": path.stem}
+            return {"name": stem}
 
         REGISTRY.submit("extract", run, pass_job=True)
         names.append(path.name)

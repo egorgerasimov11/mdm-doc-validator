@@ -57,7 +57,11 @@ class PageExtract:
 def _engine_list(specs: list[str] | None, vlm: str | None) -> list[E.PageEngine]:
     specs = list(specs or DEFAULT_ENGINES)
     if vlm:
-        specs.append(vlm if vlm.startswith("ollama:") else f"ollama:{vlm}")
+        # the benchmark winner reads at 200 dpi (v200); a bare model name gets that
+        spec = vlm if vlm.startswith("ollama:") else f"ollama:{vlm}"
+        if "@" not in spec:
+            spec += "@v200"
+        specs.append(spec)
     out = []
     for s in specs:
         eng = E.parse(s)
