@@ -36,7 +36,7 @@ from .. import config, ocr
 from . import render as R
 from .plausibility import layer_usable, plausibility
 
-CODE_VERSION = "1"
+CODE_VERSION = "2"   # 2: repeat_penalty in the Ollama options
 
 
 # ── data ──────────────────────────────────────────────────────────────────────
@@ -482,8 +482,13 @@ class OllamaVLMEngine(PageEngine):
         self.O.unload(self.model, self.host)
 
     def _options(self) -> dict:
+        # repeat_penalty is load-bearing, not tuning: without it qwen2.5vl:7b fell into
+        # a loop on a French RIB (one table cell repeated to the 4096-token limit, 279 s,
+        # zero values extracted); with 1.15 the same page took 90 s and every key
+        # value was present. 3-10% of wave-1 pages looped this way.
         return {"temperature": 0, "seed": 7, "num_ctx": self.prof["num_ctx"],
-                "num_predict": self.prof["num_predict"]}
+                "num_predict": self.prof["num_predict"],
+                "repeat_penalty": self.prof.get("repeat_penalty", 1.15)}
 
     def _call(self, prompt: str, images: list[Path], timeout: int) -> tuple[str, dict]:
         think = False if "thinking" in self.caps else None
