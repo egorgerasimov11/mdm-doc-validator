@@ -389,7 +389,11 @@ def _file_sha8(p: Path) -> str:
 # per-model-family defaults (prefix match on the model name)
 PROFILES: dict[str, dict] = {
     "qwen2.5vl": {"num_ctx": 16384, "num_predict": 4096},
-    "qwen3-vl": {"num_ctx": 32768, "num_predict": 6144},
+    # 24k, not 32k: the bench host (Mac mini, 16 GB) holds qwen3-vl:8b at 32k as
+    # 10.6 GB resident and swaps 9.5 GB — 5.8 min wall-clock per page vs 49 s of
+    # model time. HARD limit for that machine: <= 24k context (memory note
+    # mini-model-memory-limit). 24k is still 4x the longest page we emit.
+    "qwen3-vl": {"num_ctx": 24576, "num_predict": 6144},
     "deepseek-ocr": {"num_ctx": 8192, "num_predict": 3000, "prompt": "deepseek_ocr",
                      "max_side": 1280},
     "gemma3": {"num_ctx": 16384, "num_predict": 4096},

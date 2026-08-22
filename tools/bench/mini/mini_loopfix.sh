@@ -15,4 +15,6 @@ banner "loop-fix: wave-2 engines (cells written by the pre-fix code are version-
 OLL="ollama:qwen3-vl:4b@v200#transcribe_md,ollama:deepseek-ocr:3b@v200,ollama:minicpm-v:8b@v200#transcribe_md,ollama:granite3.2-vision:2b@v200#transcribe_md"
 $B run --engines "$OLL" --docs tag:core --tag w2
 $B run --engines "$OLL" --docs stratum:public --tag w2
+$B doctype --tag w1
+$B doctype --tag w2
 banner "DONE loopfix"
