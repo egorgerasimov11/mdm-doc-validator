@@ -116,6 +116,7 @@ def run_sweep(engines: list[E.PageEngine], docs: list[manifest.Doc], tag: str, *
         try:
             for i, (d, p) in enumerate(jobs, 1):
                 job = E.PageJob(doc_id=d.doc_id, src=d.abs_path, page=p, cache_dir=d.render_dir,
+                                hints={"scripts": list(d.scripts), "langs": list(d.langs)},
                                 timeout_s=timeout or eng.default_timeout_s)
                 t0 = time.time()
                 try:

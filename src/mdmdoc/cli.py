@@ -318,6 +318,11 @@ def _cmd_skill_rules(args) -> int:
     return 0
 
 
+def _cmd_extract(args) -> int:
+    from .extract.extractor import cli_extract
+    return cli_extract(args)
+
+
 def _cmd_bench(args) -> int:
     # The benchmark is a separate, optional tool (dependency group "bench");
     # its own argparse lives in mdmdoc.bench.cli so this module stays thin.
@@ -368,6 +373,15 @@ def main(argv: list[str] | None = None) -> int:
                                                     "(else reverse-lookup by the document)")
         p.set_defaults(func=lambda a, dc=doc_class: _cmd_check(a, dc))
 
+    p = sub.add_parser("extract", help="offline extraction: every value confirmed by independent "
+                       "local engines or a checksum, the rest flagged for a human (Markdown + JSON)")
+    p.add_argument("path", nargs="+")
+    p.add_argument("--engines", default="", help="comma list (default textlayer,tess:auto,rapidocr:auto)")
+    p.add_argument("--vlm", default="", help="add a local Ollama vision model, e.g. qwen2.5vl:7b")
+    p.add_argument("--out", default="", help="output root (default out/extract/<name>/)")
+    p.add_argument("--pages", default="", help="0-based page list, e.g. 0,1")
+    p.add_argument("--timeout", type=int, default=300)
+    p.set_defaults(func=_cmd_extract)
     p = sub.add_parser("review", help="interactively correct a run -> labeled example")
     p.add_argument("run", help="run id, prefix, source path, or 'last'")
     p.add_argument("--open", action="store_true", help="open the original document")

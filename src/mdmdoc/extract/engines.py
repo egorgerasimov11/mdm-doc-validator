@@ -8,6 +8,9 @@ from a spec string:
 
     textlayer                         PDF text layer (PyMuPDF, reading order)
     tess:auto | tess:kor+eng~psm6     tesseract (auto = production CJK-retry logic)
+    rapidocr:auto | rapidocr:korean   RapidOCR (PaddleOCR models on ONNX Runtime, CPU,
+                                      fully offline; auto = pick the rec model by the
+                                      document's scripts, then by confidence)
     applevision:legacy | :document    Apple Vision via tools/visionocr (Swift CLI)
     ollama:qwen2.5vl:7b@v200#transcribe_md.v1~tiles:q4~ocrhint~twopass
     mlx:mlx-community/Qwen3-VL-8B-Instruct-4bit@v200      (tools/mlxvlm worker)
@@ -252,6 +255,142 @@ def _tess_version() -> str:
         out = subprocess.run(["tesseract", "--version"], capture_output=True, timeout=10).stdout.decode()
         m = re.search(r"tesseract\s+v?([\d.]+)", out)
         return m.group(1) if m else "?"
+    except Exception:
+        return "?"
+
+
+# ── RapidOCR (PaddleOCR models on ONNX Runtime; CPU; offline) ────────────────
+
+# Which recognition models to try for a script hint (manifest `scripts`) and the
+# fallback order when there is no hint. PP-OCRv5/v6 "ch" covers Chinese, Japanese
+# kana and English; "latin" has the accented letters of de/fr/es/pl/hu that the
+# Chinese dictionary lacks; the others are single-script dictionaries.
+RAPIDOCR_BY_SCRIPT = {
+    "Han": ["ch"], "Kana": ["ch", "japan"], "Hangul": ["korean"], "Cyrillic": ["cyrillic"],
+    "Arabic": ["arabic"], "Latin": ["latin", "en"],
+}
+RAPIDOCR_FALLBACK = ["latin", "ch"]
+RAPIDOCR_MIN_CONF = 0.85          # mean line confidence below this → try the next model
+
+
+class RapidOCREngine(PageEngine):
+    """Second, independent OCR voice for the consensus layer: different models,
+    different training data and a different text detector than tesseract, so the
+    two do not share failure modes. Runs on CPU everywhere (Windows included) and
+    never touches the network once its model files are present."""
+    family = "rapidocr"
+    render = R.PRESETS["v200"]
+    platforms = PLATFORMS_ALL
+
+    def __init__(self, lang: str = "auto", render_spec: R.RenderSpec | None = None):
+        self.lang = lang or "auto"
+        if render_spec:
+            self.render = render_spec
+        rend = f"@{self.render.name}" if self.render.name != "v200" else ""
+        self.id = f"rapidocr:{self.lang}{rend}"
+        self.version = f"{CODE_VERSION}-rapidocr{_rapidocr_version()}"
+        self._engines: dict[str, object] = {}
+
+    def available(self) -> tuple[bool, str]:
+        try:
+            import rapidocr  # noqa: F401
+            import onnxruntime  # noqa: F401
+        except ImportError as e:
+            return False, f"rapidocr/onnxruntime not installed ({e}); uv sync --group bench"
+        return True, ""
+
+    def _engine(self, lang: str):
+        eng = self._engines.get(lang)
+        if eng is None:
+            import logging
+            logging.getLogger("RapidOCR").setLevel(logging.WARNING)
+            from rapidocr import RapidOCR
+            from rapidocr.utils.typings import LangRec, ModelType, OCRVersion
+            params = {"Rec.lang_type": LangRec(lang)}
+            if lang not in ("ch", "ch_doc"):
+                # the per-script dictionaries ship as PP-OCRv5 "mobile" models (japan: v4);
+                # v6 is Chinese-only so far
+                params["Rec.ocr_version"] = OCRVersion("PP-OCRv4" if lang == "japan" else "PP-OCRv5")
+                params["Rec.model_type"] = ModelType("mobile")
+            eng = RapidOCR(params=params)
+            self._engines[lang] = eng
+        return eng
+
+    def _read(self, png: Path, lang: str) -> tuple[str, list[dict], float]:
+        r = self._engine(lang)(str(png))
+        txts = list(r.txts or []) if r is not None else []
+        scores = list(r.scores or []) if r is not None else []
+        boxes = r.boxes if r is not None else None
+        lines = []
+        for i, t in enumerate(txts):
+            box = None
+            if boxes is not None and i < len(boxes):
+                b = boxes[i]
+                xs = [float(pt[0]) for pt in b]
+                ys = [float(pt[1]) for pt in b]
+                box = [round(min(xs)), round(min(ys)), round(max(xs)), round(max(ys))]
+            lines.append({"text": t, "conf": round(float(scores[i]) * 100, 1) if i < len(scores) else None,
+                          "bbox": box})
+        text = "\n".join(_rapidocr_reading_order(lines))
+        mean = sum(float(x) for x in scores) / len(scores) if scores else 0.0
+        return text, lines, mean
+
+    def _candidates(self, hints: dict) -> list[str]:
+        if self.lang != "auto":
+            return [self.lang]
+        out: list[str] = []
+        for sc in hints.get("scripts") or []:
+            for l in RAPIDOCR_BY_SCRIPT.get(sc, []):
+                if l not in out:
+                    out.append(l)
+        for l in RAPIDOCR_FALLBACK:
+            if l not in out:
+                out.append(l)
+        return out
+
+    def transcribe(self, job: PageJob) -> PageResult:
+        png = self.page_image(job)
+        t0 = time.time()
+        best = None
+        tried = []
+        for lang in self._candidates(job.hints):
+            text, lines, mean = self._read(png, lang)
+            tried.append({"lang": lang, "lines": len(lines), "mean_conf": round(mean, 3)})
+            if best is None or (mean, len(lines)) > (best[2], len(best[1])):
+                best = (text, lines, mean, lang)
+            if mean >= RAPIDOCR_MIN_CONF and lines:
+                break
+        text, lines, mean, lang = best if best else ("", [], 0.0, "")
+        if ocr.cjk_char_count(text) >= 4:
+            text = ocr.collapse_cjk_spaces(text)
+        return PageResult(text, lines, None, round(time.time() - t0, 3),
+                          {"lang": lang, "mean_conf": round(mean, 3), "tried": tried}, None)
+
+
+def _rapidocr_reading_order(lines: list[dict]) -> list[str]:
+    """Group detected boxes into visual rows (centre-y within half a box height),
+    left to right inside a row; rows top to bottom. Cells of one row join with two
+    spaces so table columns stay apart."""
+    items = [(ln["bbox"], ln["text"]) for ln in lines if ln.get("bbox")]
+    if len(items) != len(lines):
+        return [ln["text"] for ln in lines]
+    items.sort(key=lambda it: ((it[0][1] + it[0][3]) / 2, it[0][0]))
+    rows: list[list] = []
+    for box, text in items:
+        cy, h = (box[1] + box[3]) / 2, max(1, box[3] - box[1])
+        if rows and abs(rows[-1][0] - cy) <= 0.5 * h:
+            rows[-1][1].append((box[0], text))
+            n = len(rows[-1][1])
+            rows[-1][0] = (rows[-1][0] * (n - 1) + cy) / n
+        else:
+            rows.append([cy, [(box[0], text)]])
+    return ["  ".join(t for _, t in sorted(r[1])) for r in rows]
+
+
+def _rapidocr_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("rapidocr")
     except Exception:
         return "?"
 
@@ -832,6 +971,8 @@ def parse(spec: str, **kw) -> PageEngine:
         return TextLayerEngine()
     if family == "tess":
         return TesseractEngine(model or "auto", psm=psm, render_spec=rspec)
+    if family == "rapidocr":
+        return RapidOCREngine(model or "auto", render_spec=rspec)
     if family == "applevision":
         return AppleVisionEngine(model or "legacy", langs=langs, render_spec=rspec, correct=correct)
     if family == "ollama":
@@ -865,7 +1006,8 @@ def platforms_of(engine_id: str) -> tuple[str, ...]:
             eid = eid[len(prefix):]
     family = eid.split(":", 1)[0].split("@", 1)[0]
     table = {"textlayer": TextLayerEngine, "tess": TesseractEngine,
-             "applevision": AppleVisionEngine, "ollama": OllamaVLMEngine, "mlx": MLXVLMEngine}
+             "applevision": AppleVisionEngine, "ollama": OllamaVLMEngine, "mlx": MLXVLMEngine,
+             "rapidocr": RapidOCREngine}
     cls = table.get(family)
     plats = tuple(getattr(cls, "platforms", PLATFORMS_ALL)) if cls else PLATFORMS_ALL
     if engine_id.startswith(("layer>", "layer+")):

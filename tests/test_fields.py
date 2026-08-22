@@ -205,7 +205,11 @@ def test_no_writes_outside_choke_points():
                "rule_approvals.py", "config.py", "synth.py", "rule_stats.py",
                "webcheck.py", "skill_import.py", "patterns.py",
                "doctype_profiles.py", "casestore.py", "tags.py"}
-    bench_allowed = {"src/mdmdoc/bench", "src/mdmdoc/extract/render.py", "src/mdmdoc/extract/engines.py"}
+    # extract/extractor.py (`mdmdoc extract`, 2026-08-22) writes the FULL-value
+    # extraction (Markdown + JSON + review crops) under out/extract/ — that output IS
+    # the product, by Egor's decision fully offline and unmasked; /out/ is gitignored.
+    bench_allowed = {"src/mdmdoc/bench", "src/mdmdoc/extract/render.py", "src/mdmdoc/extract/engines.py",
+                     "src/mdmdoc/extract/extractor.py"}
     offenders = []
     for p in src.rglob("*.py"):
         if p.name in allowed:

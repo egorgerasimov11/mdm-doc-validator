@@ -222,3 +222,14 @@ def test_ollama_clean_page_is_untouched(bench):
     res = eng.transcribe(job)
     assert res.text == CLEAN and res.meta["calls"] == 1 and res.meta["retry"] == []
     assert not res.meta["loop_detected"]
+
+
+def test_rapidocr_spec_and_reading_order():
+    e = E.parse("rapidocr:auto")
+    assert e.id == "rapidocr:auto" and e.version.startswith("1-rapidocr") and "windows" in e.platforms
+    assert E.parse("rapidocr:korean").id == "rapidocr:korean"
+    assert e._candidates({"scripts": ["Hangul", "Latin"]})[:2] == ["korean", "latin"]
+    assert e._candidates({})[0] == "latin"
+    lines = [{"text": "right", "bbox": [300, 10, 400, 30]}, {"text": "left", "bbox": [10, 12, 100, 32]},
+             {"text": "below", "bbox": [10, 80, 100, 100]}]
+    assert E._rapidocr_reading_order(lines) == ["left  right", "below"]

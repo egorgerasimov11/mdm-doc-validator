@@ -1,5 +1,36 @@
 # Extractor benchmark — decision (2026-08-22)
 
+> **Update, same day — strictly offline is required.** Egor: every document is
+> confidential; no API, no service. The answer is the **consensus extractor**
+> (`mdmdoc extract`): every value is handed over only when independent local
+> engines agree on it or its checksum holds, everything else goes to the
+> operator with a crop. Measured on the real corpus (target platform Windows):
+>
+> | voices (all local, all offline) | auto-accepted | silent errors | doc time median · p90 · ≤60 s |
+> |---|---|---|---|
+> | text layer + tesseract + RapidOCR (CPU only) | 83.9 % of 732 values, 69 docs | **0** | 6 s · 81 s · 87 % |
+> | … + qwen2.5vl:7b via Ollama | 91.5 % of 704 values, 66 docs | **0** | 59 s · 738 s · 52 % |
+> | … with gemma3:4b instead | 87.2 % | 1 (5→9 in a phone number) | — |
+>
+> "Silent error" = a value accepted without a human that is not in the gold —
+> the number that has to be zero; it is, for both qwen and the CPU-only set. The
+> consensus also caught an error IN the gold: Claude wrote a 20-digit Chinese
+> account number, the 300-dpi crop and all three engines show 19.
+> Rules that got the count to zero are documented in
+> `src/mdmdoc/extract/consensus.py`: two engine FAMILIES (all VLMs are one
+> family — qwen agreed with itself on 17 wrong numbers, with tesseract on 2);
+> three families for confusable glyphs (O/0 in a BIC) and long zero runs; IBAN
+> mod-97 / ABA / EIN-shape-with-US-context as single-voice witnesses; a value
+> that only the PDF text layer has while OCR saw the page is never auto-accepted
+> (an ING statement had its IBANs whited out but still in the layer).
+>
+> **Recommendation:** ship `mdmdoc extract` with the CPU-only voice set as the
+> default (seconds per document, 84 % automatic, 0 silent); add the local VLM as
+> a background voice where a GPU exists (91 %). The remaining 9–16 % of values
+> are shown to the operator with the crop — they are never lost, never guessed.
+> The original verdict below stands for a *single* engine; the consensus is what
+> makes the offline path usable.
+
 **Question.** Can a local engine (OCR / vision-language model) transcribe any vendor
 document — every character, every language, handwriting included — well enough to
 replace the validator with a pure extractor, running on a Windows work machine and

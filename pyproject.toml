@@ -27,6 +27,8 @@ dev = [
 bench = [
     "rapidfuzz>=3.9",
     "claude-agent-sdk>=0.2.114",
+    "rapidocr>=3.0",
+    "onnxruntime>=1.17",
 ]
 
 [build-system]

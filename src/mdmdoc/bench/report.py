@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import config
-from ..extract import engines as E
+from ..extract import consensus as C, engines as E
 from . import manifest, metrics as M
 from .run import engine_dir, load_cell, results_dir
 
@@ -148,6 +148,7 @@ def score_tag(tag: str, docs: list[manifest.Doc] | None = None) -> dict:
         out[engine_id] = {"docs": docs_out, "status": status.get(engine_id, {}),
                           "versions": versions, "stale_cells": stale}
     out.update(_virtual_layer_engines(tag, out, by_id))
+    out.update(_virtual_consensus_engines(tag, out, by_id))
     return out
 
 
@@ -206,6 +207,71 @@ def _virtual_layer_engines(tag: str, scored: dict, by_id: dict) -> dict:
         if docs_out:
             virt[f"layer>{eid}"] = {"docs": docs_out, "status": {"state": "virtual"}}
             virt[f"layer+{eid}"] = {"docs": docs_union, "status": {"state": "virtual"}}
+    return virt
+
+
+def consensus_combos(engine_ids: list[str]) -> list[list[str]]:
+    """Which voice sets to evaluate: every OCR family present (tesseract, rapidocr,
+    applevision) with the text layer, alone and with each VLM. Two-family sets are
+    the minimum; the rule for confusable values wants three."""
+    real = [e for e in engine_ids if not e.startswith(("layer>", "layer+", "consensus("))]
+    by_fam: dict[str, list[str]] = {}
+    for e in real:
+        by_fam.setdefault(C.family_of(e), []).append(e)
+    from itertools import combinations
+    ocr = [by_fam[f][0] for f in ("tesseract", "rapidocr", "applevision") if f in by_fam]
+    layer = ["textlayer"] if "textlayer" in by_fam else []
+    combos: list[list[str]] = []
+    # every OCR subset (so a platform without Apple Vision still gets its own rows)
+    for k in range(1, len(ocr) + 1):
+        for sub in combinations(ocr, k):
+            base = layer + list(sub)
+            if len(sub) >= 2:
+                combos.append(base)
+            for v in by_fam.get("vlm", []):
+                combos.append(base + [v])
+    return combos
+
+
+def _virtual_consensus_engines(tag: str, scored: dict, by_id: dict) -> dict:
+    """`consensus(a+b+c)`: the offline guarantee evaluated from cached cells. The
+    page text is the union of the voices (for the usual recall metrics); the
+    consensus fields say what would be handed over without a human and whether
+    any of it is wrong (silent errors)."""
+    virt: dict = {}
+    for voices in consensus_combos(list(scored)):
+        vid = "consensus(" + "+".join(voices) + ")"
+        dirs = {v: engine_dir(tag, v) for v in voices}
+        docs_out: dict = {}
+        common = set.intersection(*(set(scored[v]["docs"]) for v in voices))
+        for did in sorted(common):
+            d = by_id[did]
+            pages: dict = {}
+            page_ids = set.intersection(*(set(scored[v]["docs"][did]["pages"]) for v in voices))
+            for page in sorted(page_ids):
+                gold = load_gold(d, page)
+                if gold is None:
+                    continue
+                readings: dict[str, str] = {}
+                lat = 0.0
+                for v in voices:
+                    cell = load_cell(dirs[v] / did / f"p{page}.json") or {}
+                    if v == "textlayer" and not (cell.get("meta") or {}).get("usable"):
+                        continue                      # an implausible layer is not a voice
+                    readings[v] = cell.get("text") or ""
+                    lat += cell.get("latency_s") or 0
+                sc = M.score_page(gold["text"], gold["fields"], E.merge_tile_texts(list(readings.values())))
+                sc["latency_s"] = round(lat, 3)
+                sc["error"] = None
+                sc["consensus"] = C.score_consensus(gold["text"], readings)
+                pages[page] = sc
+            if pages:
+                agg = M.aggregate_pages(list(pages.values()), pages_total=d.pages_total)
+                agg["doc_id"] = did
+                agg["doc_name"] = d.name
+                docs_out[did] = {"pages": pages, "agg": agg}
+        if docs_out:
+            virt[vid] = {"docs": docs_out, "status": {"state": "virtual"}, "voices": voices}
     return virt
 
 
@@ -305,6 +371,47 @@ def leaderboard_md(tag: str, table: dict, scored: dict, docs: list[manifest.Doc]
                 f"| {_fmt(a.get('entity_recall_worst'), True)} · {_fmt(a.get('entity_recall'), True)} "
                 f"| {_fmt(a.get('cer'))} | {_fmt(a.get('line_recall'), True)} | {_fmt_doc_time(a)} "
                 f"| {'✅' if a.get('pass') else '❌'} | {wname[:38]} |")
+        lines.append("")
+    cons = {eid: data for eid, data in scored.items() if eid.startswith("consensus(")
+            and (not platform or platform == "any" or all(E.runs_on(v, platform) for v in data.get("voices", [])))}
+    if cons:
+        lines += ["## offline guarantee — consensus of independent engines", "",
+                  "A value is handed over without a human only when >= 2 engine families read it "
+                  "identically (3 for values with confusable glyphs or long zero runs) or its own "
+                  "checksum holds (IBAN mod-97, ABA, EIN/SSN shape). `silent` = accepted values that "
+                  "are NOT in the gold — the number that must be 0. `auto` = share of gold values "
+                  "accepted automatically; the rest go to the operator with the page crop.", "",
+                  "| voices | docs | gold values | auto | silent errors | to review | doc time (median · p90 · ≤60s) |",
+                  "|---|---|---|---|---|---|---|"]
+        real_ids = {d.doc_id for d in docs if d.stratum == "real"}
+        rows = []
+        for eid, data in cons.items():
+            tot = {"gold_values": 0, "auto_found": 0, "accepted": 0, "silent_errors": 0, "review": 0}
+            aggs = []
+            bad: list[str] = []
+            for did, v in data["docs"].items():
+                if did not in real_ids:
+                    continue
+                aggs.append(v["agg"])
+                for page, sc in v["pages"].items():
+                    c = sc.get("consensus") or {}
+                    for k in tot:
+                        tot[k] += c.get(k, 0)
+                    bad += [f"{v['agg']['doc_name'][:30]} p{page}: {x}" for x in c.get("silent_error_values", [])]
+            if not aggs:
+                continue
+            agg = M.aggregate_docs(aggs)
+            rows.append((tot, agg, eid, bad, len(aggs)))
+        rows.sort(key=lambda r: (r[0]["silent_errors"], -(r[0]["auto_found"] / max(1, r[0]["gold_values"]))))
+        for tot, agg, eid, bad, n in rows:
+            auto = tot["auto_found"] / max(1, tot["gold_values"])
+            lines.append(f"| `{eid}` | {n} | {tot['gold_values']} | {auto * 100:.1f}% | **{tot['silent_errors']}** "
+                         f"| {tot['review']} | {_fmt_doc_time(agg)} |")
+        for tot, agg, eid, bad, n in rows:
+            if bad:
+                lines.append("")
+                lines.append(f"silent errors of `{eid}`:")
+                lines += [f"- {b}" for b in bad[:20]]
         lines.append("")
     # engine status
     lines.append("## engine status")

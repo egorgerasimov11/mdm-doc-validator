@@ -40,3 +40,4 @@ rules/history/
 /bench/
 tools/mlxvlm/.venv/
 tools/visionocr/visionocr
+/out/
