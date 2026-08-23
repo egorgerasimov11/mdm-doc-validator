@@ -213,12 +213,13 @@ def page_boxes(lines_by_engine: dict, page_size: tuple[int, int]) -> list[dict]:
             t, b = (ln.get("text") or "").strip(), ln.get("bbox")
             if not t or not b:
                 continue
-            key = (t, round(b[1] / h, 3))
+            pct = ln.get("bbox_pct") or [round(b[0] / w * 100, 2), round(b[1] / h * 100, 2),
+                                         round(b[2] / w * 100, 2), round(b[3] / h * 100, 2)]
+            key = (t, round(pct[1] / 100, 3))
             if key in seen:
                 continue
             seen.add(key)
-            out.append({"text": t, "bbox_pct": [round(b[0] / w * 100, 2), round(b[1] / h * 100, 2),
-                                                round(b[2] / w * 100, 2), round(b[3] / h * 100, 2)]})
+            out.append({"text": t, "bbox_pct": pct})
     return out
 
 
@@ -264,9 +265,12 @@ def build_fields(verdicts: list, transcript: str, lines_by_engine: dict, page_si
         label, pretty, line_no = _locate(v.value, transcript)
         kind, group = classify(v.value, label)
         tlines = (transcript or "").split("\n")
-        bbox, _ = _bbox_for(v.value, lines_by_engine, tlines[line_no] if 0 <= line_no < len(tlines) else "")
-        pct = None
-        if bbox and page_size[0] and page_size[1]:
+        bbox, src_line = _bbox_for(v.value, lines_by_engine, tlines[line_no] if 0 <= line_no < len(tlines) else "")
+        # the engine that read the line knows its own frame (points / 300-dpi /
+        # 200-dpi pixels) and already expressed the box in % of the page;
+        # dividing by the v200 size is only the fallback for an engine without it
+        pct = src_line.get("bbox_pct") if src_line else None
+        if pct is None and bbox and page_size[0] and page_size[1]:
             w, h = page_size
             pct = [round(bbox[0] / w * 100, 2), round(bbox[1] / h * 100, 2),
                    round(bbox[2] / w * 100, 2), round(bbox[3] / h * 100, 2)]
@@ -347,10 +351,14 @@ def _crop_for(value: str, page_img: Path, lines_by_engine: dict, out_dir: Path, 
     for lines in lines_by_engine.values():
         for ln in lines or []:
             body = re.sub(r"\D", "", ln.get("text") or "") if needle.isdigit() else (ln.get("text") or "")
-            if needle and needle in body and ln.get("bbox"):
-                x0, y0, x1, y1 = ln["bbox"]
+            if needle and needle in body and (ln.get("bbox_pct") or ln.get("bbox")):
                 with Image.open(page_img) as im:
                     w, h = im.size
+                    if ln.get("bbox_pct"):
+                        px0, py0, px1, py1 = ln["bbox_pct"]
+                        x0, y0, x1, y1 = px0 / 100 * w, py0 / 100 * h, px1 / 100 * w, py1 / 100 * h
+                    else:
+                        x0, y0, x1, y1 = ln["bbox"]
                     pad = max(12, (y1 - y0))
                     box = (max(0, x0 - pad), max(0, y0 - pad), min(w, x1 + pad), min(h, y1 + pad))
                     crop = im.crop(box)
@@ -425,6 +433,12 @@ def extract_document(src: Path, *, engines: list[str] | None = None, vlm: str | 
         "pages_out": [{"page": pe.page, "latency": pe.latency,
                        "primary_engine": pe.primary_engine, "transcript": pe.primary,
                        "size": list(pe.size), "boxes": pe.boxes,
+                       # every engine's lines in % of the page — what a layout reader
+                       # (the W-9 zones) needs; the raw per-engine pixel boxes stay out
+                       "lines": {eid: [{"text": ln.get("text", ""), "bbox_pct": ln.get("bbox_pct"),
+                                        "conf": ln.get("conf")}
+                                       for ln in lines or [] if (ln.get("text") or "").strip()]
+                                 for eid, lines in pe.lines.items()},
                        "fields": [dict(f, crop=str(pe.crops.get(f["value"], "")) or None) for f in pe.fields],
                        "values": [dict(v.as_dict(), crop=str(pe.crops.get(v.value, "")) or None)
                                   for v in pe.verdicts],

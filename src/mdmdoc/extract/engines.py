@@ -79,6 +79,43 @@ class PageResult:
                 "latency_s": self.latency_s, "meta": self.meta, "error": self.error}
 
 
+def lines_with_pct(lines: list[dict] | None, width: float, height: float,
+                   fmt: str = "xyxy") -> list[dict]:
+    """Attach `bbox_pct` = [x0, y0, x1, y1] in PERCENT OF THE PAGE to every line.
+
+    Every engine reads the page in its own frame — the text layer in PDF points,
+    tesseract in the pixels of its 300-dpi render, RapidOCR in the pixels of the
+    200-dpi render — and the consumers (page boxes, crops, the W-9 zone reader)
+    used to divide all of them by one render's size. Percent of the page is the
+    one frame they share, so it is computed HERE, by the engine that knows its
+    own frame. `fmt`: "xyxy" = [x0, y0, x1, y1]; "xywh" = [x, y, w, h]."""
+    out = []
+    if not lines:
+        return out
+    for ln in lines:
+        b = ln.get("bbox")
+        if b and width and height:
+            if fmt == "xywh":
+                x0, y0, x1, y1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
+            else:
+                x0, y0, x1, y1 = b[0], b[1], b[2], b[3]
+            pct = [round(x0 / width * 100, 2), round(y0 / height * 100, 2),
+                   round(x1 / width * 100, 2), round(y1 / height * 100, 2)]
+            out.append(dict(ln, bbox_pct=pct))
+        else:
+            out.append(dict(ln, bbox_pct=None))
+    return out
+
+
+def _png_size(png) -> tuple[int, int]:
+    try:
+        from PIL import Image
+        with Image.open(png) as im:
+            return im.size
+    except Exception:
+        return (0, 0)
+
+
 class EngineUnavailable(RuntimeError):
     pass
 
@@ -159,13 +196,20 @@ class TextLayerEngine(PageEngine):
         with fitz.open(job.src) as d:
             pg = d[job.page]
             text = pg.get_text("text", sort=True) or ""
-            blocks = pg.get_text("blocks") or []
+            # "dict" gives every LINE its own box (a block of five checkbox
+            # labels side by side is five lines with five boxes, not one box
+            # cut into five strips) — what a layout reader needs
+            layout = pg.get_text("dict") or {}
+            page_w, page_h = float(pg.rect.width), float(pg.rect.height)
         lines = []
-        for b in sorted(blocks, key=lambda b: (round(b[1], 1), b[0])):
-            if len(b) >= 5 and isinstance(b[4], str):
-                for ln in b[4].split("\n"):
-                    if ln.strip():
-                        lines.append({"text": ln.strip(), "bbox": [b[0], b[1], b[2] - b[0], b[3] - b[1]]})
+        for blk in layout.get("blocks") or []:
+            for ln in blk.get("lines") or []:
+                t = "".join(sp.get("text", "") for sp in ln.get("spans") or []).strip()
+                x0, y0, x1, y1 = ln.get("bbox") or (0, 0, 0, 0)
+                if t:
+                    lines.append({"text": t, "bbox": [x0, y0, x1, y1]})
+        lines.sort(key=lambda l: (round(l["bbox"][1], 1), l["bbox"][0]))
+        lines = lines_with_pct(lines, page_w, page_h)
         usable, why = layer_usable(text)
         meta = {"present": bool(text.strip()), "usable": usable, "reason": why,
                 "plausibility": plausibility(text) if text.strip() else None}
@@ -195,11 +239,16 @@ def _tesseract(png: Path, lang: str, psm: int, timeout: int = 120) -> tuple[str,
             if key != cur_key and cur_words:
                 lines.append({"text": " ".join(cur_words), "conf": round(sum(cur_conf) / len(cur_conf), 1),
                               "bbox": cur_box})
-                cur_words, cur_conf = [], []
+                cur_words, cur_conf, cur_box = [], [], None
             cur_key = key
             cur_words.append(word)
             cur_conf.append(conf)
-            cur_box = [int(f[6]), int(f[7]), int(f[8]), int(f[9])]
+            # TSV columns are left, top, width, height OF THE WORD; the line box
+            # is the union of its words, stored as [x0, y0, x1, y1] pixels
+            x0, y0 = int(f[6]), int(f[7])
+            x1, y1 = x0 + int(f[8]), y0 + int(f[9])
+            cur_box = ([min(cur_box[0], x0), min(cur_box[1], y0), max(cur_box[2], x1), max(cur_box[3], y1)]
+                       if cur_box else [x0, y0, x1, y1])
         if cur_words:
             lines.append({"text": " ".join(cur_words), "conf": round(sum(cur_conf) / len(cur_conf), 1),
                           "bbox": cur_box})
@@ -246,6 +295,9 @@ class TesseractEngine(PageEngine):
             text, lines = _tesseract(png, self.lang, self.psm, timeout=job.timeout_s or 120)
             if ocr.cjk_char_count(text) >= 4:
                 text = ocr.collapse_cjk_spaces(text)
+        if lines:
+            w, h = _png_size(png)
+            lines = lines_with_pct(lines, w, h)
         return PageResult(text, lines, None, round(time.time() - t0, 3),
                           {"lang": self.lang, "psm": self.psm}, None)
 
@@ -270,6 +322,44 @@ RAPIDOCR_BY_SCRIPT = {
     "Arabic": ["arabic"], "Latin": ["latin", "en"],
 }
 RAPIDOCR_FALLBACK = ["latin", "ch"]
+
+# The files RapidOCR needs for the languages above. The wheel ships only the
+# Chinese v6 pair + the classifier; the per-script recognisers are fetched from
+# modelscope on first use — which never happens on a laptop without egress. An
+# offline install points MDMDOC_RAPIDOCR_MODELS at a folder holding these.
+RAPIDOCR_MODEL_FILES = ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx",
+                        "ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+                        "latin_PP-OCRv5_rec_mobile.onnx")
+
+
+def rapidocr_models_dir() -> Path | None:
+    """Folder of bundled RapidOCR models (env MDMDOC_RAPIDOCR_MODELS, else
+    <project>/models/rapidocr when it holds the files), or None = the wheel's
+    own folder + network download."""
+    cand = os.environ.get("MDMDOC_RAPIDOCR_MODELS", "").strip()
+    paths = [Path(cand)] if cand else []
+    try:
+        from .. import config
+        paths.append(Path(config.PROJECT_ROOT) / "models" / "rapidocr")
+    except Exception:
+        pass
+    for p in paths:
+        if p.is_dir() and all((p / f).exists() for f in RAPIDOCR_MODEL_FILES[:3]):
+            return p
+    return None
+
+
+def rapidocr_offline() -> bool:
+    """True when every model the default language ladder needs is on disk —
+    a scan will be read without touching the network."""
+    root = rapidocr_models_dir()
+    if root is None:
+        try:
+            import rapidocr
+            root = Path(rapidocr.__file__).parent / "models"
+        except Exception:
+            return False
+    return all((root / f).exists() for f in RAPIDOCR_MODEL_FILES)
 RAPIDOCR_MIN_CONF = 0.85          # mean line confidence below this → try the next model
 
 
@@ -340,6 +430,11 @@ class RapidOCREngine(PageEngine):
             from rapidocr import RapidOCR
             from rapidocr.utils.typings import LangRec, ModelType, OCRVersion
             params = {"Rec.lang_type": LangRec(lang)}
+            root = rapidocr_models_dir()
+            if root:
+                # an offline install: every model file is read from this folder
+                # and nothing is downloaded (a corporate laptop has no egress)
+                params["Global.model_root_dir"] = str(root)
             if lang not in ("ch", "ch_doc"):
                 # the per-script dictionaries ship as PP-OCRv5 "mobile" models (japan: v4);
                 # v6 is Chinese-only so far
@@ -396,6 +491,9 @@ class RapidOCREngine(PageEngine):
         text, lines, mean, lang = best if best else ("", [], 0.0, "")
         if ocr.cjk_char_count(text) >= 4:
             text = ocr.collapse_cjk_spaces(text)
+        if lines:
+            w, h = _png_size(png)
+            lines = lines_with_pct(lines, w, h)
         return PageResult(text, lines, None, round(time.time() - t0, 3),
                           {"lang": lang, "mean_conf": round(mean, 3), "tried": tried}, None)
 
