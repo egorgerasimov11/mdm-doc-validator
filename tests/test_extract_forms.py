@@ -71,6 +71,8 @@ def test_w9_reads_every_field_by_layout():
         ("SPRINGFIELD", "IL", "62704")
     assert fields["tin"]["value"] == "123456789" and fields["tin_type"]["value"] == "ein"
     assert fields["tin"]["pretty"] == "12-3456789"
+    # the digits came one per line: the TIN's box is the union of those lines
+    assert fields["tin"]["bbox_pct"] and fields["tin"]["bbox_pct"][0] < 70 and fields["tin"]["bbox_pct"][2] > 88
     assert fields["classification"]["value"] == "llc"
     assert fields["llc_tax_class"]["value"] == "S"
     assert extra["w9_revision"] == "3-2024"

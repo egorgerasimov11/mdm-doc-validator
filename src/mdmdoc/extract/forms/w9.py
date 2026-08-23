@@ -161,9 +161,12 @@ def _band_value(page: dict, y0: float, y1: float, x_max: float, *, skip_labels: 
     return {eid: " ".join(t for _, _, t in sorted(v)) for eid, v in out.items()}
 
 
-def _digits_in_band(page: dict, y0: float, y1: float, x_min: float) -> dict[str, str]:
+def _digits_in_band(page: dict, y0: float, y1: float, x_min: float,
+                    boxes_out: dict | None = None) -> dict[str, str]:
     """The TIN boxes flatten to one digit per line: collect every digit-only
-    line in the band, left to right, per engine."""
+    line in the band, left to right, per engine. `boxes_out[engine]` receives
+    the union box of the lines the digits came from — the TIN's place on the
+    page, which no single line can name."""
     out: dict[str, list] = {}
     for eid, ln in _lines(page):
         b = ln["bbox_pct"]
@@ -173,18 +176,23 @@ def _digits_in_band(page: dict, y0: float, y1: float, x_min: float) -> dict[str,
         t = ln["text"].strip()
         d = re.sub(r"\D", "", t)
         if d and (len(t) <= 3 or len(d) >= 9 or re.fullmatch(r"[\d\s\-–—|/\\.,;:)(\[\]]+", t)):
-            out.setdefault(eid, []).append((b[0], d))
+            out.setdefault(eid, []).append((b[0], d, b))
     res = {}
     for eid, items in out.items():
-        digits = "".join(d for _, d in sorted(items))
+        digits = "".join(d for _, d, _ in sorted(items, key=lambda it: it[0]))
+        used = [b for _, _, b in items]
         if len(digits) == 9:
             res[eid] = digits
         elif len(digits) > 9:
             # a box row read as one line plus a stray digit elsewhere: keep a
             # 9-digit run when the row itself holds one
-            run = next((d for _, d in items if len(d) == 9), "")
+            run = next(((d, b) for _, d, b in items if len(d) == 9), None)
             if run:
-                res[eid] = run
+                res[eid] = run[0]
+                used = [run[1]]
+        if eid in res and boxes_out is not None and used:
+            boxes_out[eid] = [min(b[0] for b in used), min(b[1] for b in used),
+                              max(b[2] for b in used), max(b[3] for b in used)]
     return res
 
 
@@ -436,11 +444,17 @@ def read(doc: dict, page_image=None) -> tuple[dict[str, dict], dict]:
         if kind not in a:
             continue
         y0 = a[kind]["y1"] - 0.2
-        cands = _digits_in_band(page, y0, y0 + 4.0, a[kind]["x0"] - 6)
+        boxes: dict = {}
+        cands = _digits_in_band(page, y0, y0 + 4.0, a[kind]["x0"] - 6, boxes_out=boxes)
         if cands:
             f = _field_from(page, cands, digits=True)
             if f.value:
                 tin = f
+                if not tin.bbox_pct:
+                    # the digits came one per line — the union of those lines
+                    # (from the engine that won the vote) is where the TIN sits
+                    src = next((e for e in f.voices if e in boxes), None) or next(iter(boxes), None)
+                    tin.bbox_pct = boxes.get(src)
                 tin.pretty = (f"{f.value[:2]}-{f.value[2:]}" if kind == "ein" else f"{f.value[:3]}-{f.value[3:5]}-{f.value[5:]}")
                 tin_type = Field(value=kind, pretty=kind.upper(), status=f.status, page=f.page, bbox_pct=f.bbox_pct,
                                  evidence=f"digits under the {kind.upper()} label", voices=f.voices)
