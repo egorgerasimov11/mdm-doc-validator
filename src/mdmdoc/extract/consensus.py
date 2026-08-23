@@ -105,6 +105,25 @@ def _without_amounts_and_dates(text: str) -> str:
     return _DATE_RE.sub(" ", _AMOUNT_RE.sub(" ", text or ""))
 
 
+_SPACED_RUN = re.compile(r"(?<!\d)(\d[\d\-./]*(?: \d[\d\-./]*)+)(?!\d)")
+
+
+def _split_table_runs(text: str) -> str:
+    """A table row read by OCR — "30003 02110 00037262223 29" — is several values
+    separated by single spaces, but the benchmark's digit-run regex treats a single
+    space as an in-number separator and glues them into one 23-digit token, so the
+    OCR voice is lost for every cell. Groups of UNEQUAL length are distinct values:
+    put two spaces between them. Uniformly grouped numbers ("4830 2291 0077",
+    "3000 3021 1000 0372") stay one number."""
+    def fix(m):
+        groups = m.group(1).split(" ")
+        lens = {len(re.sub(r"\D", "", g)) for g in groups[:-1]} if len(groups) > 2 else {len(re.sub(r"\D", "", g)) for g in groups}
+        if len(lens) > 1 and any(len(re.sub(r"\D", "", g)) >= 4 for g in groups):
+            return "  ".join(groups)
+        return m.group(1)
+    return _SPACED_RUN.sub(fix, text or "")
+
+
 def tokens_of(text: str) -> Counter:
     """All entity tokens of a transcript, canonical (digit runs + typed ids). A digit
     run that is just the digits of a typed id on the same page (the IBAN's body, an
@@ -115,7 +134,7 @@ def tokens_of(text: str) -> Counter:
             tok = "IBAN:" + canonical_iban(tok[5:])
         ids[tok] += n
     shadows = {re.sub(r"\D", "", v.split(":", 1)[1]) for v in ids}
-    out = Counter({d: n for d, n in digit_tokens(_without_amounts_and_dates(text)).items()
+    out = Counter({d: n for d, n in digit_tokens(_split_table_runs(_without_amounts_and_dates(text))).items()
                    if d not in shadows})
     out.update(ids)
     return out

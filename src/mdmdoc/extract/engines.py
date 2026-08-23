@@ -273,6 +273,39 @@ RAPIDOCR_FALLBACK = ["latin", "ch"]
 RAPIDOCR_MIN_CONF = 0.85          # mean line confidence below this → try the next model
 
 
+_SCRIPT_RANGES = {
+    "Hangul": (0xAC00, 0xD7A3), "Han": (0x4E00, 0x9FFF), "Kana": (0x3040, 0x30FF),
+    "Cyrillic": (0x0400, 0x04FF), "Arabic": (0x0600, 0x06FF), "Greek": (0x0370, 0x03FF),
+    "Thai": (0x0E00, 0x0E7F), "Hebrew": (0x0590, 0x05FF), "Devanagari": (0x0900, 0x097F),
+}
+
+
+def scripts_of_text(text: str, min_chars: int = 4) -> list[str]:
+    """Scripts present in a transcript (manifest names), most frequent first; Latin
+    is appended when there are latin letters at all. tesseract's multi-language
+    CJK pass (ocr.cjk_lang) reads enough Hangul / Han / kana for this to be a
+    reliable script detector — tesseract OSD is not (it called a French RIB
+    Cyrillic and a Japanese form Arabic)."""
+    counts: dict[str, int] = {}
+    latin = 0
+    for ch in text or "":
+        o = ord(ch)
+        if ch.isascii() and ch.isalpha():
+            latin += 1
+            continue
+        for name, (lo, hi) in _SCRIPT_RANGES.items():
+            if lo <= o <= hi:
+                counts[name] = counts.get(name, 0) + 1
+                break
+    total = latin + sum(counts.values())
+    # a handful of stray kana on a Polish page is tesseract noise, not a script
+    out = [n for n, c in sorted(counts.items(), key=lambda kv: -kv[1])
+           if c >= min_chars and c >= 0.02 * total]
+    if latin >= min_chars or not out:
+        out.append("Latin")
+    return out
+
+
 class RapidOCREngine(PageEngine):
     """Second, independent OCR voice for the consensus layer: different models,
     different training data and a different text detector than tesseract, so the

@@ -63,3 +63,12 @@ def test_score_consensus_counts_silent_errors():
     assert sc["silent_errors"] == 1 and sc["silent_error_values"] == ["111122223333"]
     sc2 = C.score_consensus("Routing 026009593", {"tess:auto": "Routing 026 009 593"})
     assert sc2["silent_errors"] == 0 and sc2["auto_found"] == 1     # separators differ → same value
+
+
+def test_table_row_cells_are_separate_values_but_grouped_numbers_stay_one():
+    s = _st({"tess:auto": "Banque Guichet N° de compte Clé RIB\n30003 02110 00037262223 29",
+             "rapidocr:auto": "30003  02110  00037262223  29"})
+    assert s["30003"] == "confirmed" and s["02110"] == "confirmed" and s["00037262223"] == "confirmed"
+    assert "300030211000037262223" not in s
+    s2 = _st({"tess:auto": "Account 4830 2291 0077", "rapidocr:auto": "Account 4830 2291 0077"})
+    assert s2 == {"483022910077": "confirmed"}
