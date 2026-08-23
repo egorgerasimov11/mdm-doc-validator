@@ -25,6 +25,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
+from .. import ocr
 from ..bench.metrics import digit_tokens, id_tokens
 from ..fields import iban_mod97_ok
 
@@ -115,7 +116,11 @@ def _split_table_runs(text: str) -> str:
     OCR voice is lost for every cell. Groups of UNEQUAL length are distinct values:
     put two spaces between them. Uniformly grouped numbers ("4830 2291 0077",
     "3000 3021 1000 0372") stay one number."""
+    protected = [m.span() for m in ocr.IBAN_RE.finditer(text or "")]
+
     def fix(m):
+        if any(a <= m.start() < b or a < m.end() <= b for a, b in protected):
+            return m.group(1)                   # inside an IBAN: OCR spacing is not a table
         groups = m.group(1).split(" ")
         lens = {len(re.sub(r"\D", "", g)) for g in groups[:-1]} if len(groups) > 2 else {len(re.sub(r"\D", "", g)) for g in groups}
         if len(lens) > 1 and any(len(re.sub(r"\D", "", g)) >= 4 for g in groups):

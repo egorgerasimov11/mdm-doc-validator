@@ -1,37 +1,106 @@
 {% extends "base.html" %}
-{% block title %}mdmdoc — {{ file }}{% endblock %}
+{% block title %}{{ short }} · extract{% endblock %}
+{% block wrapmod %}wrap--full{% endblock %}
+{% block bodymod %}has-split{% endblock %}
 {% block content %}
-<p class="meta"><a href="/ui/extract">← extract</a> · <a href="/ui/extract/{{ name }}/markdown">download Markdown</a></p>
-<h1>{{ file }}</h1>
-<p class="meta"><b>Document type (guess):</b> {{ doc.doc_type }} · <b>pages:</b> {{ doc.pages }} ·
-<b>engines:</b> {{ doc.engines|join(', ') }} · <b>time:</b> {{ doc.elapsed_s }} s · fully offline</p>
+<div class="case-subhead">
+  <a href="/ui/extract" class="btn-quiet btn">← Extract</a>
+  <span class="title" title="{{ file }}">{{ short }}</span>
+  <span class="chip chip--quiet">{{ doc.doc_type }}</span>
+  <span class="meta">{{ doc.pages }} page{{ 's' if doc.pages != 1 }} · {{ doc.elapsed_s }} s · offline</span>
+  <span class="spacer"></span>
+  <div class="seg" role="tablist">
+    <button type="button" class="active" data-pane="values">Values <span class="meta">{{ n_ready }} · {{ n_review }}</span></button>
+    <button type="button" data-pane="transcript">Transcript</button>
+  </div>
+  <a class="btn" href="/ui/extract/{{ name }}/markdown">Markdown</a>
+</div>
 
-<section>
-  <h2>Ready to use ({{ ready|length }})</h2>
-  <p class="meta">Confirmed by independent engines or by checksum.</p>
-  <table class="list">
-    <thead><tr><th>page</th><th>value</th><th>how</th><th>read by</th></tr></thead>
-    <tbody>{% for v in ready %}
-      <tr><td>{{ v.page }}</td><td><code>{{ v.value }}</code></td><td>{{ v.status }}</td><td class="meta">{{ v.families|join(', ') }}</td></tr>
-    {% else %}<tr><td colspan="4" class="meta">none</td></tr>{% endfor %}</tbody>
-  </table>
-</section>
+<div class="split-root">
+  <div class="split-left" data-split-left>
+    <div class="split-left-scroll">
+      <div data-pane-body="values">
+        {% if n_review %}
+        <div class="status-banner status-banner--amber" style="margin:0 0 14px">
+          <span class="status-mark">!</span>
+          <div><p class="status-title">{{ n_review }} value{{ 's' if n_review != 1 }} need a human look</p>
+          <p class="status-sub">Read by one engine, engines disagree, or confusable glyphs — click a row to see it on the page.</p></div>
+        </div>
+        {% else %}
+        <div class="status-banner status-banner--ok" style="margin:0 0 14px">
+          <span class="status-mark">✓</span>
+          <div><p class="status-title">Every value confirmed</p>
+          <p class="status-sub">Independent engines agree, or the checksum holds. Nothing left for a human.</p></div>
+        </div>
+        {% endif %}
+        {% for g in groups %}
+        <div class="f-group">{{ g.title }}</div>
+        <div class="f-rows">
+          {% for f in g.rows %}
+          <div class="f-row{{ ' is-review' if f.status == 'review' }}" data-page="{{ f.page - 1 }}"
+               data-bbox="{{ f.bbox_pct|join(',') if f.bbox_pct else '' }}" title="page {{ f.page }} · read by {{ f.voices|join(', ') }}">
+            <div class="f-label">{{ f.label or f.kind }}<small>{{ f.kind }}{% if doc.pages > 1 %} · p{{ f.page }}{% endif %}</small></div>
+            <div>
+              <div class="f-value">{{ f.pretty }}</div>
+              {% if f.status == 'review' and f.crop %}<img class="f-crop" src="/ui/extract/{{ name }}/crop/{{ f.crop }}" alt="" loading="lazy">{% endif %}
+            </div>
+            <div class="f-actions">
+              <span class="f-read">{{ f.families|join(' · ') }}</span>
+              <span class="chip chip--{{ f.status }}">{{ 'confirmed' if f.status == 'confirmed' else 'checksum' if f.status == 'checksum_ok' else 'review' }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="meta">No identifier-like values on this document.</p>
+        {% endfor %}
+        <p class="hint" style="margin-top:18px">Engines: {{ doc.engines|join(', ') }}. Values are what an operator copies into SAP: account and bank
+        numbers, IBAN/BIC, tax ids, phones. Amounts and dates are in the transcript only.</p>
+      </div>
+      <div data-pane-body="transcript" hidden>
+        {% for page, eng, text in transcripts %}
+        <div class="f-group">Page {{ page + 1 }} <span class="meta" style="text-transform:none;letter-spacing:0">— {{ eng }}</span></div>
+        <pre>{{ text }}</pre>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
 
-<section>
-  <h2>Needs a human look ({{ review|length }})</h2>
-  <p class="meta">Read by one engine only, engines disagree, or the glyphs are confusable — compare with the crop.</p>
-  <table class="list">
-    <thead><tr><th>page</th><th>value</th><th>read by</th><th>crop</th></tr></thead>
-    <tbody>{% for v in review %}
-      <tr><td>{{ v.page }}</td><td><code>{{ v.value }}</code></td><td class="meta">{{ v.voices|join(', ') }}</td>
-          <td>{% if v.crop %}<img src="/ui/extract/{{ name }}/crop/{{ v.crop }}" alt="" style="max-width:420px;max-height:120px;border:1px solid #ddd">{% else %}—{% endif %}</td></tr>
-    {% else %}<tr><td colspan="4" class="meta">none</td></tr>{% endfor %}</tbody>
-  </table>
-</section>
+  <div class="split-divider" data-split-divider role="separator" aria-orientation="vertical" aria-label="Resize panes"
+       title="Drag to resize · double-click to collapse"><div class="grip"></div><span class="chev" aria-hidden="true">›</span></div>
 
-<section>
-  <h2>Transcript</h2>
-  <p class="meta">Union of the engines, for reading — not for copying values.</p>
-  <pre style="white-space:pre-wrap;font-size:12px">{{ doc.transcript }}</pre>
-</section>
+  <div class="split-right" data-doc-viewer>
+    <div class="doc-toolbar">
+      <span>Document</span>
+      <div class="seg">
+        <button type="button" data-zoom="70%">70%</button>
+        <button type="button" class="active" data-zoom="100%">100%</button>
+        <button type="button" data-zoom="150%">150%</button>
+      </div>
+      <span class="spacer" style="flex:1"></span>
+      <div class="vnav" data-vnav style="position:static;padding:0">
+        {% for p in pages %}<a href="#page-{{ p }}" data-page="{{ p }}" title="page {{ p + 1 }}"></a>{% endfor %}
+      </div>
+    </div>
+    <div class="doc-pages">
+      {% for p in pages %}
+      <div class="doc-page is-loading" id="page-{{ p }}" data-page="{{ p }}">
+        <img src="/ui/extract/{{ name }}/page/{{ p }}" alt="page {{ p + 1 }}" loading="{{ 'eager' if loop.first else 'lazy' }}">
+        <span class="pg-no">{{ p + 1 }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+(() => {
+  const tabs = document.querySelectorAll("[data-pane]");
+  tabs.forEach((b) => b.addEventListener("click", () => {
+    tabs.forEach((x) => x.classList.toggle("active", x === b));
+    document.querySelectorAll("[data-pane-body]").forEach((p) => { p.hidden = p.dataset.paneBody !== b.dataset.pane; });
+  }));
+})();
+</script>
 {% endblock %}

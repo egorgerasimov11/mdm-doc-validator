@@ -94,22 +94,45 @@ def extract_jobs():
     return {"jobs": _jobs(), "results": _results()[:5]}
 
 
-@router_extract.get("/ui/extract/{name}", response_class=HTMLResponse)
-def extract_result(request: Request, name: str):
+def _load(name: str) -> dict:
     if not _SAFE.match(name):
         raise api_error(400, "bad_request", "bad name")
     f = OUT_ROOT / name / "extract.json"
     if not f.exists():
         raise api_error(404, "not_found", "no such extraction")
-    doc = json.loads(f.read_text(encoding="utf-8"))
-    ready, review = [], []
-    for pg in doc["pages_out"]:
-        for v in pg["values"]:
-            row = dict(v, page=pg["page"] + 1, crop=Path(v["crop"]).name if v.get("crop") else "")
-            (review if v["status"] == "review" else ready).append(row)
+    return json.loads(f.read_text(encoding="utf-8"))
+
+
+@router_extract.get("/ui/extract/{name}", response_class=HTMLResponse)
+def extract_result(request: Request, name: str):
+    from ..extract.extractor import grouped_fields
+    doc = _load(name)
+    groups = grouped_fields(doc)
+    for g in groups:
+        for f in g["rows"]:
+            f["crop"] = Path(f["crop"]).name if f.get("crop") else ""
+    n_ready = sum(1 for g in groups for f in g["rows"] if f["status"] != "review")
+    n_review = sum(1 for g in groups for f in g["rows"] if f["status"] == "review")
+    pages = [pg["page"] for pg in doc["pages_out"]]
     return _templates().TemplateResponse(request, "extract_result.html", _ctx(
-        name=name, doc=doc, ready=ready, review=review,
-        file=Path(doc["file"]).name, latency={pg["page"] + 1: pg["latency"] for pg in doc["pages_out"]}))
+        name=name, doc=doc, groups=groups, n_ready=n_ready, n_review=n_review, pages=pages,
+        file=Path(doc["file"]).name, short=Path(doc["file"]).name.split("__", 1)[-1],
+        transcripts=[(pg["page"], pg.get("primary_engine", ""), pg.get("transcript", "")) for pg in doc["pages_out"]]))
+
+
+@router_extract.get("/ui/extract/{name}/page/{page}")
+def extract_page_image(name: str, page: int):
+    """The page as the extractor saw it (the v200 render the bboxes refer to),
+    streamed for the viewer — never stored anywhere else."""
+    from ..extract import render as R
+    doc = _load(name)
+    src = Path(doc["file"])
+    if not src.exists():
+        raise api_error(404, "not_found", "source document is gone")
+    if page < 0 or page >= int(doc.get("pages") or 1):
+        raise api_error(404, "not_found", "page out of range")
+    img = R.render_page(src, OUT_ROOT / name / "render", page, R.PRESETS["v200"])
+    return FileResponse(img, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router_extract.get("/ui/extract/{name}/crop/{crop}")

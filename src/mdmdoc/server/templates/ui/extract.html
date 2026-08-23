@@ -1,33 +1,42 @@
 {% extends "base.html" %}
-{% block title %}mdmdoc — extract (beta){% endblock %}
+{% block title %}mdmdoc — extract{% endblock %}
 {% block content %}
-<h1>Extract <span class="badge">beta</span></h1>
-<p class="meta">Fully offline. Every value is handed over only when independent local engines agree on it
-(text layer, tesseract, RapidOCR{% if vlm %}, {{ vlm }} as a third voice when Ollama is up{% endif %}) or its checksum holds;
-everything else is shown for a human look with the page crop. Nothing leaves this machine.</p>
+<h1>Extract <span class="chip chip--quiet" style="vertical-align:middle">beta</span></h1>
+<p class="meta">Fully offline. A value is handed over only when independent local engines agree on it — text layer, tesseract,
+RapidOCR{% if vlm %} and {{ vlm }} through Ollama{% endif %} — or its checksum holds; everything else is shown for a human look
+with the page beside it. Nothing leaves this machine.</p>
 {% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
 
 <section>
-  <h2>Upload</h2>
-  <form method="post" action="/ui/extract/upload" enctype="multipart/form-data" class="upload">
-    <input type="file" name="files" multiple required accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.heic">
-    <label>vision voice
-      <select name="vlm">
-        <option value="{{ vlm }}">{{ vlm or 'none' }} (CPU engines + VLM)</option>
-        <option value="none">none (CPU engines only — seconds)</option>
-      </select>
+  <form method="post" action="/ui/extract/upload" enctype="multipart/form-data" id="extract-form">
+    <label class="drop" for="extract-files">
+      <span class="big">Drop documents here or click to choose</span>
+      PDF, scans, photos — one or many
+      <small>W-9 / W-8, bank letters, RIB, statements, bankbooks, certificates — any language</small>
+      <input type="file" id="extract-files" name="files" multiple required hidden
+             accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.heic,.webp">
     </label>
-    <button type="submit">Extract</button>
+    <div class="actions">
+      <div class="seg" role="radiogroup" aria-label="vision voice">
+        <button type="button" class="active" data-vlm="{{ vlm }}">CPU engines + {{ vlm or 'VLM' }}</button>
+        <button type="button" data-vlm="none">CPU engines only</button>
+      </div>
+      <input type="hidden" name="vlm" value="{{ vlm }}">
+      <span class="hint">CPU-only takes seconds; the vision voice adds about a minute per page on this machine.</span>
+      <span class="spacer" style="flex:1"></span>
+      <button type="submit" class="primary">Extract</button>
+    </div>
   </form>
 </section>
 
 <section>
   <h2>Queue</h2>
-  <ul class="timeline" id="extract-jobs">
+  <ul class="timeline" data-extract-queue>
     {% for j in jobs %}
-    <li class="{{ j.status }}"><b>{{ j.label or j.id }}</b> — {{ j.status }}
-      {% if j.progress %}<div class="meta">{{ j.progress[-1] }}</div>{% endif %}
-      {% if j.error %}<div class="error">{{ j.error }}</div>{% endif %}</li>
+    <li class="{{ j.status }}"><span class="dot dot--{{ 'running' if j.status == 'running' else 'ok' if j.status == 'done' else 'down' if j.status == 'error' else '' }}"></span>
+      <span class="grow"><b>{{ j.label or j.id }}</b>{% if j.progress %} <span class="meta">— {{ j.progress[-1] }}</span>{% endif %}
+      {% if j.error %}<div class="error">{{ j.error }}</div>{% endif %}</span>
+      <span class="chip chip--{{ j.status }}">{{ j.status }}</span></li>
     {% else %}<li class="meta">nothing running</li>{% endfor %}
   </ul>
 </section>
@@ -38,8 +47,11 @@ everything else is shown for a human look with the page crop. Nothing leaves thi
     <thead><tr><th>document</th><th>type</th><th>pages</th><th>ready</th><th>to review</th><th>time</th><th>engines</th></tr></thead>
     <tbody>
     {% for r in results %}
-      <tr><td><a href="/ui/extract/{{ r.name }}">{{ r.file }}</a></td><td>{{ r.doc_type }}</td><td>{{ r.pages }}</td>
-          <td>{{ r.ready }}</td><td>{{ r.review }}</td><td>{{ r.elapsed_s }} s</td><td class="meta">{{ r.engines|join(', ') }}</td></tr>
+      <tr style="--i:{{ loop.index0 }}"><td><a href="/ui/extract/{{ r.name }}">{{ r.file.split('__', 1)[-1] }}</a></td>
+          <td><span class="chip chip--quiet">{{ r.doc_type }}</span></td><td>{{ r.pages }}</td>
+          <td><span class="chip chip--ok">{{ r.ready }}</span></td>
+          <td>{% if r.review %}<span class="chip chip--review">{{ r.review }}</span>{% else %}<span class="meta">0</span>{% endif %}</td>
+          <td class="meta">{{ r.elapsed_s }} s</td><td class="hint">{{ r.engines|join(', ') }}</td></tr>
     {% else %}<tr><td colspan="7" class="meta">no extractions yet</td></tr>{% endfor %}
     </tbody>
   </table>
@@ -47,9 +59,18 @@ everything else is shown for a human look with the page crop. Nothing leaves thi
 {% endblock %}
 {% block script %}
 <script>
-(function(){
-  const busy = {{ 'true' if jobs and (jobs|selectattr('status','in',['queued','running'])|list) else 'false' }};
-  if (busy) setTimeout(() => location.reload(), 4000);
+(() => {
+  const form = document.getElementById("extract-form"), drop = form.querySelector(".drop"),
+        input = document.getElementById("extract-files"), hidden = form.querySelector("input[name=vlm]");
+  form.querySelectorAll("[data-vlm]").forEach((b) => b.addEventListener("click", () => {
+    form.querySelectorAll("[data-vlm]").forEach((x) => x.classList.toggle("active", x === b));
+    hidden.value = b.dataset.vlm;
+  }));
+  const setLabel = () => { const n = input.files.length; if (n) drop.querySelector(".big").textContent = n + " file" + (n > 1 ? "s" : "") + " ready — press Extract"; };
+  input.addEventListener("change", setLabel);
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("hover"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("hover"); }));
+  drop.addEventListener("drop", (e) => { input.files = e.dataTransfer.files; setLabel(); });
 })();
 </script>
 {% endblock %}

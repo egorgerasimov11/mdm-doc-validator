@@ -5,21 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {% if token %}<meta name="mdmdoc-token" content="{{ token }}">{% endif %}
 <title>{% block title %}mdmdoc{% endblock %}</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/ui/app.css?v={{ asset_v }}">
 </head>
-<body>
+<body class="{% block bodymod %}{% endblock %}">
+{# theme before first paint — localStorage only, default light; a <head> script
+   could not reach document.body yet #}
+<script>try{if(localStorage.getItem("mdmdoc.theme")==="dark")document.body.classList.add("dark");}catch(e){}</script>
 <header>
-  <div class="wrap header-row">
-    <span class="wordmark">mdmdoc</span>
-    <nav class="tabbar">
-      <a href="/ui" class="{{ 'current' if page == 'documents' }}">Documents</a>
-      {% if consol_enabled %}<a href="/ui/consolidation" class="{{ 'current' if page == 'consolidation' }}">Consolidation</a>{% endif %}
-      <a href="/ui/extract" class="{{ 'current' if page == 'extract' }}">Extract</a>
-      <a href="/ui/data" class="{{ 'current' if page == 'data' }}">Data</a>
-      <a href="/ui/activity" class="{{ 'current' if page == 'activity' }}">Activity<span id="activity-badge" class="badge" hidden></span></a>
-      <a href="/ui/settings" class="{{ 'current' if page == 'settings' }}">Settings</a>
-    </nav>
-    <span id="host-chip" class="meta host-chip">…</span>
+  <div class="header-row">
+    <a class="wordmark" href="/ui">mdmdoc</a>
+    <div class="header-right">
+      <nav class="tabbar">
+        <a href="/ui" class="{{ 'current' if page == 'documents' }}">Documents</a>
+        {% if consol_enabled %}<a href="/ui/consolidation" class="{{ 'current' if page == 'consolidation' }}">Consolidation</a>{% endif %}
+        <a href="/ui/extract" class="{{ 'current' if page == 'extract' }}">Extract</a>
+        <a href="/ui/data" class="{{ 'current' if page == 'data' }}">Data</a>
+        <a href="/ui/activity" class="{{ 'current' if page == 'activity' }}">Activity<span id="activity-badge" class="badge" hidden></span></a>
+        <a href="/ui/settings" class="{{ 'current' if page == 'settings' }}">Settings</a>
+      </nav>
+      <span class="header-sep" aria-hidden="true"></span>
+      <span id="host-chip" class="host-chip" title="engine host">…</span>
+      <button type="button" class="theme-toggle" data-theme-toggle title="Toggle light / dark"
+              aria-label="Toggle light and dark theme">☾</button>
+    </div>
   </div>
 </header>
 {# one sub-tab row per primary group; a run page sets page='documents' with no
@@ -51,7 +60,7 @@
   <a href="/ui/history" class="{{ 'current' if subpage == 'history' }}">Journal</a>
 </nav></div>
 {% endif %}
-<main class="wrap">
+<main class="wrap {% block wrapmod %}{% endblock %}">
 {% block content %}{% endblock %}
 </main>
 <script src="/static/ui/app.js?v={{ asset_v }}"></script>

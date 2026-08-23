@@ -175,16 +175,30 @@ def classify(value: str, label: str) -> tuple[str, str]:
     return "number", "other"
 
 
-def _bbox_for(value: str, lines_by_engine: dict) -> tuple[list | None, dict]:
-    core = value.split(":", 1)[-1]
-    needle = _digits(core) if _digits(core) == _digits(value.partition(":")[2] or value) and not value.startswith(("IBAN:", "SWIFT:")) else core.upper()
+def _bbox_for(value: str, lines_by_engine: dict, context: str = "") -> tuple[list | None, dict]:
+    """OCR line box for the value. Several lines may contain the same digits (a
+    postcode in the address AND a branch code in the table): prefer the one that
+    reads most like the transcript line the value was labelled from."""
+    from rapidfuzz import fuzz
+    kind, _, val = value.partition(":")
+    needle = (_digits(val) if kind in ("EIN", "SSN") else val.upper()) if val else _digits(kind)
+    best: tuple[float, list, dict] | None = None
     for lines in lines_by_engine.values():
         for ln in lines or []:
             t = ln.get("text") or ""
             hay = _digits(t) if needle.isdigit() else re.sub(r"\s", "", t).upper()
             if needle and needle in hay and ln.get("bbox"):
-                return list(ln["bbox"]), ln
-    return None, {}
+                score = fuzz.ratio(t.casefold(), (context or "").casefold()) if context else 0.0
+                alnum = re.sub(r"[^0-9A-Za-z]", "", t).upper()
+                if alnum == needle.upper():
+                    score += 200                # the box IS the value (a table cell) — beats any line that merely contains it
+                elif hay == needle:
+                    score += 80                 # only these digits, but with words around ("METZ (02110)")
+                elif hay.startswith(needle) or hay.endswith(needle):
+                    score += 40
+                if best is None or score > best[0]:
+                    best = (score, list(ln["bbox"]), ln)
+    return (best[1], best[2]) if best else (None, {})
 
 
 def build_fields(verdicts: list, transcript: str, lines_by_engine: dict, page_size: tuple[int, int]) -> list[dict]:
@@ -194,7 +208,8 @@ def build_fields(verdicts: list, transcript: str, lines_by_engine: dict, page_si
     for v in verdicts:
         label, pretty, line_no = _locate(v.value, transcript)
         kind, group = classify(v.value, label)
-        bbox, _ = _bbox_for(v.value, lines_by_engine)
+        tlines = (transcript or "").split("\n")
+        bbox, _ = _bbox_for(v.value, lines_by_engine, tlines[line_no] if 0 <= line_no < len(tlines) else "")
         pct = None
         if bbox and page_size[0] and page_size[1]:
             w, h = page_size

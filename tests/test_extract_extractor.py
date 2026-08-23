@@ -70,3 +70,12 @@ def test_markdown_groups_and_primary_transcript():
     md = X.to_markdown(doc)
     assert "## Bank details" in md and "| 1 | Guichet | `02110` | confirmed |" in md
     assert md.count("TITULAIRE DU COMPTE") == 1                     # one transcript, no merged duplicates
+
+
+def test_bbox_prefers_the_pure_cell_over_a_line_with_the_same_digits():
+    lines = {"rapidocr:auto": [
+        {"text": "DOMICILIATION : TOULOUSE METZ (02110)", "bbox": [172, 446, 555, 472]},
+        {"text": "02110", "bbox": [322, 506, 384, 531]},
+        {"text": "IBAN FR76 3000 3021 1000 0372 6222 329", "bbox": [172, 571, 537, 595]}]}
+    box, _ = X._bbox_for("02110", lines, "30003  02110  00037262223  29")
+    assert box == [322, 506, 384, 531]

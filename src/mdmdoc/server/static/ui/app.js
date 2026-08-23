@@ -67,6 +67,16 @@ window.mdmdoc = (() => {
       b.classList.add("active");
     });
     const docClass = () => seg.querySelector(".active").dataset.v;
+    // analysis MODE segment (Auto/Fast/Regular/Ultra) — replaces the effort slider
+    const modeSeg = document.getElementById("mode-seg");
+    if (modeSeg) modeSeg.querySelectorAll("button").forEach(b => b.onclick = () => {
+      modeSeg.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+    });
+    const modeVal = () => {
+      const a = modeSeg && modeSeg.querySelector(".active");
+      return a ? a.dataset.v : "";
+    };
     const say = (l) => { log.hidden = false; log.textContent += l + "\n"; log.scrollTop = 1e9; };
 
     // ---- packet state: documents to analyze + one optional SAP/form compare ----
@@ -224,15 +234,15 @@ window.mdmdoc = (() => {
 
     // one document -> one /check job; resolves with the run result (or null)
     function send(file) {
-      say(`uploading ${file.name} (${docClass()})…`);
+      say(`uploading ${file.name} — class: ${docClass()}, mode: ${modeVal() || "default"}…`);
       const fd = new FormData();
       fd.append("file", file);
       fd.append("doc_class", docClass());
       const langEl = document.getElementById("lang");
       fd.append("lang", (langEl && langEl.value) || "en");
       fd.append("wait", "false");
-      const eff = document.getElementById("effort");
-      if (eff) fd.append("effort", eff.value);
+      const md = modeVal();
+      if (md) fd.append("mode", md);
       if (compare) fd.append(compare.kind === "sap" ? "sap_file" : "template_file", compare.file);
       return api("/api/v1/check", { method: "POST", body: fd }).then(({ job_id }) => {
         trackJob(job_id);
@@ -260,17 +270,6 @@ window.mdmdoc = (() => {
       if (packet.length === 1 && firstRun) { say("opening run page…"); location = `/ui/runs/${firstRun}`; }
       else { say("done — see Activity or Recent checks below"); docs = []; compare = null; render(); }
     };
-
-    // effort slider: live label only (the DEFAULT effort lives in Settings → Defaults)
-    const eff = document.getElementById("effort");
-    const effLabel = document.getElementById("effort-label");
-    const EFFORT_NAMES = { 1: "1 · instant (no LLM)", 2: "2 · fast", 3: "3 · standard",
-                           4: "4 · thorough", 5: "5 · maximum (~slow)" };
-    if (eff && effLabel) {
-      const paint = () => effLabel.textContent = EFFORT_NAMES[eff.value] || eff.value;
-      paint();
-      eff.oninput = paint;
-    }
   }
 
   /* ---------- settings: defaults (engine / effort / language) ------------- */
@@ -284,18 +283,14 @@ window.mdmdoc = (() => {
         if (stateEl) { stateEl.textContent = "✓ saved"; setTimeout(() => stateEl.textContent = "", 1500); }
       } catch (e) { if (stateEl) stateEl.textContent = "ERROR: " + e.message; }
     };
+    const mode = document.getElementById("mode-default");
+    const modeState = document.getElementById("mode-default-state");
+    if (mode) mode.onchange = () => save({ default_mode: mode.value }, modeState);
+
     const engine = document.getElementById("engine-default");
     const engineState = document.getElementById("engine-default-state");
     if (engine && !engine.disabled) engine.onchange = () => save({ engine: engine.value }, engineState);
 
-    const eff = document.getElementById("effort");
-    const effLabel = document.getElementById("effort-label");
-    const NAMES = { 1: "1 · instant (no LLM)", 2: "2 · fast", 3: "3 · standard", 4: "4 · thorough", 5: "5 · maximum (~slow)" };
-    if (eff && effLabel) {
-      const paint = () => effLabel.textContent = NAMES[eff.value] || eff.value;
-      paint(); eff.oninput = paint;
-      eff.onchange = () => save({ default_effort: parseInt(eff.value, 10) });
-    }
     const lang = document.getElementById("lang-default");
     const langState = document.getElementById("lang-default-state");
     if (lang) lang.onchange = () => save({ lang: lang.value }, langState);
@@ -1523,4 +1518,142 @@ window.mdmdoc = (() => {
            initSapCompare, initWebVerify, initProposeFix, initFieldCopy, initBankCheck,
            initRetrainWatch, initBulk, initFilterBar, initRunFilters, initRunTabs, initRerun, initTestToggle,
            initConsolidationAttach, initDefaults, initTagsAdmin, initActivity, initActivityJobs };
+})();
+
+/* ======================================================================
+   Shell (2026-08-23, consolidator design system): theme toggle, split
+   divider, document viewer highlight, live extract queue, reveal stagger.
+   Independent of window.mdmdoc — runs on every page.
+   ====================================================================== */
+(() => {
+  // ---- light / dark theme ------------------------------------------------
+  const btn = document.querySelector("[data-theme-toggle]");
+  const paint = () => { if (btn) btn.textContent = document.body.classList.contains("dark") ? "☀" : "☾"; };
+  paint();
+  if (btn) btn.addEventListener("click", () => {
+    const dark = !document.body.classList.contains("dark");
+    document.body.classList.toggle("dark", dark);
+    try { localStorage.setItem("mdmdoc.theme", dark ? "dark" : "light"); } catch (e) {}
+    paint();
+  });
+
+  // ---- reveal stagger: rows/sections fade in one after another ----------
+  document.querySelectorAll(".f-row, .timeline li, .list tbody tr, main > section").forEach((el, i) => {
+    if (!el.style.getPropertyValue("--i")) el.style.setProperty("--i", String(Math.min(i, 24)));
+  });
+
+  // ---- draggable divider (port of the consolidator's) ---------------------
+  const divider = document.querySelector("[data-split-divider]");
+  const left = document.querySelector("[data-split-left]");
+  if (divider && left) {
+    const saved = parseInt(localStorage.getItem("mdmdoc.leftW") || "", 10);
+    if (saved) left.style.width = Math.max(320, saved) + "px";
+    const setCollapsed = (on) => {
+      left.classList.toggle("is-collapsed", on);
+      divider.classList.toggle("is-collapsed", on);
+      localStorage.setItem("mdmdoc.leftCollapsed", on ? "1" : "0");
+    };
+    if (localStorage.getItem("mdmdoc.leftCollapsed") === "1") setCollapsed(true);
+    let dragged = false;
+    const start = (ev) => {
+      ev.preventDefault();
+      const startX = ev.touches ? ev.touches[0].clientX : ev.clientX;
+      const startW = left.getBoundingClientRect().width;
+      dragged = false;
+      document.body.style.userSelect = "none";
+      divider.classList.add("is-dragging");
+      const move = (e) => {
+        const x = e.touches ? e.touches[0].clientX : e.clientX;
+        const raw = startW + (x - startX);
+        if (Math.abs(x - startX) > 3) dragged = true;
+        if (raw < 150) { setCollapsed(true); return; }
+        setCollapsed(false);
+        const max = Math.max(360, window.innerWidth - 360);
+        left.style.width = Math.max(320, Math.min(raw, max)) + "px";
+      };
+      const up = () => {
+        window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+        window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
+        document.body.style.userSelect = "";
+        divider.classList.remove("is-dragging");
+        if (!left.classList.contains("is-collapsed"))
+          localStorage.setItem("mdmdoc.leftW", String(Math.round(left.getBoundingClientRect().width)));
+      };
+      window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+      window.addEventListener("touchmove", move, { passive: false }); window.addEventListener("touchend", up);
+    };
+    divider.addEventListener("mousedown", start);
+    divider.addEventListener("touchstart", start, { passive: false });
+    divider.addEventListener("dblclick", () => setCollapsed(!left.classList.contains("is-collapsed")));
+    divider.addEventListener("click", () => { if (!dragged && left.classList.contains("is-collapsed")) setCollapsed(false); });
+  }
+
+  // ---- document viewer: zoom, page bars, value → highlight on the page ----
+  const viewer = document.querySelector("[data-doc-viewer]");
+  if (viewer) {
+    const pages = [...viewer.querySelectorAll(".doc-page")];
+    viewer.querySelectorAll("[data-zoom]").forEach((b) => b.addEventListener("click", () => {
+      viewer.querySelectorAll("[data-zoom]").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      pages.forEach((p) => p.style.setProperty("--zoom", b.dataset.zoom));
+    }));
+    pages.forEach((p) => {
+      const img = p.querySelector("img");
+      if (img) {
+        const done = () => p.classList.remove("is-loading");
+        if (img.complete) done(); else { img.addEventListener("load", done); img.addEventListener("error", done); }
+      }
+    });
+    const bars = [...document.querySelectorAll("[data-vnav] a")];
+    const io = new IntersectionObserver((entries) => entries.forEach((en) => {
+      if (en.isIntersecting) {
+        bars.forEach((a) => a.classList.toggle("current", a.dataset.page === en.target.dataset.page));
+      }
+    }), { root: viewer, threshold: 0.4 });
+    pages.forEach((p) => io.observe(p));
+    document.querySelectorAll(".f-row[data-page]").forEach((row) => row.addEventListener("click", () => {
+      document.querySelectorAll(".f-row.is-active").forEach((r) => r.classList.remove("is-active"));
+      document.querySelectorAll(".hl.is-on").forEach((h) => h.classList.remove("is-on"));
+      row.classList.add("is-active");
+      const page = pages.find((p) => p.dataset.page === row.dataset.page);
+      if (!page) return;
+      const box = (row.dataset.bbox || "").split(",").map(Number);
+      let hl = page.querySelector(".hl");
+      if (!hl) { hl = document.createElement("div"); hl.className = "hl"; page.appendChild(hl); }
+      hl.classList.toggle("is-review", row.classList.contains("is-review"));
+      if (box.length === 4 && !box.some(isNaN)) {
+        hl.style.left = box[0] + "%"; hl.style.top = box[1] + "%";
+        hl.style.width = (box[2] - box[0]) + "%"; hl.style.height = (box[3] - box[1]) + "%";
+        hl.classList.add("is-on");
+        const top = page.offsetTop + page.offsetHeight * box[1] / 100 - viewer.clientHeight / 2;
+        viewer.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      } else {
+        viewer.scrollTo({ top: page.offsetTop - 12, behavior: "smooth" });
+      }
+    }));
+  }
+
+  // ---- extract queue: live without a full reload --------------------------
+  const q = document.querySelector("[data-extract-queue]");
+  if (q) {
+    const chip = (s) => `<span class="chip chip--${s}">${s}</span>`;
+    const render = (d) => {
+      if (!d.jobs.length) { q.innerHTML = '<li class="meta">nothing running</li>'; return false; }
+      q.innerHTML = d.jobs.map((j) => `<li class="${j.status}"><span class="dot dot--${j.status === "running" ? "running" : j.status === "done" ? "ok" : j.status === "error" ? "down" : ""}"></span>` +
+        `<span class="grow"><b>${j.label || j.id}</b>${j.progress.length ? ` <span class="meta">— ${j.progress[j.progress.length - 1]}</span>` : ""}` +
+        `${j.error ? `<div class="error">${j.error}</div>` : ""}</span>${chip(j.status)}</li>`).join("");
+      return d.jobs.some((j) => j.status === "queued" || j.status === "running");
+    };
+    const tick = async () => {
+      try {
+        const r = await fetch("/ui/extract/jobs", { credentials: "same-origin" });
+        const d = await r.json();
+        const busy = render(d);
+        if (busy) setTimeout(tick, 3000);
+        else if (q.dataset.wasBusy === "1") location.reload();
+        q.dataset.wasBusy = busy ? "1" : "0";
+      } catch (e) { setTimeout(tick, 8000); }
+    };
+    tick();
+  }
 })();

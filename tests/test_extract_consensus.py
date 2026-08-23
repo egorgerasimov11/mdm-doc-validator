@@ -72,3 +72,8 @@ def test_table_row_cells_are_separate_values_but_grouped_numbers_stay_one():
     assert "300030211000037262223" not in s
     s2 = _st({"tess:auto": "Account 4830 2291 0077", "rapidocr:auto": "Account 4830 2291 0077"})
     assert s2 == {"483022910077": "confirmed"}
+
+
+def test_iban_with_ocr_spacing_is_not_split_into_cells():
+    s = _st({"tess:auto": "IBAN FR76 3000 3021 10 00 0372 6222 329", "rapidocr:auto": "IBAN FR76 3000 3021 10 00 0372 6222 329"})
+    assert s == {"IBAN:FR7630003021100003726222329": "confirmed"}
