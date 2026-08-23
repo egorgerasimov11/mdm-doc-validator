@@ -73,12 +73,30 @@ def _is_letters(tok: str) -> bool:
     return all(c in _ASCII_LETTERS or c in "'-" for c in tok) and any(c in _ASCII_LETTERS for c in tok)
 
 
+# ocr._CASE_JUMBLE / ocr._word_improbable arrive with the reliability wave of
+# ocr.py; a checkout that has this module but not that ocr.py (it happened:
+# 78ccf68 landed first) must still read a text layer, so both fall back here
+# to the same definitions instead of raising inside the text-layer engine.
+_CASE_JUMBLE_FALLBACK = re.compile(r"[a-zà-ÿ][A-ZÀ-Þ]")
+
+
+def _case_jumble():
+    return getattr(ocr, "_CASE_JUMBLE", None) or _CASE_JUMBLE_FALLBACK
+
+
+def _word_improbable(w: str) -> bool:
+    fn = getattr(ocr, "_word_improbable", None)
+    if fn is not None:
+        return fn(w)
+    return bool(_case_jumble().search(w))
+
+
 def _latin_word_ok(tok: str) -> bool:
     """Letters-only LATIN token: needs a vowel unless it is a short acronym; no case jumble."""
     letters = [c for c in tok if c.isalpha()]
     if len(letters) < 3:
         return True
-    if ocr._CASE_JUMBLE.search(tok):
+    if _case_jumble().search(tok):
         return False
     if tok.isupper() and len(letters) <= 6:
         return True                      # HSBC, BBVA, IBAN, SWIFT
@@ -133,7 +151,7 @@ def features(text: str) -> dict:
                 "vowel_ok": 0.0, "cjk_frac": 0.0, "short_junk": 0.0}
     wf = sum(1 for t in toks if _wellformed(t)) / len(toks)
     latin_words = [w for w in re.findall(r"[A-Za-zÀ-ɏ]{3,}", text) ]
-    improbable = (sum(1 for w in latin_words if ocr._word_improbable(w)) / len(latin_words)) \
+    improbable = (sum(1 for w in latin_words if _word_improbable(w)) / len(latin_words)) \
         if latin_words else 0.0
     nonspace = [c for c in text if not c.isspace()]
     sym = sum(1 for c in nonspace if c in _SYMBOLS)
