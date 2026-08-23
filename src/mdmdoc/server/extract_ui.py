@@ -41,7 +41,7 @@ def _results() -> list[dict]:
                 doc = json.loads(f.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            vals = [v for pg in doc.get("pages_out", []) for v in pg.get("values", [])]
+            vals = [v for pg in doc.get("pages_out", []) for v in (pg.get("fields") or pg.get("values", []))]
             rows.append({"name": d.name, "file": Path(doc.get("file", d.name)).name,
                          "doc_type": doc.get("doc_type", "?"), "pages": doc.get("pages"),
                          "elapsed_s": doc.get("elapsed_s"), "engines": doc.get("engines", []),
@@ -94,13 +94,34 @@ def extract_jobs():
     return {"jobs": _jobs(), "results": _results()[:5]}
 
 
+def _upgrade(doc: dict) -> dict:
+    """Results written before the structured output (no `fields`, merged
+    transcript) are rebuilt from the stored engine readings — the consensus and
+    the labels are pure functions of those; only the page boxes are lost."""
+    from ..extract import consensus as C
+    from ..extract.extractor import build_fields, primary_reading
+    changed = False
+    for pg in doc.get("pages_out", []):
+        if "fields" in pg:
+            continue
+        readings = pg.get("readings") or {}
+        eng, primary = primary_reading(readings)
+        verdicts = C.consensus(readings)
+        pg["primary_engine"], pg["transcript"] = eng, primary
+        pg["fields"] = build_fields(verdicts, primary, {}, (0, 0))
+        changed = True
+    if changed:
+        doc["transcript"] = "\n\n".join(pg.get("transcript", "") for pg in doc.get("pages_out", []))
+    return doc
+
+
 def _load(name: str) -> dict:
     if not _SAFE.match(name):
         raise api_error(400, "bad_request", "bad name")
     f = OUT_ROOT / name / "extract.json"
     if not f.exists():
         raise api_error(404, "not_found", "no such extraction")
-    return json.loads(f.read_text(encoding="utf-8"))
+    return _upgrade(json.loads(f.read_text(encoding="utf-8")))
 
 
 @router_extract.get("/ui/extract/{name}", response_class=HTMLResponse)
