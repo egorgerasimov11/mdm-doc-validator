@@ -14,15 +14,20 @@
 <script>try{if(localStorage.getItem("mdmdoc.theme")==="dark")document.body.classList.add("dark");}catch(e){}</script>
 <header>
   <div class="header-row">
-    <a class="wordmark" href="/ui">mdmdoc</a>
+    <a class="wordmark" href="{{ '/ui/extract' if ui_mode == 'extract' else '/ui' }}">mdmdoc</a>
     <div class="header-right">
       <nav class="tabbar">
+        {% if ui_mode == 'extract' %}
+        <a href="/ui/extract" class="{{ 'current' if page == 'extract' }}">Extract</a>
+        <a href="/ui/activity" class="{{ 'current' if page == 'activity' }}">Activity<span id="activity-badge" class="badge" hidden></span></a>
+        {% else %}
         <a href="/ui" class="{{ 'current' if page == 'documents' }}">Documents</a>
         {% if consol_enabled %}<a href="/ui/consolidation" class="{{ 'current' if page == 'consolidation' }}">Consolidation</a>{% endif %}
         <a href="/ui/extract" class="{{ 'current' if page == 'extract' }}">Extract</a>
         <a href="/ui/data" class="{{ 'current' if page == 'data' }}">Data</a>
         <a href="/ui/activity" class="{{ 'current' if page == 'activity' }}">Activity<span id="activity-badge" class="badge" hidden></span></a>
         <a href="/ui/settings" class="{{ 'current' if page == 'settings' }}">Settings</a>
+        {% endif %}
       </nav>
       <span class="header-sep" aria-hidden="true"></span>
       <span id="host-chip" class="host-chip" title="engine host">…</span>
@@ -54,7 +59,7 @@
   <a href="/ui/settings/tags" class="{{ 'current' if subpage == 'tags' }}">Tags</a>
   <a href="/ui/settings/defaults" class="{{ 'current' if subpage == 'defaults' }}">Defaults</a>
 </nav></div>
-{% elif page == 'activity' %}
+{% elif page == 'activity' and ui_mode != 'extract' %}
 <div class="wrap"><nav class="subtabs">
   <a href="/ui/activity" class="{{ 'current' if subpage == 'runs' }}">Runs</a>
   <a href="/ui/history" class="{{ 'current' if subpage == 'history' }}">Journal</a>

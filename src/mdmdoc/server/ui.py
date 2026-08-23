@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 import re
 from pathlib import Path
 
@@ -42,6 +43,13 @@ def _asset_version() -> str:
         return "0"
 
 
+def ui_mode() -> str:
+    """`full` (the validator console) or `extract` (the offline extractor beta:
+    only Extract and Activity in the nav; Documents / Data / Settings hidden).
+    Read per call so tests can flip it with monkeypatch."""
+    return os.environ.get("MDMDOC_UI_MODE", "full").strip().lower() or "full"
+
+
 def _ctx(**kw) -> dict:
     """Globals every page gets. `page` is the primary NAV GROUP (documents /
     rules / training / bulk / debug) and `subpage` the optional sub-tab — one
@@ -52,6 +60,7 @@ def _ctx(**kw) -> dict:
             "asset_v": _asset_version(),
             "subpage": "",
             "consol_enabled": _CONSOL_ENABLED,
+            "ui_mode": ui_mode(),
             **kw}
 
 
@@ -94,6 +103,8 @@ def _run_rows(test: bool) -> list[dict]:
 
 @router_ui.get("/ui", response_class=HTMLResponse)
 def dashboard(request: Request):
+    if ui_mode() == "extract":
+        return RedirectResponse("/ui/extract", status_code=303)
     # no doctor probe here any more: the header chip fetches /doctor async
     # (refreshChip), so the page no longer blocks on the model host
     rows = _run_rows(test=False)
@@ -447,16 +458,39 @@ def _activity_feed() -> list[dict]:
     return feed
 
 
+def _extract_feed() -> list[dict]:
+    """Finished extractions as feed entries (section «Extract»): review count
+    decides the status bucket — anything left for a human is 'review'."""
+    from .extract_ui import OUT_ROOT, _results
+    out = []
+    for r in _results():
+        verdict = "NEED_MANUAL_REVIEW" if r["review"] else "ACCEPT"
+        try:
+            ts = datetime.fromtimestamp((OUT_ROOT / r["name"] / "extract.json").stat().st_mtime,
+                                        tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except OSError:
+            ts = ""
+        out.append({"entity": "extract:" + r["name"], "type": "extract", "section": "Extract",
+                    "name": r["file"].split("__", 1)[-1],
+                    "sub": f"{r['doc_type']} · {r['ready']} ready · {r['review']} to review",
+                    "verdict": verdict, "vbucket": _verdict_bucket(verdict), "ts": ts,
+                    "link": f"/ui/extract/{r['name']}", "tags": []})
+    return out
+
+
 @router_ui.get("/ui/activity", response_class=HTMLResponse)
 def activity_page(request: Request):
     """E2: running jobs survive navigation and live in 'Active'; the 'Runs' feed
     is every completed run across Documents / Consolidation / Data, tag-filterable."""
     from .. import tags as tags_mod
+    only_extract = ui_mode() == "extract"
     active = [j.to_dict() for j in jobs.REGISTRY.list()
-              if j.status in ("queued", "running")]
+              if j.status in ("queued", "running") and (not only_extract or j.kind == "extract")]
+    feed = _extract_feed() if only_extract else _extract_feed() + _activity_feed()
+    feed.sort(key=lambda x: x.get("ts") or "", reverse=True)
     return templates.TemplateResponse(request, "activity.html", _ctx(
         page="activity", subpage="runs", active=active,
-        feed_json=json.dumps(_activity_feed()),
+        feed_json=json.dumps(feed),
         tags_json=json.dumps(tags_mod.list_with_counts())))
 
 

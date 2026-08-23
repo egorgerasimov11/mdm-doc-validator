@@ -2,8 +2,8 @@
 {% block title %}mdmdoc — activity{% endblock %}
 {% block content %}
 <h1>Activity</h1>
-<p class="meta">One feed of every run — documents, consolidation and data validations — plus
-background jobs. A run keeps going when you navigate away. Filter by section, status and tag.
+<p class="meta">{% if ui_mode == 'extract' %}Every extraction, newest first, plus the jobs still running.{% else %}One feed of every run — extractions, documents, consolidation and data validations — plus
+background jobs.{% endif %} A run keeps going when you navigate away. Filter by section, status and tag.
 Finished operator actions stay in the <a href="/ui/history">Journal</a> across restarts.</p>
 
 <section>
@@ -25,9 +25,12 @@ Finished operator actions stay in the <a href="/ui/history">Journal</a> across r
     <input type="text" id="act-search" autocomplete="off" placeholder="file name / case / run id…">
     <span class="seg" data-fkey="type">
       <button type="button" class="active" data-v="">all sections</button>
+      <button type="button" data-v="extract">Extract</button>
+      {% if ui_mode != 'extract' %}
       <button type="button" data-v="doc">Documents</button>
       <button type="button" data-v="consol">Consolidation</button>
       <button type="button" data-v="data">Data</button>
+      {% endif %}
     </span>
     <span class="seg" data-fkey="vbucket">
       <button type="button" class="active" data-v="">any status</button>
