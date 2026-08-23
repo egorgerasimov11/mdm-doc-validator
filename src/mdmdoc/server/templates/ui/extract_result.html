@@ -58,9 +58,11 @@
         numbers, IBAN/BIC, tax ids, phones. Amounts and dates are in the transcript only.</p>
       </div>
       <div data-pane-body="transcript" hidden>
-        {% for page, eng, text in transcripts %}
-        <div class="f-group">Page {{ page + 1 }} <span class="meta" style="text-transform:none;letter-spacing:0">— {{ eng }}</span></div>
-        <pre>{{ text }}</pre>
+        {% for page, eng, lines in transcripts %}
+        <div class="f-group">Page {{ page + 1 }} <span class="meta" style="text-transform:none;letter-spacing:0">— {{ eng }} · click a line to see it on the page</span></div>
+        <div class="t-lines">
+          {% for ln in lines %}{% if ln.text.strip() %}<div class="t-line">{% for sg in ln.segments %}<span class="t-seg{{ ' has-box' if sg.bbox_pct }}" data-page="{{ page }}" data-bbox="{{ sg.bbox_pct|join(',') if sg.bbox_pct else '' }}">{{ sg.text }}</span>{% if not loop.last %}<span class="t-sep">  </span>{% endif %}{% endfor %}</div>{% else %}<div class="t-gap"></div>{% endif %}{% endfor %}
+        </div>
         {% endfor %}
       </div>
     </div>

@@ -79,3 +79,20 @@ def test_bbox_prefers_the_pure_cell_over_a_line_with_the_same_digits():
         {"text": "IBAN FR76 3000 3021 1000 0372 6222 329", "bbox": [172, 571, 537, 595]}]}
     box, _ = X._bbox_for("02110", lines, "30003  02110  00037262223  29")
     assert box == [322, 506, 384, 531]
+
+
+def test_page_boxes_and_transcript_line_matching():
+    lines = {"rapidocr:auto": [{"text": "Banque  Guichet", "bbox": [100, 200, 400, 230]},
+                               {"text": "30003", "bbox": [100, 240, 160, 270]},
+                               {"text": "SOCIETE GENERALE", "bbox": [100, 50, 400, 80]}]}
+    boxes = X.page_boxes(lines, (1000, 2000))
+    assert boxes[0]["bbox_pct"] == [10.0, 10.0, 40.0, 11.5] and len(boxes) == 3
+    rows = X.transcript_lines_with_boxes("SOCIETE GENERALE\n\nBanque Guichet\n30003\nunrelated text here", boxes)
+    seg = lambda i: rows[i]["segments"][0]["bbox_pct"] if rows[i]["segments"] else None
+    assert seg(0) == [10.0, 2.5, 40.0, 4.0]
+    assert seg(2) == [10.0, 10.0, 40.0, 11.5] and seg(3) == [10.0, 12.0, 16.0, 13.5]
+    assert seg(1) is None and seg(4) is None
+    # twin slips joined on one line: each copy goes to its own box
+    twin = [{"text": "IBAN FR76 3000", "bbox_pct": [10, 30, 40, 31]}, {"text": "IBAN FR76 3000", "bbox_pct": [55, 30, 85, 31]}]
+    r = X.transcript_lines_with_boxes("IBAN FR76 3000  IBAN FR76 3000", twin)[0]["segments"]
+    assert [x["bbox_pct"][0] for x in r] == [10, 55]

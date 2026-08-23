@@ -201,6 +201,61 @@ def _bbox_for(value: str, lines_by_engine: dict, context: str = "") -> tuple[lis
     return (best[1], best[2]) if best else (None, {})
 
 
+def page_boxes(lines_by_engine: dict, page_size: tuple[int, int]) -> list[dict]:
+    """Every OCR line of the page with its box in % of the render — what lets the
+    viewer point at any transcript line, not only the extracted values."""
+    w, h = page_size
+    if not w or not h:
+        return []
+    out, seen = [], set()
+    for lines in lines_by_engine.values():
+        for ln in lines or []:
+            t, b = (ln.get("text") or "").strip(), ln.get("bbox")
+            if not t or not b:
+                continue
+            key = (t, round(b[1] / h, 3))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"text": t, "bbox_pct": [round(b[0] / w * 100, 2), round(b[1] / h * 100, 2),
+                                                round(b[2] / w * 100, 2), round(b[3] / h * 100, 2)]})
+    return out
+
+
+def transcript_lines_with_boxes(transcript: str, boxes: list[dict]) -> list[dict]:
+    """Each transcript line as clickable segments: the line is split at its cell
+    separators (two spaces / pipes — RapidOCR joins side-by-side slips and table
+    cells that way) and every segment is paired with the OCR box that reads most
+    like it (rapidfuzz ratio >= 65, digits must agree). Boxes already used on the
+    line are skipped, so the second "IBAN …" of a twin slip lands on the right
+    copy. → [{text, segments:[{text, bbox_pct|None}]}]"""
+    from rapidfuzz import fuzz
+    out = []
+    for ln in (transcript or "").split("\n"):
+        parts = [c for c in _CELL_SPLIT.split(ln) if c.strip()] or ([ln] if ln.strip() else [])
+        used: set[int] = set()
+        segs = []
+        for t in parts:
+            td = _digits(t)
+            best_i, score = -1, 0.0
+            for i, b in enumerate(boxes):
+                if i in used:
+                    continue
+                bd = _digits(b["text"])
+                if td and bd and td not in bd and bd not in td:
+                    continue
+                sc = fuzz.ratio(t.strip().casefold(), b["text"].casefold())
+                if sc > score:
+                    best_i, score = i, sc
+            if best_i >= 0 and score >= 65:
+                used.add(best_i)
+                segs.append({"text": t, "bbox_pct": boxes[best_i]["bbox_pct"]})
+            else:
+                segs.append({"text": t, "bbox_pct": None})
+        out.append({"text": ln, "segments": segs})
+    return out
+
+
 def build_fields(verdicts: list, transcript: str, lines_by_engine: dict, page_size: tuple[int, int]) -> list[dict]:
     """Structured rows for one page: what the value is, what the document calls it,
     how it is spelled there, where it sits on the page (bbox in % of the v200 render)."""
@@ -261,6 +316,7 @@ class PageExtract:
     primary_engine: str = ""
     fields: list = field(default_factory=list)
     size: tuple = (0, 0)
+    boxes: list = field(default_factory=list)           # every OCR line: {text, bbox_pct}
 
 
 def _engine_list(specs: list[str] | None, vlm: str | None) -> list[E.PageEngine]:
@@ -346,6 +402,7 @@ def extract_document(src: Path, *, engines: list[str] | None = None, vlm: str | 
                 pe.size = im.size
             pe.primary_engine, pe.primary = primary_reading(pe.readings)
             pe.fields = build_fields(pe.verdicts, pe.primary, pe.lines, pe.size)
+            pe.boxes = page_boxes(pe.lines, pe.size)
             for v in pe.verdicts:
                 if v.status == "review":
                     p = _crop_for(v.value, page_img, pe.lines, out_dir / "review", idx)
@@ -367,7 +424,7 @@ def extract_document(src: Path, *, engines: list[str] | None = None, vlm: str | 
         "elapsed_s": round(time.time() - t_start, 1),
         "pages_out": [{"page": pe.page, "latency": pe.latency,
                        "primary_engine": pe.primary_engine, "transcript": pe.primary,
-                       "size": list(pe.size),
+                       "size": list(pe.size), "boxes": pe.boxes,
                        "fields": [dict(f, crop=str(pe.crops.get(f["value"], "")) or None) for f in pe.fields],
                        "values": [dict(v.as_dict(), crop=str(pe.crops.get(v.value, "")) or None)
                                   for v in pe.verdicts],

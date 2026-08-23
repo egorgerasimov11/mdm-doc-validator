@@ -1611,8 +1611,8 @@ window.mdmdoc = (() => {
       }
     }), { root: viewer, threshold: 0.4 });
     pages.forEach((p) => io.observe(p));
-    document.querySelectorAll(".f-row[data-page]").forEach((row) => row.addEventListener("click", () => {
-      document.querySelectorAll(".f-row.is-active").forEach((r) => r.classList.remove("is-active"));
+    document.querySelectorAll(".f-row[data-page], .t-seg[data-page]").forEach((row) => row.addEventListener("click", () => {
+      document.querySelectorAll(".f-row.is-active, .t-seg.is-active").forEach((r) => r.classList.remove("is-active"));
       document.querySelectorAll(".hl.is-on").forEach((h) => h.classList.remove("is-on"));
       row.classList.add("is-active");
       const page = pages.find((p) => p.dataset.page === row.dataset.page);
@@ -1624,6 +1624,7 @@ window.mdmdoc = (() => {
       if (box.length === 4 && !box.some(isNaN)) {
         hl.style.left = box[0] + "%"; hl.style.top = box[1] + "%";
         hl.style.width = (box[2] - box[0]) + "%"; hl.style.height = (box[3] - box[1]) + "%";
+        hl.classList.remove("is-on"); void hl.offsetWidth;      // restart the settle animation
         hl.classList.add("is-on");
         const top = page.offsetTop + page.offsetHeight * box[1] / 100 - viewer.clientHeight / 2;
         viewer.scrollTo({ top: Math.max(0, top), behavior: "smooth" });

@@ -126,7 +126,7 @@ def _load(name: str) -> dict:
 
 @router_extract.get("/ui/extract/{name}", response_class=HTMLResponse)
 def extract_result(request: Request, name: str):
-    from ..extract.extractor import grouped_fields
+    from ..extract.extractor import grouped_fields, transcript_lines_with_boxes
     doc = _load(name)
     groups = grouped_fields(doc)
     for g in groups:
@@ -138,7 +138,9 @@ def extract_result(request: Request, name: str):
     return _templates().TemplateResponse(request, "extract_result.html", _ctx(
         name=name, doc=doc, groups=groups, n_ready=n_ready, n_review=n_review, pages=pages,
         file=Path(doc["file"]).name, short=Path(doc["file"]).name.split("__", 1)[-1],
-        transcripts=[(pg["page"], pg.get("primary_engine", ""), pg.get("transcript", "")) for pg in doc["pages_out"]]))
+        transcripts=[(pg["page"], pg.get("primary_engine", ""),
+                      transcript_lines_with_boxes(pg.get("transcript", ""), pg.get("boxes") or []))
+                     for pg in doc["pages_out"]]))
 
 
 @router_extract.get("/ui/extract/{name}/page/{page}")
