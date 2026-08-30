@@ -93,6 +93,17 @@ def test_generic_label_column_is_not_a_value():
     assert not fields["phone"]["value"]
 
 
+def test_a_bank_label_is_never_read_as_the_company_name():
+    """Codex review 2026-08-30: after a bare "Firma" the next transcript line
+    may be the bank block — "IBAN: DE…" is the bank's field, not a name."""
+    page = {"page": 0, "lines": {}, "fields": [],
+            "readings": {"textlayer": "Firma\nIBAN: DE20 6008 0000 0321 1678 00\nBIC: DRESDEFF600"},
+            "transcript": ""}
+    fields, _ = generic.read({"pages_out": [page]}, bank=({}, {}))
+    assert not fields["company_name"]["value"]
+    assert not fields["street"]["value"]
+
+
 def test_generic_keeps_bank_schema(selbstauskunft_doc):
     bank_stub = {"iban": {"value": "DE20600800000321167800", "pretty": "", "status": "checksum_ok",
                           "page": 3, "bbox_pct": None, "evidence": "", "voices": []}}

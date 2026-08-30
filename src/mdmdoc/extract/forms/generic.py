@@ -95,12 +95,18 @@ _TIDY = {
     "duns": lambda v: re.sub(r"\D", "", v),
 }
 
+_BARE_ID_LABEL = re.compile(r"(?i)^\W*(?:iban|bic|swift|blz|bankleitzahl|kontonummer|account\s*(?:no\.?|number)?|"
+                            r"routing|aba|sort\s*code|bank\s*code)\s*[:：\-–|]?\s*(?P<v>.*)$")
+
+
 def _is_label_line(s: str) -> bool:
-    """A "value" that is itself one of the labels with nothing after it — the
-    next line of a label-column layout, not a value."""
-    for rx in LABELS.values():
+    """A "value" that is itself a LABEL — the next line of a label-column
+    layout, not a value. Knows the bank reader's labels too: after a bare
+    "Firma" the next transcript line may well be "IBAN: DE…", and that is the
+    bank's field, never the company's name (Codex review 2026-08-30)."""
+    for rx in list(LABELS.values()) + list(bank_reader.LABELS.values()) + [_BARE_ID_LABEL]:
         m = rx.match(s)
-        if m and not (m.group("v") or "").strip(" :：-–|\t"):
+        if m and (rx is _BARE_ID_LABEL or not (m.group("v") or "").strip(" :：-–|\t")):
             return True
     return False
 
