@@ -26,11 +26,14 @@ _DOC_TYPES: list[tuple[str, re.Pattern]] = [
     ("W-8ECI", re.compile(r"(?i)\bW-?8ECI\b")),
     ("W-8IMY", re.compile(r"(?i)\bW-?8IMY\b")),
     ("W-9", re.compile(r"(?i)\bW-?9\b|request for taxpayer identification number")),
+    ("supplier self-disclosure", re.compile(
+        r"(?i)lieferanten\s*selbst\s*auskunft|selbstauskunft|supplier\s+self.?(?:disclosure|declaration)|"
+        r"stammdatenblatt|lieferantenstammdaten|supplier\s+(?:master\s+)?data\s+(?:sheet|form)|firmenprofil")),
     ("RIB (relevé d'identité bancaire)", re.compile(r"(?i)relev[ée]s? d'identit[ée] bancaire|\bRIB\b")),
     ("ACH / wire authorization form", re.compile(r"(?i)\bACH\b.*(?:form|authori[sz]ation)|wire (?:transfer )?(?:form|instructions)|EFT form")),
     ("voided check", re.compile(r"(?i)\bvoid(?:ed)?\b.*\bcheck\b|\bcheque\b.*\bvoid")),
     ("bank statement", re.compile(r"(?i)\bstatement\b.*\b(?:account|period)\b|afschrift|kontoauszug|relevé de compte|estratto conto|extracto")),
-    ("bank confirmation letter", re.compile(r"(?i)kontobest[äa]tigung|bankbest[äa]tigung|confirm(?:s|ation)? (?:that )?.{0,40}account|certificaci[óo]n bancaria|attestation bancaire|bank(?:ing)? (?:details|letter)|to whom it may concern")),
+    ("bank confirmation letter", re.compile(r"(?i)kontobest[äa]tigung|bankbest[äa]tigung|bankverbindung|confirm(?:s|ation)? (?:that )?.{0,40}account|certificaci[óo]n bancaria|attestation bancaire|bank(?:ing)? (?:details|letter)|to whom it may concern")),
     ("bankbook / passbook", re.compile(r"통장|계좌번호|預金通帳|存折")),
     ("tax registration certificate", re.compile(r"(?i)vat registration|tax registration|شهادة تسجيل|营业执照|开户许可证")),
     ("invoice", re.compile(r"(?i)\binvoice\b|\brechnung\b|\bfactur[ae]\b|\bfattura\b|請求書")),

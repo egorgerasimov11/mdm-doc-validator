@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from .common import Field, absent, find_line, norm_text, vote
+from .common import Field, absent, anchored, find_line, looks_like_label, norm_text, vote
 
 # label → value on the same line ("Account holder: ACME GmbH") or on the next
 # non-empty line (a form laid out label-above-value). Labels per language.
@@ -33,30 +33,12 @@ LABELS = {
         r"\s*[:：\-–|]?\s*(?P<v>.*)$"),
 }
 _CUR = re.compile(r"\b(USD|EUR|GBP|CHF|JPY|CNY|RMB|KRW|PLN|HUF|CZK|SEK|NOK|DKK|CAD|AUD|BRL|MXN|CLP|COP|ARS|INR|TRY|ILS|AED|SAR|SGD|HKD|TWD|THB|ZAR)\b")
-_BANK_WORD = re.compile(r"(?i)\b(bank|banque|banco|banca|bancaria|sparkasse|volksbank|raiffeisen|credit\s*union|銀行|은행|银行)\b")
+_BANK_WORD = re.compile(r"(?i)\b(\w{0,12}bank|banque|banco|banca|bancaria|sparkasse|raiffeisen|credit\s*union|銀行|은행|银行)\b")
 _ADDRESS_NOISE = re.compile(r"(?i)\b(street|str\.|strasse|straße|avenue|ave\.|road|rd\.|p\.?o\.? box|suite|floor)\b|\d{4,}")
 
 
-def _anchored(readings: dict[str, str], rx: re.Pattern) -> dict[str, str]:
-    """engine_id → value for the first line of each transcript matching `rx`."""
-    out: dict[str, str] = {}
-    for eid, text in (readings or {}).items():
-        lines = [ln.strip() for ln in (text or "").split("\n")]
-        for i, ln in enumerate(lines):
-            m = rx.match(ln)
-            if not m:
-                continue
-            val = (m.group("v") or "").strip(" :：-–|\t")
-            if not val:
-                val = next((l for l in lines[i + 1:i + 3] if l.strip()), "").strip(" :：-–|\t")
-            if val and not _looks_like_label(val):
-                out[eid] = val
-                break
-    return out
-
-
-def _looks_like_label(s: str) -> bool:
-    return len(s) <= 2 or bool(re.fullmatch(r"[\W_]+", s))
+_anchored = anchored               # shared with the generic reader (forms/common.py)
+_looks_like_label = looks_like_label
 
 
 def _bank_name_fallback(readings: dict[str, str]) -> dict[str, str]:
@@ -66,6 +48,7 @@ def _bank_name_fallback(readings: dict[str, str]) -> dict[str, str]:
     for eid, text in (readings or {}).items():
         for ln in [l.strip() for l in (text or "").split("\n") if l.strip()][:12]:
             if _BANK_WORD.search(ln) and len(ln) <= 60 and not _ADDRESS_NOISE.search(ln):
+                ln = re.sub(r"(?i)^\W*(?:bankdaten|bankverbindung|bank(?:\s*name)?)\s*[:：\-–|]?\s+", "", ln)
                 out[eid] = ln.strip(" :：-–|")
                 break
     return out

@@ -37,8 +37,9 @@ class ModuleUnavailable(RuntimeError):
 def capabilities() -> dict:
     """What this install can do — the host shows it next to the module switch."""
     from . import engines as E
-    out = {"api_version": API_VERSION, "engines": [], "tesseract": False, "rapidocr": False,
-           "offline_models": False, "vlm": os.environ.get("MDMDOC_EXTRACT_VLM", "") or None, "reasons": {}}
+    out = {"api_version": API_VERSION, "generic_fields": True, "engines": [], "tesseract": False,
+           "rapidocr": False, "offline_models": False,
+           "vlm": os.environ.get("MDMDOC_EXTRACT_VLM", "") or None, "reasons": {}}
     for spec in DEFAULT_ENGINES:
         try:
             eng = E.parse(spec)
@@ -102,13 +103,13 @@ def _seed_rotation(src: Path, cache: Path, pages: list[int]) -> None:
 
 
 def extract_for_consolidator(path, *, out_dir, engines: list[str] | None = None, vlm: str | None = None,
-                             timeout: int = 300, max_pages: int = 3) -> dict:
+                             timeout: int = 300, max_pages: int = 20) -> dict:
     """Read the document offline and hand back the schema the host compares.
 
     Page 0 is read first: a W-9 is its first page (the rest is IRS
     instructions), so the remaining pages are read only for the other kinds."""
     from .extractor import extract_document, guess_doc_type
-    from .forms import bank as bank_reader, w9 as w9_reader
+    from .forms import bank as bank_reader, generic as generic_reader, w9 as w9_reader
     from . import render as R
 
     src, out_dir = Path(path), Path(out_dir)
@@ -149,7 +150,9 @@ def extract_for_consolidator(path, *, out_dir, engines: list[str] | None = None,
         page_img = R.render_page(src, cache, 0, R.PRESETS["v200"])
         fields, extra = w9_reader.read(doc, page_image=page_img)
     else:
-        fields, extra = bank_fields, bank_extra     # bank support, or whatever identifiers it holds
+        # any other document: the bank schema plus the company fields a vendor
+        # form also carries (name / address / contacts / tax identifiers)
+        fields, extra = generic_reader.read(doc, bank=(bank_fields, bank_extra))
     return {
         "api_version": API_VERSION,
         "doc_type": doc_type, "doc_class": klass,

@@ -56,6 +56,29 @@ def find_line(page: dict, needle: str, *, digits: bool = False) -> tuple[str, li
     return "", None
 
 
+def looks_like_label(s: str) -> bool:
+    return len(s) <= 2 or bool(re.fullmatch(r"[\W_]+", s))
+
+
+def anchored(readings: dict[str, str], rx: re.Pattern) -> dict[str, str]:
+    """engine_id → value for the first line of each transcript matching `rx`
+    ("label: value" on one line, or the value on the next non-empty line)."""
+    out: dict[str, str] = {}
+    for eid, text in (readings or {}).items():
+        lines = [ln.strip() for ln in (text or "").split("\n")]
+        for i, ln in enumerate(lines):
+            m = rx.match(ln)
+            if not m:
+                continue
+            val = (m.group("v") or "").strip(" :：-–|\t")
+            if not val:
+                val = next((l for l in lines[i + 1:i + 3] if l.strip()), "").strip(" :：-–|\t")
+            if val and not looks_like_label(val):
+                out[eid] = val
+                break
+    return out
+
+
 def vote(cands: dict[str, str], *, key=norm_text) -> tuple[str, str, list[str]]:
     """cands: engine_id → raw value. → (winning raw value, status, voices).
     Two engine FAMILIES agreeing (after `key`) = confirmed; otherwise the
