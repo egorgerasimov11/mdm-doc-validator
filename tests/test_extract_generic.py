@@ -101,6 +101,25 @@ def test_generic_keeps_bank_schema(selbstauskunft_doc):
     assert extra == {"ibans": []}
 
 
+def test_the_ibans_tail_is_kept_when_the_alternative_reads_worse():
+    """AMF, 2026-08-30: two engines read "321 167 800" (the IBAN's tail) and
+    tesseract alone read a truncated "321167". Dropping the tail as a duplicate
+    left the truncation, and the host reported a mismatch against the form."""
+    from mdmdoc.extract.forms import bank as bank_reader
+
+    def tok(kind, value, status, voices, label="Kontonummer"):
+        return {"kind": kind, "value": value, "pretty": value, "status": status,
+                "label": label, "bbox_pct": None, "voices": voices}
+
+    page = {"page": 3, "lines": {}, "readings": {}, "fields": [
+        tok("IBAN", "IBAN:DE20600800000321167800", "confirmed", ["textlayer", "rapidocr:auto"], "IBAN"),
+        tok("account", "321167800", "confirmed", ["textlayer", "rapidocr:auto"]),
+        tok("account", "321167", "review", ["tess:eng"]),
+    ]}
+    fields, _extra = bank_reader.read({"pages_out": [page]})
+    assert fields["account_number"]["value"] == "321167800"
+
+
 def test_contract_is_additive():
     assert api.API_VERSION == 1
     assert "supplier self-disclosure" not in api.BANK_TYPES     # class still decided by identifiers

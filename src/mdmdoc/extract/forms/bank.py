@@ -69,6 +69,10 @@ def _pick(cands: list[Field]) -> Field:
     return min(cands, key=lambda f: (_ORDER.get(f.status, 3), f.page or 0)) if cands else absent()
 
 
+def _best_status(cands: list[Field]) -> int:
+    return min((_ORDER.get(f.status, 3) for f in cands), default=3)
+
+
 def read(doc: dict) -> tuple[dict[str, dict], dict]:
     """→ (fields, extra). fields: schema key → Field.as_dict(); extra: candidates
     the host may want to show (several routings, several IBANs)."""
@@ -95,10 +99,17 @@ def read(doc: dict) -> tuple[dict[str, dict], dict]:
         "iban": _pick(ibans), "swift_bic": _pick(swifts), "routing_aba": _pick(routings),
         "routing_aba_wires": _pick(wires), "national_clearing": _pick(clearings),
     }
-    # an account number that is only the tail of the IBAN is the same value twice
+    # An account number that is only the tail of the IBAN is the same value
+    # twice — unless dropping it would leave a WORSE reading behind: on the AMF
+    # self-disclosure "321 167 800" (two engines) is the IBAN's tail while
+    # tesseract's truncated "321167" is not, and dropping the good one handed
+    # the host a mismatch against the form (2026-08-30).
     iban_digits = re.sub(r"\D", "", fields["iban"].value)
-    accounts = [a for a in accounts if not (iban_digits and re.sub(r"\D", "", a.value)
-                                            and iban_digits.endswith(re.sub(r"\D", "", a.value)))] or accounts
+    tails = [a for a in accounts if iban_digits and re.sub(r"\D", "", a.value)
+             and iban_digits.endswith(re.sub(r"\D", "", a.value))]
+    rest = [a for a in accounts if a not in tails]
+    if rest and tails and _best_status(rest) <= _best_status(tails):
+        accounts = rest
     fields["account_number"] = _pick(accounts)
     if not fields["routing_aba"].value and fields["routing_aba_wires"].value:
         fields["routing_aba"] = fields["routing_aba_wires"]
