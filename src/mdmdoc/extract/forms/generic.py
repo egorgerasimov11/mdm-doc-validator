@@ -196,6 +196,8 @@ def _tax_id_tokens(pages: list[dict]) -> tuple[list[Field], list[Field]]:
             f = bank_reader._token_field(e, pno)
             compact = re.sub(r"[\s.]", "", f.value).upper()
             label = (e.get("label") or "").lower()
+            if bank_reader._VAT_ACCOUNT.search(label) or re.search(r"(?i)rachun|konto|account|compte|conto|cuenta", label):
+                continue                    # a digit group of a bank account next to the word VAT, not a tax id
             if _EU_VAT.fullmatch(compact) or "ust" in label or "vat" in label or "tva" in label:
                 f.value = f.pretty = compact if _EU_VAT.fullmatch(compact) else f.value
                 vats.append(f)

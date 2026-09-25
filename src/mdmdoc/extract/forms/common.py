@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from ..consensus import family_of  # noqa: F401  (re-exported)
@@ -32,7 +33,11 @@ _WS = re.compile(r"\s+")
 
 def norm_text(s: str) -> str:
     """Voting key for free text: case, punctuation and spacing folded."""
-    s = (s or "").upper()
+    # diacritics folded: one engine reads "WOJEWÓDZKI", another "WOJEWODZKI" —
+    # the same name, and the vote winner is still the most faithful engine's spelling
+    # (NFC afterwards: Hangul decomposes into jamo under NFKD and must be put back)
+    s = unicodedata.normalize("NFC", "".join(c for c in unicodedata.normalize("NFKD", s or "")
+                                             if not "\u0300" <= c <= "\u036f")).upper()
     s = re.sub(r"[^0-9A-ZÀ-ɏЀ-ӿ぀-ヿ一-鿿가-힯 ]+", " ", s)
     return _WS.sub(" ", s).strip()
 

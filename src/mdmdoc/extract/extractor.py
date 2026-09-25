@@ -33,7 +33,7 @@ _DOC_TYPES: list[tuple[str, re.Pattern]] = [
     ("ACH / wire authorization form", re.compile(r"(?i)\bACH\b.*(?:form|authori[sz]ation)|wire (?:transfer )?(?:form|instructions)|EFT form")),
     ("voided check", re.compile(r"(?i)\bvoid(?:ed)?\b.*\bcheck\b|\bcheque\b.*\bvoid")),
     ("bank statement", re.compile(r"(?i)\bstatement\b.*\b(?:account|period)\b|afschrift|kontoauszug|relevé de compte|estratto conto|extracto")),
-    ("bank confirmation letter", re.compile(r"(?i)kontobest[äa]tigung|bankbest[äa]tigung|bankverbindung|confirm(?:s|ation)? (?:that )?.{0,40}account|certificaci[óo]n bancaria|attestation bancaire|bank(?:ing)? (?:details|letter)|to whom it may concern")),
+    ("bank confirmation letter", re.compile(r"(?i)kontobest[äa]tigung|bankbest[äa]tigung|bankverbindung|confirm(?:s|ation)? (?:that )?.{0,40}account|certificaci[óo]n bancaria|attestation bancaire|posiadacz rachunku|potwierdzenie (?:posiadania )?rachunku|za[śs]wiadczenie o (?:posiadaniu )?rachunk|bank(?:ing)? (?:details|letter)|to whom it may concern")),
     ("bankbook / passbook", re.compile(r"통장|계좌번호|預金通帳|存折")),
     ("tax registration certificate", re.compile(r"(?i)vat registration|tax registration|شهادة تسجيل|营业执照|开户许可证")),
     ("invoice", re.compile(r"(?i)\binvoice\b|\brechnung\b|\bfactur[ae]\b|\bfattura\b|請求書")),
@@ -158,8 +158,15 @@ def _header_cell(header: str, row: str, pos: int) -> str:
 def _pretty_span(line: str, needle: str) -> tuple[str, int]:
     """Substring of `line` whose digits/letters equal `needle`, keeping separators."""
     keep = (lambda c: c.isdigit()) if needle.isdigit() else (lambda c: c.isalnum())
-    idx = [k for k, c in enumerate(line) if keep(c)]
-    flat = "".join(line[k] for k in idx).upper() if not needle.isdigit() else "".join(line[k] for k in idx)
+    # per character: "ﬁ".upper() is "FI" (two letters), so upper-casing the joined
+    # string would shift it against `idx` (Needham wire form: IndexError)
+    idx: list[int] = []
+    flat = ""
+    for k, c in enumerate(line):
+        if keep(c):
+            u = c if needle.isdigit() else c.upper()
+            idx.extend([k] * len(u))
+            flat += u
     pos = flat.find(needle)
     if pos < 0:
         return "", 0

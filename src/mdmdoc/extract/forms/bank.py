@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from .common import Field, absent, anchored, find_line, looks_like_label, norm_text, vote
+from .common import Field, absent, anchored, family_of, find_line, looks_like_label, norm_text, vote
 
 # label → value on the same line ("Account holder: ACME GmbH") or on the next
 # non-empty line (a form laid out label-above-value). Labels per language.
@@ -19,7 +19,7 @@ LABELS = {
     "account_holder": re.compile(
         r"(?i)^\W*(?:account\s*holder(?:'s)?(?:\s*name)?|account\s*name|name\s*(?:of|on)\s*(?:the\s*)?"
         r"account(?:\s*holder)?|beneficiary(?:\s*name)?|benef\.?|holder|titulaire(?:\s*du\s*compte)?|"
-        r"kontoinhaber|inhaber|beneficiario|titular|intestatario|intestato\s*a|razón\s*social|"
+        r"kontoinhaber|inhaber|posiadacz(?:\s*rachunku)?|nazwa\s*posiadacza(?:\s*rachunku)?|beneficiario|titular|intestatario|intestato\s*a|razón\s*social|"
         r"cliente|customer\s*name|company\s*name|payee|户名|账户名称|客户名称|名義|口座名義(?:人)?|예금주)"
         r"\s*[:：\-–|]?\s*(?P<v>.*)$"),
     "bank_name": re.compile(
@@ -52,6 +52,41 @@ def _bank_name_fallback(readings: dict[str, str]) -> dict[str, str]:
                 out[eid] = ln.strip(" :：-–|")
                 break
     return out
+
+
+# Polish NRB: the domestic account number IS the IBAN without "PL"
+# ("08 1130 1222 0030 2002 6720 0003", 2 + 6×4 digits). The table splitter reads
+# the groups as separate cells, so no IBAN token is ever produced for it.
+_NRB = re.compile(r"(?<![\dA-Za-z])(\d{2}(?: ?\d{4}){6})(?!\d)")
+# "Numer rachunku VAT" is the split-payment VAT account — a bank account the
+# supplier does NOT want payments to, never the payee account nor a VAT id
+_VAT_ACCOUNT = re.compile(r"(?i)rachun\w*\s+vat|vat\s+account")
+
+
+def _nrb_ibans(pages: list[dict]) -> tuple[list[Field], list[Field]]:
+    """→ (payee IBANs, split-payment VAT-account IBANs) from NRB-shaped runs that
+    pass mod-97 as PL IBANs; voted across engines like any other value."""
+    from ...fields import iban_mod97_ok
+    main: list[Field] = []
+    vat: list[Field] = []
+    for pg in pages:
+        pno = int(pg.get("page", 0))
+        by: dict[tuple[str, bool], dict[str, str]] = {}
+        for eid, text in (pg.get("readings") or {}).items():
+            for ln in (text or "").split("\n"):
+                for m in _NRB.finditer(ln):
+                    d = re.sub(r"\D", "", m.group(1))
+                    if len(d) == 26 and iban_mod97_ok("PL" + d):
+                        by.setdefault((d, bool(_VAT_ACCOUNT.search(ln))), {})[eid] = ln.strip()
+        for (d, is_vat), lines in by.items():
+            fams = {family_of(e) for e in lines}
+            iban = "PL" + d
+            pretty = "PL" + d[:2] + " " + " ".join(d[i:i + 4] for i in range(2, 26, 4))
+            _, bbox = find_line(pg, d, digits=True)
+            f = Field(value=iban, pretty=pretty, status="confirmed" if len(fams) >= 2 else "checksum_ok",
+                      page=pno, bbox_pct=bbox, evidence=next(iter(lines.values())), voices=sorted(lines))
+            (vat if is_vat else main).append(f)
+    return main, vat
 
 
 def _token_field(entry: dict, page_no: int) -> Field:
@@ -95,6 +130,10 @@ def read(doc: dict) -> tuple[dict[str, dict], dict]:
             elif kind == "bank code":
                 f.evidence = label
                 clearings.append(f)
+    nrb_vat: list[Field] = []
+    if not ibans:
+        nrb, nrb_vat = _nrb_ibans(pages)
+        ibans = nrb
     fields: dict[str, Field] = {
         "iban": _pick(ibans), "swift_bic": _pick(swifts), "routing_aba": _pick(routings),
         "routing_aba_wires": _pick(wires), "national_clearing": _pick(clearings),
@@ -151,4 +190,7 @@ def read(doc: dict) -> tuple[dict[str, dict], dict]:
                               + [dict(f.as_dict(), source="document — wires") for f in wires],
         "accounts": [f.as_dict() for f in accounts],
     }
+    if nrb_vat:
+        extra["vat_accounts"] = [dict(f.as_dict(), note="split-payment VAT account (rachunek VAT) — not the payee account")
+                                 for f in nrb_vat]
     return {k: v.as_dict() for k, v in fields.items()}, extra
