@@ -38,3 +38,20 @@ def test_vat_account_digits_are_not_a_vat_id():
 def test_norm_text_folds_latin_diacritics_only():
     assert norm_text("Wojewódzki") == norm_text("WOJEWODZKI")
     assert norm_text("한국어 ガ") == "한국어 ガ"
+
+
+def test_nrb_needs_a_polish_page():
+    # a 26-digit run that happens to pass mod-97 as PL on a non-Polish page is not an IBAN
+    doc = {"pages_out": [{"page": 0, "lines": {}, "fields": [],
+                          "readings": {"rapidocr:auto": "Reference 08 1130 1222 0030 2002 6720 0003",
+                                       "tess:eng": "Reference 08 1130 1222 0030 2002 6720 0003"}}]}
+    fields, _ = bank.read(doc)
+    assert fields["iban"]["value"] == ""
+
+
+def test_eu_vat_id_survives_an_account_word_in_the_label():
+    doc = {"pages_out": [{"page": 0, "lines": {}, "readings": {},
+                          "fields": [{"kind": "tax id", "value": "DE305096658", "label": "Konto / USt-IdNr",
+                                      "status": "confirmed", "voices": ["rapidocr:auto", "tess:eng"]}]}]}
+    fields, _ = generic.read(doc, bank=bank.read(doc))
+    assert fields["vat_id"]["value"] == "DE305096658"

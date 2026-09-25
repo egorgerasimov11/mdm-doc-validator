@@ -61,6 +61,9 @@ _NRB = re.compile(r"(?<![\dA-Za-z])(\d{2}(?: ?\d{4}){6})(?!\d)")
 # "Numer rachunku VAT" is the split-payment VAT account — a bank account the
 # supplier does NOT want payments to, never the payee account nor a VAT id
 _VAT_ACCOUNT = re.compile(r"(?i)rachun\w*\s+vat|vat\s+account")
+# mod-97 alone lets ~1 in 97 foreign 26-digit runs through: the page must be
+# Polish (the word for account, PLN, a Polish BIC)
+_PL_SWIFT = re.compile(r"\b[A-Z]{4}PL[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b")
 
 
 def _nrb_ibans(pages: list[dict]) -> tuple[list[Field], list[Field]]:
@@ -72,6 +75,9 @@ def _nrb_ibans(pages: list[dict]) -> tuple[list[Field], list[Field]]:
     for pg in pages:
         pno = int(pg.get("page", 0))
         by: dict[tuple[str, bool], dict[str, str]] = {}
+        page_text = "\n".join((pg.get("readings") or {}).values())
+        if not (re.search(r"(?i)rachun|\bPLN\b|polsk|złot|zlot", page_text) or _PL_SWIFT.search(page_text)):
+            continue
         for eid, text in (pg.get("readings") or {}).items():
             for ln in (text or "").split("\n"):
                 for m in _NRB.finditer(ln):
